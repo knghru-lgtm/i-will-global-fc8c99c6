@@ -1,0 +1,51 @@
+{
+  "name": "norm",
+  "displayName": "Norm for v2 Agents",
+  "version": "1.11.0",
+  "description": "Build, migrate, debug, and test Bland v2 agents; create evaluations and analyze calls through the Bland API and coding workspace, with a task-indexed product wiki. v2-only; v1 requests belong to the bland plugin.",
+  "author": {
+    "name": "Bland",
+    "email": "kyle@bland.ai",
+    "url": "https://bland.ai"
+  },
+  "license": "MIT",
+  "homepage": "https://bland.ai",
+  "repository": "https://github.com/CINTELLILABS/bland-plugins",
+  "logo": "../assets/logo.png",
+  "keywords": [
+    "bland",
+    "voice-ai",
+    "v2-agents",
+    "migration",
+    "simulation",
+    "norm"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "voice-ai",
+    "v2-agents",
+    "migration",
+    "mcp"
+  ],
+  "mcpServers": "./mcp.json",
+  "variables": {
+    "type": "object",
+    "properties": {
+      "BLAND_API_KEY": {
+        "type": "string",
+        "title": "Bland API key",
+        "description": "From app.bland.ai/settings/api-keys. Must belong to the org that owns the agents.",
+        "sensitive": true
+      },
+      "BLAND_API_URL": {
+        "type": "string",
+        "title": "Bland API URL (optional)",
+        "description": "Defaults to production (https://api.bland.ai). Only override for dev/staging.",
+        "default": "https://api.bland.ai"
+      }
+    },
+    "required": [
+      "BLAND_API_KEY"
+    ]
+  }
+}

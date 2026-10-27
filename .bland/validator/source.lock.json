@@ -1,0 +1,8 @@
+{
+  "source": "@bland/agent-package",
+  "format": 3,
+  "files": {
+    "index.js": "a9589c84a9b6da405187865e48dc9e902fa9f9e44900edc5e3ac5b6ea56c9c27",
+    "core.js": "9c71bbfa4b12b846d576d0b861cc3c05920e9686abdb0c4a9c2c79dc3bc36cca"
+  }
+}

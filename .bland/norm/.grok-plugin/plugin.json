@@ -1,0 +1,25 @@
+{
+  "name": "norm",
+  "version": "1.11.0",
+  "description": "Build, migrate, debug, and test Bland v2 agents; create evaluations and analyze calls through the Bland API and coding workspace, with a task-indexed product wiki. v2-only; v1 requests belong to the bland plugin.",
+  "author": {
+    "name": "Bland",
+    "email": "kyle@bland.ai",
+    "url": "https://bland.ai"
+  },
+  "homepage": "https://bland.ai",
+  "repository": "https://github.com/CINTELLILABS/bland-plugins",
+  "license": "MIT",
+  "keywords": [
+    "bland",
+    "voice-ai",
+    "v2-agents",
+    "migration",
+    "simulation",
+    "norm"
+  ],
+  "skills": [
+    "./skills"
+  ],
+  "mcpServers": "./mcp.json"
+}

@@ -1,0 +1,44 @@
+{
+  "name": "norm",
+  "version": "1.11.0",
+  "description": "Build, migrate, debug, and test Bland v2 agents; create evaluations and analyze calls through the Bland API and coding workspace, with a task-indexed product wiki.",
+  "author": {
+    "name": "Bland",
+    "email": "kyle@bland.ai",
+    "url": "https://bland.ai"
+  },
+  "homepage": "https://bland.ai",
+  "repository": "https://github.com/CINTELLILABS/bland-plugins",
+  "license": "MIT",
+  "keywords": [
+    "bland",
+    "voice-ai",
+    "v2-agents",
+    "migration",
+    "simulation",
+    "norm"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "plugin_norm_bland": {
+      "type": "http",
+      "url": "https://api.bland.ai/v1/mcp",
+      "bearer_token_env_var": "BLAND_API_KEY"
+    }
+  },
+  "interface": {
+    "displayName": "Norm for v2 Agents",
+    "shortDescription": "Build and debug v2 agents, run evaluations, and analyze calls with workspace-native guidance.",
+    "longDescription": "Task-focused skills and local product references for v2 authoring, execution, evaluation judges, call analysis, voice-test evidence, and API-first workspace workflows. Uses the existing authenticated Bland MCP connection.",
+    "developerName": "Bland",
+    "category": "Developer tools",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "Build and test a new v2 agent.",
+      "Create an evaluation judge for my agent.",
+      "Analyze my recent calls and explain recurring failures."
+    ],
+    "websiteURL": "https://bland.ai",
+    "logo": "./assets/logo.png"
+  }
+}

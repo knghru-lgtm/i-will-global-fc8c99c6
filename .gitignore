@@ -1,0 +1,8 @@
+/.bland-local.json
+/.bland-write.json
+/.bland-write.lock
+/.bland-write.recover.lock
+/.bland-write.*.tmp
+/.bland-local.*.tmp
+.env
+.env.*

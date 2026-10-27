@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "norm",
+  "displayName": "Norm for v2 Agents",
+  "version": "1.11.0",
+  "description": "Build, migrate, debug, and test Bland v2 agents; create evaluations and analyze calls through the Bland API and coding workspace, with a task-indexed product wiki. v2-only; v1 requests belong to the bland plugin.",
+  "author": {
+    "name": "Bland",
+    "email": "kyle@bland.ai",
+    "url": "https://bland.ai"
+  },
+  "homepage": "https://bland.ai",
+  "repository": "https://github.com/CINTELLILABS/bland-plugins",
+  "license": "MIT",
+  "keywords": [
+    "bland",
+    "voice-ai",
+    "voice-agents",
+    "v2-agents",
+    "migration",
+    "simulation",
+    "norm"
+  ],
+  "defaultEnabled": true,
+  "userConfig": {
+    "bland_api_key": {
+      "type": "string",
+      "title": "Bland API key",
+      "description": "Your Bland API key from app.bland.ai/settings/api-keys (org that owns the agents). OPTIONAL: leave unset for a keyless install when the project supplies its own Bland connection \u2014 commands then verify org identity before any write.",
+      "sensitive": true,
+      "required": false
+    },
+    "bland_api_url": {
+      "type": "string",
+      "title": "Bland API URL (optional)",
+      "description": "Optional. Defaults to production (https://api.bland.ai); only set this to point at a dev/staging server. Not a secret.",
+      "default": "https://api.bland.ai",
+      "required": false
+    }
+  }
+}
