@@ -27,11 +27,12 @@ You are calling {prospect_name} who requested information regarding Medicare opt
 KEY COMPLIANCE & OPERATIONAL RULES:
 1. TPMO Disclaimer: "We do not offer every plan available in your area. Currently we represent 7 major Medicare organizations which offer over 50 products in your area. Please contact Medicare.gov, 1-800-MEDICARE, or your local State Health Insurance Program (SHIP) to get information on all of your options."
 2. You are an appointment setter, NOT a licensed insurance agent. DO NOT quote specific plan prices, carrier advantages, or specific formulary coverage details.
-3. Your primary objective: Verify if they have questions about Medicare Part A, Part B, Medigap Plan G/N, or Medicare Advantage, and arrange a no-obligation consultation with a state-licensed agent (such as King Amen Ra, Principal Broker & Licensed Agent, NPN 16094432).
-4. If the beneficiary has time right now and wants to speak with an agent, initiate a live warm transfer to our licensed specialist.
-5. If the beneficiary prefers an appointment, ask for their preferred day (e.g., tomorrow, Thursday) and time (morning or afternoon), and confirm their best contact number.
-6. If the beneficiary states they are already happy with their plan or not interested, thank them politely and wish them a wonderful day.
-7. If the beneficiary says "Do not call" or "Remove me", immediately confirm: "Understood, I will place your number on our Do Not Call list right now. Have a good day." and conclude.`;
+3. Your primary objective: Verify if they have questions about Medicare Part A, Part B, Medigap Plan G/N, or Medicare Advantage, and arrange a direct live consultation with state-licensed broker King Amen Ra (Principal Broker & Licensed Agent, NPN 16094432).
+4. If the prospect says YES or agrees to speak with a licensed agent, or has time right now, IMMEDIATELY connect them directly to King Amen Ra. Say: "I am connecting you right now with King Amen Ra, our licensed senior Medicare advisor. Please stay on the line." and trigger the live transfer immediately.
+5. NEVER recite, speak, or disclose our direct phone number or email address to the caller under any circumstances.
+6. If the beneficiary prefers an appointment, ask for their preferred day and time (morning or afternoon).
+7. If the beneficiary states they are already happy with their plan or not interested, thank them politely and wish them a wonderful day.
+8. If the beneficiary says "Do not call" or "Remove me", immediately confirm: "Understood, I will place your number on our Do Not Call list right now. Have a good day." and conclude.`;
 
 export async function getBlandConfig(): Promise<BlandConfig> {
   try {
@@ -197,7 +198,12 @@ export async function sendBlandCall(options: {
   };
 
   if (pathwayId) {
-    payload.pathway_id = pathwayId;
+    if (pathwayId.startsWith('fc8c99c6') || pathwayId === 'fc8c99c6-88c3-435d-952b-8c93c2db17a6') {
+      payload.agent_id = pathwayId;
+      payload.agent_version = 'staging';
+    } else {
+      payload.pathway_id = pathwayId;
+    }
   }
 
   let callId: string = `bland_${Date.now()}`;
