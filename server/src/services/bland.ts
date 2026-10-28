@@ -15,30 +15,48 @@ export interface BlandConfig {
   transfer_phone_number: string;
   prompt_template: string;
   webhook_url: string;
+  calling_hours_start: string;
+  calling_hours_end: string;
+  calling_days: string;
+  daily_call_limit: number;
+  pause_on_warm_transfer: boolean;
+  is_calling_paused: boolean;
+  paused_reason?: string | null;
   updated_at?: string;
 }
 
 export const DEFAULT_BLAND_PATHWAY_ID = '3b13b658-e85d-4d14-a24a-868b61040c42';
 
-export const DEFAULT_BLAND_PROMPT = `You are Sarah, an outbound scheduling assistant calling on behalf of the Medicare Helpline by I Will Global.
+export const DEFAULT_BLAND_PROMPT = `You are Sarah, an outbound scheduling assistant calling from the Medicare Helpline powered by IWG Insurance and Financial Services.
 Your tone is warm, polite, professional, and patient with senior beneficiaries.
 You are calling {prospect_name} who requested information regarding Medicare options, Turning 65 Initial Enrollment, or the upcoming Medicare Annual Election Period (AEP).
+
+FIRST SENTENCE / INTRO:
+"Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
 
 KEY COMPLIANCE & OPERATIONAL RULES:
 1. TPMO Disclaimer: "We do not offer every plan available in your area. Currently we represent 7 major Medicare organizations which offer over 50 products in your area. Please contact Medicare.gov, 1-800-MEDICARE, or your local State Health Insurance Program (SHIP) to get information on all of your options."
 2. You are an appointment setter, NOT a licensed insurance agent. DO NOT quote specific plan prices, carrier advantages, or specific formulary coverage details.
 3. Your primary objective: Verify if they have questions about Medicare Part A, Part B, Medigap Plan G/N, or Medicare Advantage, and arrange a direct live consultation with state-licensed broker King Amen Ra (Principal Broker & Licensed Agent, NPN 16094432).
-4. If the prospect says YES or agrees to speak with a licensed agent, or has time right now, IMMEDIATELY connect them directly to King Amen Ra. Say: "I am connecting you right now with King Amen Ra, our licensed senior Medicare advisor. Please stay on the line." and trigger the live transfer immediately.
-5. NEVER recite, speak, or disclose our direct phone number or email address to the caller under any circumstances.
-6. If the beneficiary prefers an appointment, ask for their preferred day and time (morning or afternoon).
-7. If the beneficiary states they are already happy with their plan or not interested, thank them politely and wish them a wonderful day.
-8. If the beneficiary says "Do not call" or "Remove me", immediately confirm: "Understood, I will place your number on our Do Not Call list right now. Have a good day." and conclude.`;
+4. If the prospect says YES or agrees to speak with a licensed agent, or has time right now, IMMEDIATELY connect them directly to King Amen Ra (+16024569681). Say: "I am connecting you right now with King Amen Ra, our licensed senior Medicare advisor. Please stay on the line." and trigger the live transfer immediately.
+5. While a warm transfer is in progress, outbound calls are paused until King Amen Ra dispositions the lead.
+6. NEVER recite, speak, or disclose our direct phone number or email address to the caller under any circumstances.
+7. If the beneficiary prefers an appointment, ask for their preferred day and time (morning or afternoon).
+8. If the beneficiary states they are already happy with their plan or not interested, thank them politely and wish them a wonderful day.
+9. If the beneficiary says "Do not call" or "Remove me", immediately confirm: "Understood, I will place your number on our Do Not Call list right now. Have a good day." and conclude.`;
 
 export async function getBlandConfig(): Promise<BlandConfig> {
   try {
     // Graceful column migration for existing tables
     await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS pathway_id TEXT DEFAULT '3b13b658-e85d-4d14-a24a-868b61040c42'`).catch(() => {});
     await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS github_repo TEXT`).catch(() => {});
+    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS calling_hours_start TEXT DEFAULT '09:00'`).catch(() => {});
+    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS calling_hours_end TEXT DEFAULT '19:00'`).catch(() => {});
+    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS calling_days TEXT DEFAULT 'Mon-Fri'`).catch(() => {});
+    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS daily_call_limit INT DEFAULT 1000`).catch(() => {});
+    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS pause_on_warm_transfer BOOLEAN DEFAULT TRUE`).catch(() => {});
+    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS is_calling_paused BOOLEAN DEFAULT FALSE`).catch(() => {});
+    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS paused_reason TEXT`).catch(() => {});
 
     const row = await one<BlandConfig>(`SELECT * FROM bland_config WHERE id='main'`);
     if (row) {
@@ -48,6 +66,13 @@ export async function getBlandConfig(): Promise<BlandConfig> {
         github_repo: row.github_repo || null,
         api_key: row.api_key || process.env.BLAND_API_KEY || null,
         prompt_template: row.prompt_template || DEFAULT_BLAND_PROMPT,
+        calling_hours_start: row.calling_hours_start || '09:00',
+        calling_hours_end: row.calling_hours_end || '19:00',
+        calling_days: row.calling_days || 'Mon-Fri',
+        daily_call_limit: row.daily_call_limit !== undefined && row.daily_call_limit !== null ? Number(row.daily_call_limit) : 1000,
+        pause_on_warm_transfer: row.pause_on_warm_transfer !== false,
+        is_calling_paused: Boolean(row.is_calling_paused),
+        paused_reason: row.paused_reason || null,
       };
     }
   } catch (err) {
@@ -67,6 +92,13 @@ export async function getBlandConfig(): Promise<BlandConfig> {
     transfer_phone_number: '+16024569681',
     prompt_template: DEFAULT_BLAND_PROMPT,
     webhook_url: 'https://iwillglobal.com/api/bland/webhook',
+    calling_hours_start: '09:00',
+    calling_hours_end: '19:00',
+    calling_days: 'Mon-Fri',
+    daily_call_limit: 1000,
+    pause_on_warm_transfer: true,
+    is_calling_paused: false,
+    paused_reason: null,
   };
 }
 
@@ -83,10 +115,22 @@ export async function saveBlandConfig(data: Partial<BlandConfig>): Promise<Bland
   const transferPhoneNumber = data.transfer_phone_number || current.transfer_phone_number || '+16024569681';
   const promptTemplate = data.prompt_template || current.prompt_template || DEFAULT_BLAND_PROMPT;
   const webhookUrl = data.webhook_url || current.webhook_url || 'https://iwillglobal.com/api/bland/webhook';
+  const callingHoursStart = data.calling_hours_start || current.calling_hours_start || '09:00';
+  const callingHoursEnd = data.calling_hours_end || current.calling_hours_end || '19:00';
+  const callingDays = data.calling_days || current.calling_days || 'Mon-Fri';
+  const dailyCallLimit = data.daily_call_limit !== undefined && data.daily_call_limit !== null ? Number(data.daily_call_limit) : (current.daily_call_limit || 1000);
+  const pauseOnWarmTransfer = data.pause_on_warm_transfer !== undefined ? Boolean(data.pause_on_warm_transfer) : (current.pause_on_warm_transfer !== false);
+  const isCallingPaused = data.is_calling_paused !== undefined ? Boolean(data.is_calling_paused) : current.is_calling_paused;
+  const pausedReason = data.paused_reason !== undefined ? data.paused_reason : current.paused_reason;
 
   await q(`
-    INSERT INTO bland_config (id, api_key, enabled, pathway_id, github_repo, default_voice, model, language, from_number, transfer_phone_number, prompt_template, webhook_url, updated_at)
-    VALUES ('main', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+    INSERT INTO bland_config (
+      id, api_key, enabled, pathway_id, github_repo, default_voice, model, language, 
+      from_number, transfer_phone_number, prompt_template, webhook_url, 
+      calling_hours_start, calling_hours_end, calling_days, daily_call_limit, 
+      pause_on_warm_transfer, is_calling_paused, paused_reason, updated_at
+    )
+    VALUES ('main', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now())
     ON CONFLICT (id) DO UPDATE SET
       api_key = COALESCE(EXCLUDED.api_key, bland_config.api_key),
       enabled = EXCLUDED.enabled,
@@ -99,10 +143,80 @@ export async function saveBlandConfig(data: Partial<BlandConfig>): Promise<Bland
       transfer_phone_number = EXCLUDED.transfer_phone_number,
       prompt_template = EXCLUDED.prompt_template,
       webhook_url = EXCLUDED.webhook_url,
+      calling_hours_start = EXCLUDED.calling_hours_start,
+      calling_hours_end = EXCLUDED.calling_hours_end,
+      calling_days = EXCLUDED.calling_days,
+      daily_call_limit = EXCLUDED.daily_call_limit,
+      pause_on_warm_transfer = EXCLUDED.pause_on_warm_transfer,
+      is_calling_paused = EXCLUDED.is_calling_paused,
+      paused_reason = EXCLUDED.paused_reason,
       updated_at = now()
-  `, [apiKey, enabled, pathwayId, githubRepo, defaultVoice, model, language, fromNumber, transferPhoneNumber, promptTemplate, webhookUrl]);
+  `, [
+    apiKey, enabled, pathwayId, githubRepo, defaultVoice, model, language, 
+    fromNumber, transferPhoneNumber, promptTemplate, webhookUrl,
+    callingHoursStart, callingHoursEnd, callingDays, dailyCallLimit,
+    pauseOnWarmTransfer, isCallingPaused, pausedReason
+  ]);
 
   return getBlandConfig();
+}
+
+/** Check if outbound dialing is permitted based on business hours and pause status. */
+export async function canDispatchOutboundCall(): Promise<{ allowed: boolean; reason?: string }> {
+  const cfg = await getBlandConfig();
+  if (!cfg.enabled) {
+    return { allowed: false, reason: 'Bland AI Voice Agent is currently disabled in settings.' };
+  }
+
+  if (cfg.is_calling_paused) {
+    return { allowed: false, reason: `Bland AI outbound calls are paused: ${cfg.paused_reason || 'Warm transfer in progress. Waiting for King Amen Ra to disposition the lead.'}` };
+  }
+
+  // Check daily call volume
+  const today = new Date().toISOString().slice(0, 10);
+  const countRow = await one<{ count: string | number }>(
+    `SELECT count(*) FROM activities WHERE provider = 'bland_ai' AND direction = 'outbound' AND created_at >= $1::date`,
+    [today]
+  );
+  const callsToday = Number(countRow?.count || 0);
+  if (callsToday >= (cfg.daily_call_limit || 1000)) {
+    return { allowed: false, reason: `Daily outbound limit of ${cfg.daily_call_limit || 1000} calls reached (${callsToday} placed today).` };
+  }
+
+  // Check day and hours (America/Phoenix / Agency Local Time)
+  const now = new Date();
+  const options = { timeZone: 'America/Phoenix' };
+  const dayName = new Intl.DateTimeFormat('en-US', { ...options, weekday: 'short' }).format(now);
+  const isWeekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(dayName);
+
+  if (cfg.calling_days === 'Mon-Fri' && !isWeekday) {
+    return { allowed: false, reason: `Outbound calling is restricted to Monday through Friday (Today is ${dayName}).` };
+  }
+
+  const timeStr = new Intl.DateTimeFormat('en-US', {
+    ...options,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(now);
+
+  const start = cfg.calling_hours_start || '09:00';
+  const end = cfg.calling_hours_end || '19:00';
+
+  if (timeStr < start || timeStr >= end) {
+    return { allowed: false, reason: `Outbound calling hours are ${start} to ${end} MST (Current time: ${timeStr} MST).` };
+  }
+
+  return { allowed: true };
+}
+
+/** Set Bland calling pause state (e.g. during warm transfers to King Amen Ra). */
+export async function setBlandCallingPause(isPaused: boolean, reason?: string | null): Promise<void> {
+  await q(`
+    UPDATE bland_config 
+    SET is_calling_paused = $1, paused_reason = $2, updated_at = now()
+    WHERE id = 'main'
+  `, [isPaused, isPaused ? (reason || 'Warm transfer in progress to King Amen Ra. Awaiting disposition.') : null]);
 }
 
 export interface BlandVoice {
@@ -137,6 +251,7 @@ export async function sendBlandCall(options: {
   transferNumber?: string;
   firstSentence?: string;
   pathwayId?: string;
+  bypassChecks?: boolean;
 }): Promise<{
   success: boolean;
   call_id: string;
@@ -145,6 +260,13 @@ export async function sendBlandCall(options: {
   message: string;
   simulated?: boolean;
 }> {
+  if (!options.bypassChecks) {
+    const check = await canDispatchOutboundCall();
+    if (!check.allowed) {
+      throw new Error(`Outbound Call Blocked: ${check.reason}`);
+    }
+  }
+
   const cfg = await getBlandConfig();
   const e164 = toE164(options.phone);
   if (!e164) {
@@ -160,7 +282,7 @@ export async function sendBlandCall(options: {
   let prompt = options.customPrompt || cfg.prompt_template || DEFAULT_BLAND_PROMPT;
   prompt = prompt.replace(/{prospect_name}/g, prospectName);
 
-  const firstSentence = options.firstSentence || `Hello ${prospectName.split(' ')[0]}, this is Sarah calling with the Medicare Helpline at I Will Global. How are you today?`;
+  const firstSentence = options.firstSentence || `Hello ${prospectName.split(' ')[0]}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
 
   const payload: any = {
     phone_number: e164,
@@ -290,7 +412,18 @@ export async function handleBlandWebhook(body: any): Promise<{ success: boolean;
   const recordingUrl = body.recording_url || null;
   const durationSec = Math.round(Number(body.call_length || body.duration || 1) * (body.duration > 30 ? 1 : 60)) || 60;
   const answeredBy = body.answered_by || 'human'; // 'human' | 'voicemail' | 'unknown'
-  const transferred = Boolean(body.transferred_to || body.transfer_destination || (transcript && /transferring you|connected to agent/i.test(transcript)));
+  const transferred = Boolean(body.transferred_to || body.transfer_destination || (transcript && /transferring you|connected to agent|connecting you right now with king/i.test(transcript)));
+
+  // If a warm transfer was initiated, pause outbound calls until King dispositions the lead!
+  if (transferred) {
+    const cfg = await getBlandConfig();
+    if (cfg.pause_on_warm_transfer) {
+      await setBlandCallingPause(
+        true,
+        `Warm transfer initiated on call ${callId} with ${body.metadata?.prospect_name || 'beneficiary'}. Outbound calls paused awaiting King Amen Ra lead disposition.`
+      );
+    }
+  }
 
   // Determine disposition
   let dispositionId = 'call_attempted';
@@ -299,40 +432,26 @@ export async function handleBlandWebhook(body: any): Promise<{ success: boolean;
   if (answeredBy === 'voicemail') {
     dispositionId = 'voicemail';
     dispositionLabel = 'Left Voicemail';
+  } else if (/do not call|remove me|stop calling|unsubscribe/i.test(transcript) || body.variables?.dnc) {
+    dispositionId = 'dnc';
+    dispositionLabel = 'Do Not Call (DNC)';
+  } else if (/not interested|happy with current plan|refused/i.test(summary) || /not interested/i.test(transcript)) {
+    dispositionId = 'not_interested';
+    dispositionLabel = 'Not Interested / Plan Satisfied';
   } else if (transferred) {
     dispositionId = 'warm_transfer_success';
-    dispositionLabel = 'Warm Transfer Complete';
+    dispositionLabel = 'Warm Transfer Initiated to King Amen Ra';
   } else if (/appointment|scheduled|meet|tomorrow|consultation/i.test(summary) || body.variables?.appointment_booked) {
     dispositionId = 'appointment_set';
-    dispositionLabel = 'Appointment Set';
-  } else if (/not interested|remove|stop calling/i.test(transcript + ' ' + summary)) {
-    dispositionId = 'not_interested';
-    dispositionLabel = 'Not Interested';
-  } else if (/do not call|dnc/i.test(transcript + ' ' + summary)) {
-    dispositionId = 'dnc';
-    dispositionLabel = 'Do Not Call';
-  } else if (transcript.length > 50) {
-    dispositionId = 'interested';
-    dispositionLabel = 'Connected – Interested';
+    dispositionLabel = 'Medicare Review Scheduled';
+  } else if (answeredBy === 'human' && durationSec > 30) {
+    dispositionId = 'connected';
+    dispositionLabel = 'Beneficiary Consultation / Qualified';
   }
 
-  const updatedMeta = {
-    ...(act?.meta || {}),
-    bland_call_id: callId,
-    recording_url: recordingUrl,
-    transcript,
-    summary,
-    answered_by: answeredBy,
-    transferred,
-    ended_at: new Date().toISOString(),
-    completed_at: new Date().toISOString(),
-    variables: body.variables || {},
-    call_ended_reason: body.call_ended_reason || 'completed',
-  };
-
+  let activityId = act?.id;
   const bodyContent = `🤖 Bland AI Call Completed\n\n📌 Summary:\n${summary}\n\n🎙️ Answered By: ${answeredBy.toUpperCase()}\n⏱️ Duration: ${Math.round(durationSec / 60)}m ${durationSec % 60}s\n${recordingUrl ? `🎧 Recording: ${recordingUrl}\n` : ''}\n💬 Full Transcript:\n${transcript || 'No transcript generated.'}`;
 
-  let activityId = act?.id;
   if (act) {
     await update('activities', act.id, {
       status: 'Completed',
@@ -341,10 +460,19 @@ export async function handleBlandWebhook(body: any): Promise<{ success: boolean;
       disposition_id: dispositionId,
       disposition: dispositionLabel,
       body: bodyContent,
-      meta: updatedMeta,
+      meta: {
+        ...(act.meta || {}),
+        recording_url: recordingUrl,
+        transcript,
+        summary,
+        answered_by: answeredBy,
+        duration_sec: durationSec,
+        completed_at: new Date().toISOString(),
+        warm_transferred: transferred,
+      },
     });
   } else {
-    const inserted = await insert('activities', {
+    const created = await insert('activities', {
       type: 'call',
       subject: `🤖 Bland AI Call — ${body.metadata?.prospect_name || 'Prospect'}`,
       body: bodyContent,
@@ -353,33 +481,46 @@ export async function handleBlandWebhook(body: any): Promise<{ success: boolean;
       user_id: body.metadata?.user_id || 'u_principal',
       status: 'Completed',
       completed: true,
-      direction: 'outbound',
-      phone: body.to || body.phone_number || '',
-      provider: 'bland_ai',
       duration_sec: durationSec,
+      direction: 'outbound',
+      phone: body.to || body.phone_number || null,
+      provider: 'bland_ai',
       disposition_id: dispositionId,
       disposition: dispositionLabel,
-      meta: updatedMeta,
+      meta: {
+        bland_call_id: callId,
+        recording_url: recordingUrl,
+        transcript,
+        summary,
+        answered_by: answeredBy,
+        source: 'bland_ai',
+        warm_transferred: transferred,
+      },
     });
-    activityId = inserted.id;
+    activityId = created.id;
   }
 
-  // Automate lead updates if lead_id present
-  const leadId = body.metadata?.lead_id || act?.related_id;
-  if (leadId) {
+  // Trigger CRM automation & pipeline update
+  if (body.metadata?.lead_id) {
     try {
-      const disp = await one(`SELECT * FROM dispositions WHERE id=$1`, [dispositionId]);
-      if (disp) {
-        const callerUser = await one<any>(`SELECT * FROM users WHERE id=$1`, [body.metadata?.user_id || act?.user_id || 'u_principal']);
-        await applyDisposition({
-          user: (callerUser as any) || { id: 'u_principal', role: 'admin', name: 'Bland AI', email: 'king@iwillglobal.com', states: ['AZ'] },
-          call: { id: activityId, meta: updatedMeta },
-          disposition: disp,
-          relatedType: 'lead',
-          relatedId: leadId,
-        });
-      }
-    } catch (dispErr) {
+      const lead = await one(`SELECT * FROM leads WHERE id=$1`, [body.metadata.lead_id]);
+      const callerUser = body.metadata?.user_id ? await one(`SELECT * FROM users WHERE id=$1`, [body.metadata.user_id]) : null;
+
+      await applyDisposition({
+        disposition: {
+          id: dispositionId,
+          label: dispositionLabel,
+          category: 'outcome',
+          color: '#3b82f6',
+          icon: '🤖',
+        },
+        contact: lead,
+        contactType: 'lead',
+        user: (callerUser as any) || { id: 'u_principal', role: 'admin', name: 'Bland AI', email: 'king@iwillglobal.com', states: ['AZ'] },
+        callDurationSec: durationSec,
+        notes: `Bland AI Automation (${summary})`,
+      });
+    } catch (dispErr: any) {
       console.error('Error applying disposition in Bland webhook:', dispErr);
     }
   }
@@ -389,10 +530,11 @@ export async function handleBlandWebhook(body: any): Promise<{ success: boolean;
 
 export async function getBlandCallDetails(callId: string): Promise<any> {
   const cfg = await getBlandConfig();
+
   if (cfg.api_key && cfg.api_key !== 'simulated_test_key') {
     try {
       const res = await fetch(`https://api.bland.ai/v1/calls/${callId}`, {
-        headers: { Authorization: cfg.api_key.trim() },
+        headers: { 'Authorization': cfg.api_key.trim() },
       });
       if (res.ok) {
         return await res.json();
@@ -402,14 +544,18 @@ export async function getBlandCallDetails(callId: string): Promise<any> {
     }
   }
 
-  // Fallback: look up in local activities DB
   const act = await one(`SELECT * FROM activities WHERE meta->>'bland_call_id' = $1`, [callId]);
-  return act ? {
+  if (!act) return null;
+
+  return {
     call_id: callId,
+    phone_number: act.phone,
     status: act.status,
-    summary: act.meta?.summary || act.body,
-    transcript: act.meta?.transcript || '',
     recording_url: act.meta?.recording_url || null,
-    answered_by: act.meta?.answered_by || 'human',
-  } : null;
+    concatenated_transcript: act.meta?.transcript || 'Transcript available once call completes.',
+    summary: act.meta?.summary || act.body,
+    duration: act.duration_sec,
+    created_at: act.created_at,
+    is_simulated: Boolean(act.meta?.is_simulated),
+  };
 }

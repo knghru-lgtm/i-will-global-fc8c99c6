@@ -47,6 +47,13 @@ blandAuth.get('/config', async (req, res) => {
       transfer_phone_number: cfg.transfer_phone_number,
       prompt_template: cfg.prompt_template,
       webhook_url: cfg.webhook_url,
+      calling_hours_start: cfg.calling_hours_start,
+      calling_hours_end: cfg.calling_hours_end,
+      calling_days: cfg.calling_days,
+      daily_call_limit: cfg.daily_call_limit,
+      pause_on_warm_transfer: cfg.pause_on_warm_transfer,
+      is_calling_paused: cfg.is_calling_paused,
+      paused_reason: cfg.paused_reason,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -72,6 +79,13 @@ blandAuth.post('/config', async (req, res) => {
         default_voice: saved.default_voice,
         from_number: saved.from_number,
         transfer_phone_number: saved.transfer_phone_number,
+        calling_hours_start: saved.calling_hours_start,
+        calling_hours_end: saved.calling_hours_end,
+        calling_days: saved.calling_days,
+        daily_call_limit: saved.daily_call_limit,
+        pause_on_warm_transfer: saved.pause_on_warm_transfer,
+        is_calling_paused: saved.is_calling_paused,
+        paused_reason: saved.paused_reason,
       },
     });
   } catch (err: any) {

@@ -302,6 +302,25 @@ export async function applyDisposition(ctx: ApplyCtx): Promise<{ actions: string
     actions.push(`Annual review reminder set for ${reviewAt.toDateString()}`);
   }
 
+  
+  // If King or an agent dispositions a lead, resume Bland AI outbound calling if it was paused
+  try {
+    const isKing = ctx.user.id === '3afbca01-76cd-4fa9-91cc-f3a1a4821276' ||
+                   ctx.user.id === 'u_principal' ||
+                   ctx.user.email?.toLowerCase() === 'king@iwillglobal.com' ||
+                   ctx.user.name?.toLowerCase().includes('king');
+    if (isKing || ctx.user.role === 'licensed_agent' || ctx.user.role === 'admin' || ctx.user.role === 'manager') {
+      const { getBlandConfig, setBlandCallingPause } = await import('./bland.ts');
+      const bCfg = await getBlandConfig();
+      if (bCfg.is_calling_paused) {
+        await setBlandCallingPause(false, null);
+        actions.push('Resumed Bland AI outbound dialer following lead disposition');
+      }
+    }
+  } catch (blandErr) {
+    // Non-blocking
+  }
+
   if (a.requeue) actions.push('Returned to dial queue');
   return { actions, created };
 }
