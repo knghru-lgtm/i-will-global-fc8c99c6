@@ -1,0 +1,28 @@
+{
+  "name": "iwg-crm",
+  "private": true,
+  "version": "1.0.0",
+  "description": "IWG CRM — AI-first Medicare insurance CRM for I Will Global",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace server & npm run dev --workspace client",
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "seed": "npm run seed --workspace server",
+    "test": "npm run test --workspace server",
+    "build": "npm run build --workspace client",
+    "publish": "npm run build",
+    "start": "npm run start --workspace server"
+  },
+  "dependencies": {
+    "@neon/config": "^1.8.6",
+    "@neon/env": "^1.5.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "type": "module"
+}

@@ -1,0 +1,133 @@
+.site-footer {
+  background-color: var(--primary, #051039);
+  color: #ffffff;
+  padding: 4rem 0 2rem;
+  margin-top: 4rem;
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3rem;
+  margin-bottom: 3rem;
+}
+
+@media (min-width: 768px) {
+  .footer-grid {
+    grid-template-columns: 2fr 1fr 1fr;
+  }
+}
+
+.footer-brand {
+  color: #ffffff;
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.5px;
+}
+
+.footer-tagline {
+  color: #e2e8f0 !important;
+  font-size: 0.95rem;
+  max-width: 300px;
+}
+
+.footer-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.footer-contact-link,
+.footer-contact p {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #ffffff !important;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.footer-contact-link span,
+.footer-contact p span {
+  color: #ffffff !important;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.footer-contact-link svg,
+.footer-contact p svg {
+  color: #ffd88a !important;
+  flex-shrink: 0;
+}
+
+.footer-contact-link:hover,
+.footer-contact-link:hover span {
+  color: #ffd88a !important;
+  transform: translateX(2px);
+}
+
+.footer-col h4 {
+  color: #ffd88a !important;
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.links-col a {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: #e2e8f0;
+  transition: color 0.2s;
+}
+
+.links-col a:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.small-text {
+  font-size: 0.85rem;
+  color: #e2e8f0 !important;
+}
+
+.mb-1 { margin-bottom: 1rem; }
+.mt-1 { margin-top: 1rem; }
+
+.newsletter-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.newsletter-form input {
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  border: none;
+  width: 100%;
+  font-family: inherit;
+  color: #051039 !important;
+  background: #ffffff !important;
+}
+
+.footer-bottom {
+  border-top: 1px solid rgba(255,255,255,0.15);
+  padding-top: 2rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: #e2e8f0 !important;
+}
+
+.footer-bottom p {
+  color: #e2e8f0 !important;
+}
+
+.disclaimer {
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  color: #cbd5e1 !important;
+  opacity: 0.95;
+  line-height: 1.5;
+}

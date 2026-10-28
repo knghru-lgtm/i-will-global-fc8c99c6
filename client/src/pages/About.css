@@ -1,0 +1,541 @@
+/* World-Class About Us & Mission Styles */
+.about-hero {
+  position: relative;
+  background: radial-gradient(circle at 50% 20%, #16244d 0%, #051039 80%, #03081e 100%);
+  color: #ffffff;
+  padding: 5rem 1.5rem 6.5rem;
+  text-align: center;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(200, 150, 62, 0.25);
+}
+
+.about-hero-bg {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    radial-gradient(rgba(200, 150, 62, 0.08) 1px, transparent 1px),
+    radial-gradient(ellipse 600px 300px at 50% 0%, rgba(200, 150, 62, 0.12), transparent);
+  background-size: 28px 28px, 100% 100%;
+  pointer-events: none;
+}
+
+.about-hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 840px;
+  margin: 0 auto;
+}
+
+.about-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.95rem;
+  border-radius: 999px;
+  background: rgba(200, 150, 62, 0.16);
+  border: 1px solid rgba(200, 150, 62, 0.45);
+  color: #ffd88a;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.about-hero h1 {
+  font-size: 3.1rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.15;
+  margin-bottom: 1.25rem;
+  letter-spacing: -1px;
+}
+
+.about-hero h1 span {
+  background: linear-gradient(135deg, #ffd88a 0%, #c8963e 50%, #e0ac53 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.about-hero-lead {
+  font-size: 1.15rem;
+  color: #e2e8f0;
+  line-height: 1.65;
+  max-width: 680px;
+  margin: 0 auto 2rem;
+}
+
+.about-hero-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Mission Floating Card */
+.mission-showcase-container {
+  margin-top: -3.5rem;
+  position: relative;
+  z-index: 10;
+  max-width: 1060px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0 1.5rem;
+}
+
+.mission-spotlight-card {
+  background: linear-gradient(135deg, rgba(22, 36, 77, 0.95) 0%, rgba(11, 19, 43, 0.98) 100%);
+  border: 1px solid rgba(200, 150, 62, 0.4);
+  border-radius: 20px;
+  padding: 3.25rem;
+  box-shadow: 0 25px 60px rgba(5, 16, 57, 0.45), 0 0 40px rgba(200, 150, 62, 0.15);
+  color: #ffffff;
+  backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
+}
+
+.mission-card-watermark {
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 220px;
+  height: 220px;
+  opacity: 0.05;
+  pointer-events: none;
+}
+
+.mission-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.mission-badge {
+  background: var(--accent, #c8963e);
+  color: #051039;
+  font-weight: 800;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mission-spotlight-card h2 {
+  font-size: 2.1rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 1.25rem;
+  line-height: 1.25;
+}
+
+.mission-quote-statement {
+  font-size: 1.25rem;
+  color: #ffffff;
+  line-height: 1.7;
+  border-left: 4px solid var(--accent, #c8963e);
+  padding-left: 1.5rem;
+  margin: 1.5rem 0 2rem;
+  font-weight: 400;
+  font-style: italic;
+}
+
+.mission-quote-statement strong {
+  color: #ffd88a;
+  font-weight: 700;
+  font-style: normal;
+}
+
+/* Stats Counter Grid */
+.mission-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+  padding-top: 2rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.stat-item {
+  text-align: left;
+}
+
+.stat-number {
+  font-size: 2.3rem;
+  font-weight: 900;
+  color: var(--accent, #c8963e);
+  line-height: 1;
+  margin-bottom: 0.35rem;
+  letter-spacing: -0.5px;
+}
+
+.stat-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 0.2rem;
+}
+
+.stat-sub {
+  font-size: 0.8rem;
+  color: #e2e8f0;
+  line-height: 1.4;
+}
+
+/* Section 2: Why Work With Us */
+.about-section {
+  padding: 6rem 1.5rem;
+  max-width: 1140px;
+  margin: 0 auto;
+}
+
+.section-header-centered {
+  text-align: center;
+  max-width: 720px;
+  margin: 0 auto 3.5rem;
+}
+
+.section-tag {
+  color: var(--accent, #c8963e);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+  display: block;
+}
+
+.section-title {
+  font-size: 2.4rem;
+  font-weight: 800;
+  color: var(--primary, #051039);
+  margin-bottom: 1rem;
+  line-height: 1.2;
+}
+
+[data-theme='dark'] .section-title {
+  color: #ffffff;
+}
+
+.section-subtitle {
+  font-size: 1.05rem;
+  color: #475569;
+  line-height: 1.6;
+}
+
+/* World-Class Feature Cards Grid */
+.pillars-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+}
+
+.pillar-card {
+  background: #ffffff;
+  border: 1.5px solid var(--border-color, #e2e8f0);
+  border-radius: 16px;
+  padding: 2.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.4, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+[data-theme='dark'] .pillar-card {
+  background: #111c3a;
+  border-color: #243566;
+}
+
+.pillar-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 45px rgba(200, 150, 62, 0.16);
+  border-color: var(--accent, #c8963e);
+}
+
+.pillar-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.pillar-icon-box {
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
+  background: rgba(200, 150, 62, 0.14);
+  color: var(--accent, #c8963e);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pillar-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent, #c8963e);
+  background: rgba(200, 150, 62, 0.1);
+  border: 1px solid rgba(200, 150, 62, 0.3);
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.pillar-card h3 {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--primary, #051039);
+  margin-bottom: 0.85rem;
+  line-height: 1.3;
+}
+
+[data-theme='dark'] .pillar-card h3 {
+  color: #ffffff;
+}
+
+.pillar-card p {
+  font-size: 0.95rem;
+  color: #334155 !important;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+  flex: 1;
+}
+
+[data-theme='dark'] .pillar-card p {
+  color: #cbd5e1 !important;
+}
+
+.pillar-highlights-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  padding-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+[data-theme='dark'] .pillar-highlights-list {
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+.pillar-highlight-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.88rem;
+  color: #0f172a !important;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.pillar-highlight-item span {
+  color: #0f172a !important;
+  font-weight: 600;
+}
+
+[data-theme='dark'] .pillar-highlight-item,
+[data-theme='dark'] .pillar-highlight-item span {
+  color: #f1f5f9 !important;
+}
+
+.pillar-highlight-item svg {
+  color: #059669;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* Section 3: Interactive Commitments Banner */
+.commitments-panel {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 3.5rem;
+  margin-top: 4rem;
+}
+
+[data-theme='dark'] .commitments-panel {
+  background: #0b132b;
+  border-color: #243566;
+}
+
+.commitments-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+}
+
+.commitments-text h3 {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--primary, #051039);
+  margin-bottom: 1rem;
+  line-height: 1.25;
+}
+
+[data-theme='dark'] .commitments-text h3 {
+  color: #ffffff;
+}
+
+.commitments-text p {
+  font-size: 1rem;
+  color: #475569;
+  line-height: 1.65;
+  margin-bottom: 1.5rem;
+}
+
+[data-theme='dark'] .commitments-text p {
+  color: #cbd5e1;
+}
+
+.carrier-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1.5rem;
+}
+
+.carrier-pill {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary, #051039);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+}
+
+[data-theme='dark'] .carrier-pill {
+  background: #16244d;
+  border-color: #243566;
+  color: #ffffff;
+}
+
+/* Call to Action Banner */
+.about-cta-banner {
+  background: linear-gradient(135deg, #051039 0%, #16245c 100%);
+  border: 1px solid rgba(200, 150, 62, 0.3);
+  border-radius: 20px;
+  padding: 4rem 2rem;
+  text-align: center;
+  color: #ffffff;
+  margin-top: 5rem;
+  box-shadow: 0 25px 60px rgba(5, 16, 57, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.about-cta-banner h2 {
+  font-size: 2.3rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 1rem;
+}
+
+.about-cta-banner p {
+  font-size: 1.1rem;
+  color: #e2e8f0;
+  max-width: 650px;
+  margin: 0 auto 2rem;
+  line-height: 1.6;
+}
+
+.about-cta-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1024px) {
+  .mission-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+  .pillars-grid {
+    grid-template-columns: 1fr;
+  }
+  .commitments-grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+  .about-hero h1 {
+    font-size: 2.4rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .about-hero {
+    padding: 3.25rem 1rem 4.5rem;
+  }
+  .about-hero h1 {
+    font-size: clamp(1.8rem, 6.5vw, 2.3rem);
+  }
+  .about-hero-lead {
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+  }
+  .about-hero-actions {
+    flex-direction: column;
+    width: 100%;
+    gap: 0.65rem;
+  }
+  .about-hero-actions .btn {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+  }
+  .mission-showcase-container {
+    margin-top: -2.5rem;
+    padding: 0 0.85rem;
+  }
+  .mission-spotlight-card {
+    padding: 1.65rem 1.15rem;
+    border-radius: 14px;
+  }
+  .mission-spotlight-card h2 {
+    font-size: 1.55rem;
+  }
+  .mission-quote-statement {
+    font-size: 0.98rem;
+    padding-left: 0.85rem;
+    margin: 1.25rem 0 1.5rem;
+  }
+  .mission-stats-grid {
+    grid-template-columns: 1fr;
+    gap: 1.1rem;
+  }
+  .commitments-panel {
+    padding: 1.75rem 1.15rem;
+    border-radius: 14px;
+  }
+  .about-cta-banner {
+    padding: 2.25rem 1.15rem;
+    border-radius: 14px;
+    margin-top: 3rem;
+  }
+  .about-cta-banner h2 {
+    font-size: 1.6rem;
+  }
+  .about-cta-banner p {
+    font-size: 0.95rem;
+  }
+  .about-cta-buttons {
+    flex-direction: column;
+    width: 100%;
+    gap: 0.65rem;
+  }
+  .about-cta-buttons .btn {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+  }
+}
+

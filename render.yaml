@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: iwg-crm-api
+    env: node
+    plan: free
+    region: ohio
+    buildCommand: "npm install"
+    startCommand: "npm run start --workspace server"
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GOOGLE_ALLOWED_DOMAIN
+        value: iwillglobal.com

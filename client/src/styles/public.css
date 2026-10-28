@@ -1,0 +1,599 @@
+/* I Will Global Public Website Design System */
+
+:root {
+  --pub-primary: #051039;       /* Deep Navy */
+  --pub-primary-light: #16245c;
+  --pub-accent: #c8963e;        /* Radiant Gold */
+  --pub-accent-hover: #e0ac53;
+  --pub-bg: #f8fafc;            /* Clean light background */
+  --pub-text: #0f172a;          /* High contrast deep slate */
+  --pub-text-muted: #475569;    /* Readable slate */
+  --pub-border: #e2e8f0;
+  --pub-card-bg: #ffffff;
+}
+
+/* Scoped specifically to Public Website */
+.public-website {
+  background-color: var(--pub-bg);
+  color: var(--pub-text);
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  max-width: 100vw;
+  width: 100%;
+}
+
+.public-website h1, 
+.public-website h2, 
+.public-website h3, 
+.public-website h4, 
+.public-website h5, 
+.public-website h6 {
+  color: var(--pub-primary);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.public-website p {
+  color: #334155;
+  line-height: 1.65;
+}
+
+/* Ensure all dark containers across the public site have bright, readable light text (excluding button internals) */
+.public-website .site-footer p,
+.public-website .site-footer > span,
+.public-website .site-footer a:not(.btn):not(.btn-white):not(.btn-dark-outline):not(.footer-contact-link),
+.public-website .site-footer li,
+.public-website .about-hero p,
+.public-website .about-hero > span,
+.public-website .offerings-hero p,
+.public-website .offerings-hero > span,
+.public-website .mission-spotlight-card p,
+.public-website .mission-spotlight-card > span,
+.public-website .mission-stats-grid span,
+.public-website .mission-stats-grid div,
+.public-website .about-cta-banner p,
+.public-website .about-cta-banner > span,
+.public-website .action-banner p,
+.public-website .action-banner > span,
+.public-website .offering-cta-footer p,
+.public-website .offering-cta-footer > span {
+  color: #e2e8f0;
+}
+
+.public-website .site-footer h1,
+.public-website .site-footer h2,
+.public-website .site-footer h3,
+.public-website .site-footer h4,
+.public-website .about-hero h1,
+.public-website .about-hero h2,
+.public-website .about-hero h3,
+.public-website .offerings-hero h1,
+.public-website .offerings-hero h2,
+.public-website .offerings-hero h3,
+.public-website .mission-spotlight-card h1,
+.public-website .mission-spotlight-card h2,
+.public-website .mission-spotlight-card h3,
+.public-website .about-cta-banner h1,
+.public-website .about-cta-banner h2,
+.public-website .action-banner h1,
+.public-website .action-banner h2,
+.public-website .offering-cta-footer h1,
+.public-website .offering-cta-footer h2,
+.public-website .offering-cta-footer h3,
+.public-website .offering-cta-footer h4 {
+  color: #ffffff;
+}
+
+/* Phone & Email High-Contrast Light Colors */
+.public-website .top-banner a,
+.public-website .top-banner a span,
+.public-website .site-footer a[href^="tel:"],
+.public-website .site-footer a[href^="mailto:"],
+.public-website .footer-contact-link,
+.public-website .footer-contact-link span {
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+.public-website .top-banner a svg,
+.public-website .footer-contact-link svg {
+  color: #ffd88a !important;
+}
+
+.public-website .top-banner a:hover,
+.public-website .top-banner a:hover span,
+.public-website .footer-contact-link:hover,
+.public-website .footer-contact-link:hover span {
+  color: #ffd88a !important;
+}
+
+.public-website a {
+  text-decoration: none;
+}
+
+/* Utility Containers */
+.container {
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* Public Buttons with High Contrast */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  font-weight: 700;
+  transition: all 0.2s ease-in-out;
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary {
+  background-color: var(--pub-primary);
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(5, 16, 57, 0.25);
+}
+
+.btn-primary:hover {
+  background-color: var(--pub-primary-light);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(5, 16, 57, 0.35);
+}
+
+.btn-accent {
+  background: linear-gradient(135deg, #c8963e 0%, #d4a04c 100%);
+  color: #051039 !important;
+  font-weight: 800;
+  box-shadow: 0 4px 14px rgba(200, 150, 62, 0.35);
+}
+
+.btn-accent:hover {
+  background: linear-gradient(135deg, #d4a04c 0%, #f3be6a 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(200, 150, 62, 0.5);
+}
+
+/* High Contrast Solid White Button */
+.btn-white {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: #ffffff !important;
+  color: #051039 !important;
+  border: 2px solid #ffffff !important;
+  font-weight: 800 !important;
+  border-radius: 0.5rem;
+  padding: 0.85rem 1.75rem;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.btn-white svg {
+  color: #c8963e !important;
+}
+
+.btn-white:hover {
+  background: #ffd88a !important;
+  color: #051039 !important;
+  border-color: #ffd88a !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(200, 150, 62, 0.4);
+}
+
+.btn-white:hover svg {
+  color: #051039 !important;
+}
+
+/* High Contrast Glass Outline Button for Dark Sections */
+.btn-dark-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  border: 2px solid rgba(255, 255, 255, 0.85) !important;
+  font-weight: 750 !important;
+  border-radius: 0.5rem;
+  padding: 0.85rem 1.75rem;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+
+.btn-dark-outline svg {
+  color: #ffd88a !important;
+}
+
+.btn-dark-outline:hover {
+  background: #ffffff !important;
+  color: #051039 !important;
+  border-color: #ffffff !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.btn-dark-outline:hover svg {
+  color: #c8963e !important;
+}
+
+/* Explicit button text styling to guarantee 100% contrast on any background */
+.public-website .btn-white,
+.public-website .btn-white span,
+.public-website .btn-white strong,
+.public-website .btn-outline,
+.public-website .btn-outline span,
+.public-website .btn-outline strong {
+  color: #051039 !important;
+  font-weight: 800 !important;
+}
+
+.public-website .btn-white svg,
+.public-website .btn-outline svg {
+  color: #c8963e !important;
+}
+
+.public-website .btn-accent,
+.public-website .btn-accent span,
+.public-website .btn-accent strong {
+  color: #051039 !important;
+  font-weight: 800 !important;
+}
+
+.public-website .btn-accent svg {
+  color: #051039 !important;
+}
+
+.public-website .btn-dark-outline,
+.public-website .btn-dark-outline span,
+.public-website .btn-dark-outline strong {
+  color: #ffffff !important;
+  font-weight: 750 !important;
+}
+
+.public-website .btn-dark-outline svg {
+  color: #ffd88a !important;
+}
+
+/* High Contrast Glassmorphism */
+.glass {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 10px 30px rgba(5, 16, 57, 0.08);
+}
+
+/* High Contrast Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.badge-gold {
+  background: rgba(200, 150, 62, 0.15);
+  color: #8b5cf6; /* Fallback if not themed */
+  color: #936021;
+  border: 1px solid rgba(200, 150, 62, 0.4);
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+/* ==========================================================================
+   PUBLIC WEBSITE MOBILE RESPONSIVENESS
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  /* Banner / Top Bar */
+  .top-banner {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.78rem;
+  }
+
+  .banner-inner {
+    flex-direction: column;
+    gap: 0.35rem;
+    align-items: center;
+    text-align: center;
+  }
+
+  .contact-info {
+    gap: 0.85rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .agent-locator {
+    margin-top: 0.15rem;
+  }
+
+  /* Header Logo & Nav */
+  .header-logo {
+    height: 42px;
+  }
+
+  .main-nav {
+    padding: 0.75rem 0;
+  }
+
+  /* Hero Section */
+  .hero-section {
+    min-height: auto;
+    padding: 2.5rem 0.85rem 3rem;
+  }
+
+  .hero-text-card {
+    padding: 1.75rem 1.25rem !important;
+    margin: 0 auto;
+    max-width: 100% !important;
+    border-radius: 1rem !important;
+  }
+
+  .hero-text-card h1 {
+    font-size: clamp(1.85rem, 6vw, 2.4rem) !important;
+    letter-spacing: -0.5px;
+    margin-bottom: 0.85rem;
+  }
+
+  .hero-text-card .subtitle {
+    font-size: 1rem !important;
+    margin-bottom: 1.35rem;
+    line-height: 1.55;
+  }
+
+  .hero-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .hero-actions .btn-large,
+  .hero-actions .btn-outline {
+    width: 100%;
+    justify-content: center;
+    padding: 0.85rem 1.25rem;
+  }
+
+  /* Quick Jump Core Divisions Strip */
+  .core-divisions-strip {
+    padding: 0.85rem 0.5rem;
+  }
+
+  .core-divisions-inner {
+    gap: 0.5rem;
+  }
+
+  .core-divisions-label {
+    font-size: 0.8rem;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Feature Grid & Cards */
+  .feature-card {
+    padding: 1.5rem 1.25rem;
+  }
+
+  .feature-icon {
+    width: 3rem;
+    height: 3rem;
+  }
+
+  /* Action Banner */
+  .action-banner {
+    padding: 2.25rem 1.25rem !important;
+    border-radius: 1rem !important;
+  }
+
+  .action-banner h2 {
+    font-size: 1.6rem !important;
+    line-height: 1.25;
+  }
+
+  .action-banner p {
+    font-size: 0.98rem !important;
+    margin-bottom: 1.5rem;
+  }
+
+  /* Public Page Header */
+  .page-header {
+    padding: 2.75rem 1rem !important;
+  }
+
+  .page-header h1 {
+    font-size: clamp(1.75rem, 5.5vw, 2.25rem) !important;
+  }
+
+  .page-header p {
+    font-size: 1rem !important;
+  }
+
+  .public-website .page-content {
+    padding: 2rem 0.85rem !important;
+  }
+
+  .content-card {
+    padding: 1.6rem 1.15rem !important;
+    border-radius: 0.85rem !important;
+  }
+
+  .content-card h2 {
+    font-size: 1.45rem !important;
+  }
+
+  /* Resources Grid & Detail Box */
+  .resources-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1.25rem !important;
+  }
+
+  .resource-card {
+    padding: 1.35rem 1.15rem !important;
+    gap: 1rem !important;
+  }
+
+  .resource-detail-box {
+    padding: 1.35rem 1.15rem !important;
+    border-radius: 12px !important;
+  }
+
+  .resource-detail-header {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 0.75rem !important;
+  }
+
+  .resource-detail-header h2 {
+    font-size: 1.35rem !important;
+  }
+
+  .info-cards-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+
+  .resource-cta-row {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 0.85rem !important;
+  }
+
+  .resource-cta-row .btn {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+  }
+
+  /* Buttons & Inputs on Mobile */
+  .btn, .btn-primary, .btn-accent, .btn-white, .btn-dark-outline {
+    min-height: 46px;
+    font-size: 0.95rem;
+  }
+
+  /* Footer on Mobile */
+  .site-footer {
+    padding: 2.75rem 0.75rem 1.5rem !important;
+    margin-top: 2.5rem;
+  }
+
+  .footer-grid {
+    gap: 2rem;
+  }
+
+  .newsletter-form {
+    flex-direction: column !important;
+    gap: 0.65rem;
+  }
+
+  .newsletter-form input {
+    min-height: 46px;
+    font-size: 0.92rem;
+  }
+
+  .newsletter-form .btn {
+    width: 100%;
+    min-height: 46px;
+    justify-content: center;
+  }
+
+  .footer-bottom {
+    padding-top: 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 0 1rem;
+  }
+}
+
+/* Public AI Chat Widget Responsive Styles */
+.iwg-public-chat-btn {
+  position: fixed;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  right: 24px;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background-color: #051039;
+  border: 2px solid #c8963e;
+  color: #c8963e;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  z-index: 9999;
+  transition: transform 0.2s ease;
+}
+
+.iwg-public-chat-btn:hover {
+  transform: scale(1.06);
+}
+
+.iwg-public-chat-box {
+  position: fixed;
+  bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+  right: 24px;
+  width: 380px;
+  max-width: 90vw;
+  height: 540px;
+  max-height: calc(100vh - 120px);
+  max-height: calc(100dvh - 120px);
+  background-color: #0b132b;
+  border: 1px solid #243566;
+  border-radius: 16px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 9999;
+}
+
+@media (max-width: 640px) {
+  .iwg-public-chat-btn {
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    right: 16px;
+    width: 50px;
+    height: 50px;
+    font-size: 1.35rem;
+  }
+  .iwg-public-chat-box {
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-width: none;
+    height: calc(100vh - 90px);
+    height: calc(100dvh - 90px);
+    border-radius: 14px;
+  }
+}
+
+
+

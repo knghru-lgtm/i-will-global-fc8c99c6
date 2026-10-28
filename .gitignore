@@ -1,8 +1,21 @@
+node_modules/
+dist/
+.env
+.env.*
+server/data/
+*.log
+client/android/app/build/
+client/ios/App/Pods/
+screenshots/
+
+.vercel
+.neon
+api_build/
+
+# Bland agent local runtime
 /.bland-local.json
 /.bland-write.json
 /.bland-write.lock
 /.bland-write.recover.lock
 /.bland-write.*.tmp
 /.bland-local.*.tmp
-.env
-.env.*

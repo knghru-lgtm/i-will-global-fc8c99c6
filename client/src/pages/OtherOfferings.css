@@ -1,0 +1,622 @@
+/* Other Offerings & Comprehensive Insurance Services Styles */
+.offerings-page {
+  min-height: 100vh;
+}
+
+.offerings-hero {
+  position: relative;
+  background: radial-gradient(circle at 50% 20%, #16244d 0%, #051039 80%, #03081e 100%);
+  color: #ffffff;
+  padding: 5rem 1.5rem 6.5rem;
+  text-align: center;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(200, 150, 62, 0.25);
+}
+
+.offerings-hero-bg {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    radial-gradient(rgba(200, 150, 62, 0.08) 1px, transparent 1px),
+    radial-gradient(ellipse 700px 350px at 50% 0%, rgba(200, 150, 62, 0.12), transparent);
+  background-size: 28px 28px, 100% 100%;
+  pointer-events: none;
+}
+
+.offerings-hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.offerings-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.95rem;
+  border-radius: 999px;
+  background: rgba(200, 150, 62, 0.16);
+  border: 1px solid rgba(200, 150, 62, 0.45);
+  color: #ffd88a;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.offerings-hero h1 {
+  font-size: 3.1rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.15;
+  margin-bottom: 1.25rem;
+  letter-spacing: -1px;
+}
+
+.offerings-hero h1 span {
+  background: linear-gradient(135deg, #ffd88a 0%, #c8963e 50%, #e0ac53 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.offerings-hero-lead {
+  font-size: 1.15rem;
+  color: #e2e8f0;
+  line-height: 1.65;
+  max-width: 720px;
+  margin: 0 auto 2rem;
+}
+
+/* Offerings Main Section */
+.offerings-container {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 1.5rem 5rem;
+}
+
+/* Floating Tab Selection Strip */
+.offerings-tabs-wrapper {
+  margin-top: -3rem;
+  position: relative;
+  z-index: 10;
+  margin-bottom: 3rem;
+}
+
+.offerings-tabs-bar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.75rem;
+  background: #ffffff;
+  padding: 0.85rem;
+  border-radius: 16px;
+  box-shadow: 0 15px 40px rgba(5, 16, 57, 0.12);
+  border: 1px solid #e2e8f0;
+}
+
+[data-theme='dark'] .offerings-tabs-bar {
+  background: #111c3a;
+  border-color: #243566;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.offering-tab-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.1rem 0.75rem;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.4, 1);
+  text-align: center;
+  gap: 0.5rem;
+}
+
+.offering-tab-btn:hover {
+  background: rgba(200, 150, 62, 0.08);
+  border-color: rgba(200, 150, 62, 0.3);
+  transform: translateY(-2px);
+}
+
+.offering-tab-btn.active {
+  background: linear-gradient(135deg, rgba(22, 36, 77, 0.98) 0%, rgba(5, 16, 57, 1) 100%);
+  border-color: var(--accent, #c8963e);
+  box-shadow: 0 8px 25px rgba(200, 150, 62, 0.25);
+  transform: translateY(-3px);
+}
+
+[data-theme='dark'] .offering-tab-btn.active {
+  background: linear-gradient(135deg, rgba(200, 150, 62, 0.2) 0%, rgba(14, 32, 82, 0.9) 100%);
+}
+
+.tab-icon-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(200, 150, 62, 0.14);
+  color: var(--accent, #c8963e);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.offering-tab-btn.active .tab-icon-wrap {
+  background: var(--accent, #c8963e);
+  color: #051039;
+  box-shadow: 0 0 15px rgba(200, 150, 62, 0.5);
+}
+
+.tab-btn-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--primary, #051039);
+  line-height: 1.25;
+}
+
+[data-theme='dark'] .tab-btn-title {
+  color: #ffffff;
+}
+
+.offering-tab-btn.active .tab-btn-title {
+  color: #ffffff;
+}
+
+.tab-btn-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+[data-theme='dark'] .tab-btn-badge {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+}
+
+.offering-tab-btn.active .tab-btn-badge {
+  background: rgba(200, 150, 62, 0.25);
+  color: #ffd88a;
+  border: 1px solid rgba(200, 150, 62, 0.4);
+}
+
+/* Active Offering Detail Box */
+.offering-detail-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.06);
+  padding: 3rem;
+  animation: fadeInDetail 0.35s ease-out;
+}
+
+[data-theme='dark'] .offering-detail-card {
+  background: #111c3a;
+  border-color: #243566;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes fadeInDetail {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.offering-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 2.5rem;
+  flex-wrap: wrap;
+}
+
+[data-theme='dark'] .offering-detail-header {
+  border-bottom-color: #243566;
+}
+
+.header-meta-left {
+  flex: 1;
+  min-width: 300px;
+}
+
+.offering-main-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(200, 150, 62, 0.15);
+  border: 1px solid rgba(200, 150, 62, 0.35);
+  color: var(--accent, #c8963e);
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.75rem;
+}
+
+.offering-detail-header h2 {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--primary, #051039);
+  margin-bottom: 0.5rem;
+  line-height: 1.2;
+}
+
+[data-theme='dark'] .offering-detail-header h2 {
+  color: #ffffff;
+}
+
+.offering-tagline {
+  font-size: 1.1rem;
+  color: #334155;
+  font-weight: 500;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Competitive Advantage Callout Banner */
+.competitive-advantage-banner {
+  background: linear-gradient(135deg, rgba(200, 150, 62, 0.14) 0%, rgba(22, 36, 77, 0.1) 100%);
+  border: 1px solid var(--accent, #c8963e);
+  border-radius: 14px;
+  padding: 1.5rem 1.75rem;
+  margin-bottom: 2.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+}
+
+.competitive-advantage-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--accent, #c8963e);
+  color: #051039;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 15px rgba(200, 150, 62, 0.35);
+}
+
+.competitive-advantage-text h4 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--primary, #051039);
+  margin: 0 0 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+[data-theme='dark'] .competitive-advantage-text h4 {
+  color: #ffd88a;
+}
+
+.competitive-advantage-text p {
+  font-size: 0.92rem;
+  color: #1e293b !important;
+  line-height: 1.55;
+  margin: 0;
+}
+
+[data-theme='dark'] .competitive-advantage-text p {
+  color: #e2e8f0 !important;
+}
+
+/* 4 Core Features Cards Grid */
+.features-quad-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+
+.feature-quad-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.75rem;
+  transition: all 0.25s;
+}
+
+[data-theme='dark'] .feature-quad-card {
+  background: #0b132b;
+  border-color: #243566;
+}
+
+.feature-quad-card:hover {
+  border-color: var(--accent, #c8963e);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 25px rgba(200, 150, 62, 0.12);
+}
+
+.quad-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.quad-card-header h4 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--primary, #051039);
+  margin: 0;
+}
+
+[data-theme='dark'] .quad-card-header h4 {
+  color: #ffffff;
+}
+
+.feature-quad-card p {
+  font-size: 0.88rem;
+  color: #334155 !important;
+  line-height: 1.6;
+  margin: 0 0 0.85rem;
+}
+
+[data-theme='dark'] .feature-quad-card p {
+  color: #cbd5e1 !important;
+}
+
+.quad-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.quad-bullets li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #0f172a !important;
+  font-weight: 600;
+}
+
+[data-theme='dark'] .quad-bullets li {
+  color: #f1f5f9 !important;
+}
+
+.quad-bullets li svg {
+  color: #10b981;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* Comparison Matrix Strip */
+.comparison-matrix-box {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 1.75rem;
+  margin-bottom: 2.5rem;
+}
+
+[data-theme='dark'] .comparison-matrix-box {
+  background: #16244d;
+  border-color: #243566;
+}
+
+.comparison-matrix-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.comparison-matrix-header h3 {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--primary, #051039);
+  margin: 0;
+}
+
+[data-theme='dark'] .comparison-matrix-header h3 {
+  color: #ffffff;
+}
+
+.comparison-table-wrapper {
+  overflow-x: auto;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.comparison-table th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  background: rgba(5, 16, 57, 0.08);
+  color: var(--primary, #051039);
+  font-weight: 700;
+  border-bottom: 2px solid #cbd5e1;
+}
+
+[data-theme='dark'] .comparison-table th {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  border-bottom-color: #243566;
+}
+
+.comparison-table th.iwg-col {
+  background: rgba(200, 150, 62, 0.2);
+  color: var(--accent, #c8963e);
+  border-bottom-color: var(--accent, #c8963e);
+}
+
+.comparison-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b !important;
+}
+
+[data-theme='dark'] .comparison-table td {
+  border-bottom-color: #243566;
+  color: #e2e8f0;
+}
+
+.comparison-table td.iwg-col {
+  background: rgba(200, 150, 62, 0.06);
+  font-weight: 600;
+  color: var(--primary, #051039);
+}
+
+[data-theme='dark'] .comparison-table td.iwg-col {
+  color: #ffd88a;
+  background: rgba(200, 150, 62, 0.12);
+}
+
+/* Call to Action Footer inside Detail */
+.offering-cta-footer {
+  background: linear-gradient(135deg, rgba(22, 36, 77, 0.95) 0%, rgba(5, 16, 57, 1) 100%);
+  border: 1px solid rgba(200, 150, 62, 0.35);
+  border-radius: 14px;
+  padding: 2rem 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  color: #ffffff;
+  flex-wrap: wrap;
+}
+
+.offering-cta-info h4 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 0.35rem;
+}
+
+.offering-cta-info p {
+  font-size: 0.95rem;
+  color: #e2e8f0;
+  margin: 0;
+  max-width: 580px;
+  line-height: 1.55;
+}
+
+.offering-cta-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1024px) {
+  .offerings-tabs-bar {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .features-quad-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .offerings-hero {
+    padding: 3.25rem 1rem 4.5rem;
+  }
+  .offerings-hero h1 {
+    font-size: clamp(1.8rem, 6.5vw, 2.3rem);
+  }
+  .offerings-hero-lead {
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+  }
+  .offerings-container {
+    padding: 0 1rem 3.5rem;
+  }
+  .offerings-tabs-wrapper {
+    margin-top: -2.5rem;
+    margin-bottom: 2rem;
+  }
+  .offerings-tabs-bar {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    scrollbar-width: none;
+    border-radius: 14px;
+  }
+  .offerings-tabs-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .offering-tab-btn {
+    flex: 0 0 150px;
+    scroll-snap-align: start;
+    padding: 0.75rem 0.5rem;
+  }
+  .tab-icon-wrap {
+    width: 36px;
+    height: 36px;
+  }
+  .tab-title {
+    font-size: 0.82rem;
+  }
+  .tab-sub {
+    font-size: 0.68rem;
+  }
+  .offering-detail-card {
+    padding: 1.5rem 1rem;
+    border-radius: 14px;
+  }
+  .offering-detail-header h2 {
+    font-size: 1.5rem;
+  }
+  .offering-intro-text {
+    font-size: 0.95rem;
+  }
+  .comparison-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
+  }
+  .comparison-table th,
+  .comparison-table td {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .offering-cta-footer {
+    padding: 1.35rem 1rem;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .offering-cta-actions {
+    flex-direction: column;
+    width: 100%;
+    gap: 0.5rem;
+  }
+  .offering-cta-actions .btn {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+  }
+}
