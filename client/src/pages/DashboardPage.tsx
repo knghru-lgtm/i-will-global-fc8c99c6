@@ -7,12 +7,20 @@ export const DashboardPage: React.FC = () => {
   const { isScheduler } = useAuth();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [blandConfig, setBlandConfig] = useState<any>(null);
+  const [activatingBland, setActivatingBland] = useState(false);
+  const [blandQuickPhone, setBlandQuickPhone] = useState('4803345557');
+  const [blandBannerMsg, setBlandBannerMsg] = useState('');
 
   useEffect(() => {
     api.get('/dashboard')
       .then((res) => setData(res))
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
+    const loadBland = () => api.get('/bland/config').then((c) => setBlandConfig(c)).catch(() => {});
+    loadBland();
+    window.addEventListener('iwg-bland-status-changed', loadBland);
+    return () => window.removeEventListener('iwg-bland-status-changed', loadBland);
   }, []);
 
   if (loading) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>Loading dashboard...</div>;
@@ -69,6 +77,158 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
       ) : null}
+
+      {/* Bland Agent AI Activation & Warm Transfer Appointment-Only Control Bar */}
+      <div
+        style={{
+          background: blandConfig?.is_on_warm_transfer
+            ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(88, 28, 135, 0.35))'
+            : 'linear-gradient(135deg, rgba(124, 58, 237, 0.22), rgba(15, 23, 42, 0.95))',
+          border: blandConfig?.is_on_warm_transfer ? '2px solid #f59e0b' : '1.5px solid #8b5cf6',
+          borderRadius: '16px',
+          padding: '1.25rem 1.5rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.85rem',
+          boxShadow: '0 8px 28px rgba(139, 92, 246, 0.22)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div style={{ fontSize: '2rem' }}>{blandConfig?.is_on_warm_transfer ? '🔥🤖' : '🤖'}</div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', margin: 0 }}>
+                  Bland Agent AI Outbound Dialer (Sarah)
+                </h3>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    padding: '2px 9px',
+                    borderRadius: '999px',
+                    background: blandConfig?.is_on_warm_transfer ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 185, 129, 0.2)',
+                    border: `1px solid ${blandConfig?.is_on_warm_transfer ? '#f59e0b' : '#10b981'}`,
+                    color: blandConfig?.is_on_warm_transfer ? '#fcd34d' : '#34d399',
+                  }}
+                >
+                  {blandConfig?.is_on_warm_transfer
+                    ? '🔥 ON WARM TRANSFER: BOOKING TELEPHONE / IN-PERSON / VIDEO APPTS ONLY & CONTINUING CALLS'
+                    : blandConfig?.is_campaign_active
+                    ? '● ACTIVE & MAKING CALLS'
+                    : '● READY TO CALL'}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.83rem', color: '#cbd5e1', marginTop: '0.25rem' }}>
+                {blandConfig?.is_on_warm_transfer
+                  ? 'Agent knows you are on a warm transfer call — she will ONLY select Telephone, In-Person, or Video appointments and continue dialing.'
+                  : 'Activate Bland Agent AI to begin making calls, warm-transferring to +1 (602) 456-9681, or booking Telephone, In-Person, or Video appointments.'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              value={blandQuickPhone}
+              onChange={(e) => setBlandQuickPhone(e.target.value)}
+              placeholder="4803345557"
+              style={{
+                width: '145px',
+                padding: '0.55rem 0.75rem',
+                borderRadius: '8px',
+                background: 'rgba(0,0,0,0.35)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '0.86rem',
+              }}
+              title="Phone number for immediate Bland AI call"
+            />
+            <button
+              type="button"
+              disabled={activatingBland}
+              onClick={async () => {
+                setActivatingBland(true);
+                setBlandBannerMsg('');
+                try {
+                  const res = await api.post('/bland/activate', {
+                    phone: blandQuickPhone.trim() || undefined,
+                    on_warm_transfer: Boolean(blandConfig?.is_on_warm_transfer),
+                    continue_queue: true,
+                  });
+                  setBlandBannerMsg(res.message || 'Bland Agent AI activated!');
+                  window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+                } catch (err: any) {
+                  setBlandBannerMsg('⚠️ ' + (err.message || 'Failed to activate Bland AI'));
+                } finally {
+                  setActivatingBland(false);
+                }
+              }}
+              style={{
+                padding: '0.6rem 1.1rem',
+                borderRadius: '8px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #7c3aed, #9333ea)',
+                color: '#fff',
+                fontWeight: 800,
+                fontSize: '0.86rem',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(139, 92, 246, 0.45)',
+              }}
+            >
+              {activatingBland ? 'Dialing...' : `🚀 Activate Bland AI & Call ${blandQuickPhone || 'Queue'}`}
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const nextWarm = !blandConfig?.is_on_warm_transfer;
+                try {
+                  const res = await api.post('/bland/warm-transfer-mode', { on_warm_transfer: nextWarm });
+                  setBlandConfig((prev: any) => ({ ...(prev || {}), is_on_warm_transfer: nextWarm }));
+                  setBlandBannerMsg(res.message);
+                  window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+                } catch (err: any) {
+                  setBlandBannerMsg('⚠️ ' + err.message);
+                }
+              }}
+              style={{
+                padding: '0.6rem 0.95rem',
+                borderRadius: '8px',
+                border: blandConfig?.is_on_warm_transfer ? '1.5px solid #10b981' : '1.5px solid #f59e0b',
+                background: blandConfig?.is_on_warm_transfer ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.18)',
+                color: blandConfig?.is_on_warm_transfer ? '#6ee7b7' : '#fcd34d',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+              }}
+            >
+              {blandConfig?.is_on_warm_transfer ? '✅ End Warm Transfer Mode' : '🔥 I Am On Warm Transfer (Appt-Only Mode)'}
+            </button>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('open-bland-ai-control'))}
+              style={{
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(255,255,255,0.06)',
+                color: '#e2e8f0',
+                fontWeight: 700,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+              }}
+            >
+              ⚙️ AI Command Center
+            </button>
+          </div>
+        </div>
+        {blandBannerMsg && (
+          <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#6ee7b7', background: 'rgba(0,0,0,0.25)', padding: '0.45rem 0.75rem', borderRadius: '8px' }}>
+            {blandBannerMsg}
+          </div>
+        )}
+      </div>
 
       {/* KPI Cards Grid */}
       <div className="stats-grid">

@@ -8,6 +8,7 @@ import { buildWhere } from './records.ts';
 import { isManager, isAdminUser } from '../auth.ts';
 import { summarizeCall } from '../services/ai/index.ts';
 import { TPMO_DISCLAIMER } from '../config.ts';
+import { setWarmTransferStatus } from '../services/bland.ts';
 
 export const calls = Router();
 
@@ -186,6 +187,16 @@ calls.post('/transfer/initiate', async (req, res) => {
   const { notify } = await import('../services/automation.ts');
   const { publish } = await import('../realtime.ts');
 
+  // Inform Bland AI that King Amen Ra is on a warm transfer call -> AI selects ONLY Telephone, In-Person, or Video appointments and continues calling!
+  try {
+    await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: target.id,
+      call_id: activity.id,
+      reason: `Warm Transfer active with ${target.first_name} ${target.last_name} — Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls`,
+    });
+  } catch { /* ignore */ }
+
   await notify(
     targetAgent.id,
     `🔥 Incoming Warm Transfer: ${target.first_name} ${target.last_name}`,
@@ -226,6 +237,14 @@ calls.post('/transfer/accept', async (req, res) => {
   };
   const updated = await update('activities', activity.id, { status: 'Warm Transfer Briefing', meta: updatedMeta });
   const target = await loadTarget(activity.related_type, activity.related_id);
+  try {
+    await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: activity.related_id,
+      call_id: activity.id,
+      reason: 'Broker on Warm Transfer Briefing — Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls',
+    });
+  } catch { /* ignore */ }
 
   const { publish } = await import('../realtime.ts');
   publish('inbox', 'warm_transfer_accepted', { transfer_id: activity.id, agent_id: req.user!.id, agent_name: req.user!.name });
@@ -260,6 +279,14 @@ calls.post('/transfer/3way-connect', async (req, res) => {
     status: '3-Way Conference Live',
     meta: updatedMeta,
   });
+  try {
+    await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: activity.related_id,
+      call_id: activity.id,
+      reason: 'Broker on live 3-Way Conference — Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls',
+    });
+  } catch { /* ignore */ }
 
   const { publish } = await import('../realtime.ts');
   publish('inbox', 'warm_transfer_3way_active', {
@@ -428,6 +455,10 @@ calls.post('/transfer/complete', async (req, res) => {
       actions: result.actions,
     },
   });
+
+  try {
+    await setWarmTransferStatus({ on_warm_transfer: false });
+  } catch { /* ignore */ }
 
   res.json({
     activity: updated,

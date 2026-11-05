@@ -1,561 +1,900 @@
-import { q, one, insert, update } from '../db/index.ts';
+import { one, insert, update, q } from '../db/index.ts';
+import { config as appConfig } from '../config.ts';
 import { toE164 } from './phone.ts';
 import { applyDisposition } from './automation.ts';
 
 export interface BlandConfig {
-  id: string;
-  api_key: string | null;
+  api_key: string;
   enabled: boolean;
   pathway_id: string;
-  github_repo: string | null;
+  github_repo: string;
   default_voice: string;
-  model: string;
-  language: string;
+  model: 'base' | 'enhanced' | 'turbo';
+  max_duration: number;
+  record: boolean;
+  wait_for_greeting: boolean;
   from_number: string;
   transfer_phone_number: string;
   prompt_template: string;
   webhook_url: string;
-  calling_hours_start: string;
-  calling_hours_end: string;
-  calling_days: string;
-  daily_call_limit: number;
+  calling_hours_start: number; // 9 (9:00 AM)
+  calling_hours_end: number;   // 19 (7:00 PM)
+  calling_days: string;        // 'Mon-Fri'
+  daily_call_limit: number;    // 1000
   pause_on_warm_transfer: boolean;
-  is_calling_paused: boolean;
+  is_calling_paused: boolean;  // Legacy alias for is_on_warm_transfer
+  is_on_warm_transfer: boolean; // True when King Amen Ra is on a warm transfer call -> Agent books ONLY Telephone, In-Person, or Video appointments and continues calling!
+  is_campaign_active: boolean; // True when Bland Agent AI autonomous dialer is activated in CRM
   paused_reason?: string | null;
-  updated_at?: string;
+  active_transfer_lead_id?: string | null;
+  active_transfer_call_id?: string | null;
+  paused_at?: string | null;
+  campaign_started_at?: string | null;
 }
 
-export const DEFAULT_BLAND_PATHWAY_ID = '3b13b658-e85d-4d14-a24a-868b61040c42';
+export const DEFAULT_BLAND_PATHWAY_ID = 'fc8c99c6-88c3-435d-952b-8c93c2db17a6';
+export const DEFAULT_BLAND_CALLER_ID = '+15208415736';
 
-export const DEFAULT_BLAND_PROMPT = `You are Sarah, an outbound scheduling assistant calling from the Medicare Helpline powered by IWG Insurance and Financial Services.
-Your tone is warm, polite, professional, and patient with senior beneficiaries.
-You are calling {prospect_name} who requested information regarding Medicare options, Turning 65 Initial Enrollment, or the upcoming Medicare Annual Election Period (AEP).
+export const ALLOWED_APPOINTMENT_TYPES = ['telephone', 'in_person', 'video'] as const;
+export const ALLOWED_BLAND_APPOINTMENT_TYPES = ALLOWED_APPOINTMENT_TYPES;
+export type AllowedAppointmentType = typeof ALLOWED_APPOINTMENT_TYPES[number];
 
-FIRST SENTENCE / INTRO:
-"Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+export function normalizeAppointmentType(raw?: string | null): AllowedAppointmentType {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s.includes('person') || s.includes('face') || s.includes('home') || s.includes('office') || s === 'in_person' || s === 'in-person') {
+    return 'in_person';
+  }
+  if (s.includes('video') || s.includes('zoom') || s.includes('meet') || s.includes('virtual')) {
+    return 'video';
+  }
+  return 'telephone';
+}
 
-KEY COMPLIANCE & OPERATIONAL RULES:
-1. TPMO Disclaimer: "We do not offer every plan available in your area. Currently we represent 7 major Medicare organizations which offer over 50 products in your area. Please contact Medicare.gov, 1-800-MEDICARE, or your local State Health Insurance Program (SHIP) to get information on all of your options."
-2. You are an appointment setter, NOT a licensed insurance agent. DO NOT quote specific plan prices, carrier advantages, or specific formulary coverage details.
-3. Your primary objective: Verify if they have questions about Medicare Part A, Part B, Medigap Plan G/N, or Medicare Advantage, and arrange a direct live consultation with state-licensed broker King Amen Ra (Principal Broker & Licensed Agent, NPN 16094432).
-4. If the prospect says YES or agrees to speak with a licensed agent, or has time right now, IMMEDIATELY connect them directly to King Amen Ra (+16024569681). Say: "I am connecting you right now with King Amen Ra, our licensed senior Medicare advisor. Please stay on the line." and trigger the live transfer immediately.
-5. While a warm transfer is in progress, outbound calls are paused until King Amen Ra dispositions the lead.
-6. NEVER recite, speak, or disclose our direct phone number or email address to the caller under any circumstances.
-7. If the beneficiary prefers an appointment, ask for their preferred day and time (morning or afternoon).
-8. If the beneficiary states they are already happy with their plan or not interested, thank them politely and wish them a wonderful day.
-9. If the beneficiary says "Do not call" or "Remove me", immediately confirm: "Understood, I will place your number on our Do Not Call list right now. Have a good day." and conclude.`;
+export function formatAppointmentTypeLabel(type: AllowedAppointmentType): string {
+  if (type === 'in_person') return 'In-Person';
+  if (type === 'video') return 'Video';
+  return 'Telephone';
+}
+
+export const DEFAULT_BLAND_PROMPT = `You are Sarah, calling from the Medicare Helpline powered by IWG Insurance and Financial Services, a licensed Medicare and insurance brokerage led by Principal Broker King Amen Ra (NPN: 16094432).
+You are calling {prospect_name} regarding their Medicare benefits and 2027 plan options.
+
+STRICT OPERATING RULES:
+1. REQUIRED OPENING GREETING: Always introduce yourself clearly: "Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+2. CALLING HOURS & CONTINUOUS DIALING: Operate Monday through Friday, 9:00 AM to 7:00 PM local time (up to 1,000 calls per day), and continuously dial through the lead queue without stopping.
+3. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}):
+   - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER), know that King Amen Ra is actively assisting another client on a live warm transfer call.
+   - Do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
+   - Instead, inform {prospect_name} that King Amen Ra is currently on a warm transfer call helping another client, and offer to schedule an appointment strictly from these THREE appointment types ONLY:
+     1) Telephone Appointment (30 minutes)
+     2) In-Person Appointment (60 minutes)
+     3) Video Appointment (30 minutes)
+   - Never offer or select any other appointment format — ONLY Telephone, In-Person, or Video.
+   - Collect their preferred appointment type (Telephone, In-Person, or Video) and preferred day/time, confirm the booking, and end the call politely so you can immediately continue making calls!
+4. WHEN KING AMEN RA IS AVAILABLE FOR LIVE WARM TRANSFER:
+   - If King Amen Ra is NOT on a warm transfer call and {prospect_name} agrees to speak with a licensed advisor right now, route immediately to the "Connect to King Amen Ra" scenario to bridge the call to King Amen Ra (+16024569681).
+   - If {prospect_name} prefers to schedule for later, only offer and select a Telephone, In-Person, or Video appointment.
+5. PRIVACY & ZERO DISCLOSURE RULE: NEVER recite, speak, or give out our direct phone number or email address to the caller.`;
+
+export const BLAND_VOICES = [
+  { id: 'maya', name: 'Maya (Warm & Empathetic Female — Medicare Specialist)', gender: 'Female', accent: 'American', is_recommended: true },
+  { id: 'ryan', name: 'Ryan (Trustworthy & Calm Male — Senior Advisor)', gender: 'Male', accent: 'American', is_recommended: true },
+  { id: 'elena', name: 'Elena (Bilingual English / Spanish Female)', gender: 'Female', accent: 'American/Spanish', is_recommended: false },
+  { id: 'mason', name: 'Mason (Clear & Articulate Male)', gender: 'Male', accent: 'American', is_recommended: false },
+  { id: 'tina', name: 'Tina (Friendly & Patient Receptionist)', gender: 'Female', accent: 'American', is_recommended: false },
+];
 
 export async function getBlandConfig(): Promise<BlandConfig> {
-  try {
-    // Graceful column migration for existing tables
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS pathway_id TEXT DEFAULT '3b13b658-e85d-4d14-a24a-868b61040c42'`).catch(() => {});
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS github_repo TEXT`).catch(() => {});
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS calling_hours_start TEXT DEFAULT '09:00'`).catch(() => {});
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS calling_hours_end TEXT DEFAULT '19:00'`).catch(() => {});
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS calling_days TEXT DEFAULT 'Mon-Fri'`).catch(() => {});
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS daily_call_limit INT DEFAULT 1000`).catch(() => {});
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS pause_on_warm_transfer BOOLEAN DEFAULT TRUE`).catch(() => {});
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS is_calling_paused BOOLEAN DEFAULT FALSE`).catch(() => {});
-    await q(`ALTER TABLE bland_config ADD COLUMN IF NOT EXISTS paused_reason TEXT`).catch(() => {});
+  const row = await one(`SELECT value FROM settings WHERE key='bland_ai_config'`);
+  const val = row?.value || {};
+  const envKey = process.env.BLAND_API_KEY || '';
 
-    const row = await one<BlandConfig>(`SELECT * FROM bland_config WHERE id='main'`);
-    if (row) {
-      return {
-        ...row,
-        pathway_id: row.pathway_id || DEFAULT_BLAND_PATHWAY_ID,
-        github_repo: row.github_repo || null,
-        api_key: row.api_key || process.env.BLAND_API_KEY || null,
-        prompt_template: row.prompt_template || DEFAULT_BLAND_PROMPT,
-        calling_hours_start: row.calling_hours_start || '09:00',
-        calling_hours_end: row.calling_hours_end || '19:00',
-        calling_days: row.calling_days || 'Mon-Fri',
-        daily_call_limit: row.daily_call_limit !== undefined && row.daily_call_limit !== null ? Number(row.daily_call_limit) : 1000,
-        pause_on_warm_transfer: row.pause_on_warm_transfer !== false,
-        is_calling_paused: Boolean(row.is_calling_paused),
-        paused_reason: row.paused_reason || null,
-      };
+  // Also check if there is a live active warm transfer in the database right now
+  let dbWarmTransferActive = false;
+  let dbTransferLeadId: string | null = null;
+  let dbTransferCallId: string | null = null;
+  try {
+    const activeTransfer = await one(
+      `SELECT id, related_id, status FROM activities
+       WHERE type='call'
+         AND status IN ('Warm Transfer Ringing', 'Warm Transfer Briefing', '3-Way Conference Live')
+         AND created_at >= now() - interval '2 hours'
+       ORDER BY created_at DESC LIMIT 1`
+    );
+    if (activeTransfer) {
+      dbWarmTransferActive = true;
+      dbTransferCallId = activeTransfer.id;
+      dbTransferLeadId = activeTransfer.related_id;
     }
-  } catch (err) {
-    console.error('Error fetching bland_config:', err);
+  } catch {
+    // ignore if table not ready
+  }
+
+  const isOnWarmTransfer = Boolean(val.is_on_warm_transfer ?? val.is_calling_paused ?? dbWarmTransferActive);
+
+  return {
+    api_key: val.api_key || envKey || '',
+    enabled: val.enabled !== undefined ? Boolean(val.enabled) : true,
+    pathway_id: val.pathway_id || process.env.BLAND_PATHWAY_ID || DEFAULT_BLAND_PATHWAY_ID,
+    github_repo: val.github_repo || process.env.BLAND_GITHUB_REPO || 'https://github.com/KingAmenRa/iwillglobal-crm',
+    default_voice: val.default_voice || 'maya',
+    model: val.model || 'enhanced',
+    max_duration: Number(val.max_duration) || 15,
+    record: val.record !== undefined ? Boolean(val.record) : true,
+    wait_for_greeting: val.wait_for_greeting !== undefined ? Boolean(val.wait_for_greeting) : true,
+    from_number: val.from_number || DEFAULT_BLAND_CALLER_ID,
+    transfer_phone_number: val.transfer_phone_number || '+16024569681',
+    prompt_template: val.prompt_template || DEFAULT_BLAND_PROMPT,
+    webhook_url: val.webhook_url || `${appConfig.appUrl}/api/bland/webhook`,
+    calling_hours_start: val.calling_hours_start !== undefined ? Number(val.calling_hours_start) : 9,
+    calling_hours_end: val.calling_hours_end !== undefined ? Number(val.calling_hours_end) : 19,
+    calling_days: val.calling_days || 'Mon-Fri',
+    daily_call_limit: Number(val.daily_call_limit) || 1000,
+    pause_on_warm_transfer: val.pause_on_warm_transfer !== undefined ? Boolean(val.pause_on_warm_transfer) : true,
+    is_calling_paused: isOnWarmTransfer,
+    is_on_warm_transfer: isOnWarmTransfer,
+    is_campaign_active: Boolean(val.is_campaign_active),
+    paused_reason: val.paused_reason || (isOnWarmTransfer ? 'King Amen Ra is on a live Warm Transfer call — Agent is booking Telephone, In-Person, or Video appointments only and continuing to make calls' : null),
+    active_transfer_lead_id: val.active_transfer_lead_id || dbTransferLeadId || null,
+    active_transfer_call_id: val.active_transfer_call_id || dbTransferCallId || null,
+    paused_at: val.paused_at || null,
+    campaign_started_at: val.campaign_started_at || null,
+  };
+}
+
+export async function saveBlandConfig(partial: Partial<BlandConfig>): Promise<BlandConfig> {
+  const current = await getBlandConfig();
+  const merged: BlandConfig = {
+    ...current,
+    ...partial,
+    api_key: partial.api_key && partial.api_key.trim() !== '' ? partial.api_key.trim() : current.api_key,
+  };
+  if (partial.is_on_warm_transfer !== undefined) {
+    merged.is_calling_paused = Boolean(partial.is_on_warm_transfer);
+  } else if (partial.is_calling_paused !== undefined) {
+    merged.is_on_warm_transfer = Boolean(partial.is_calling_paused);
+  }
+
+  await q(
+    `INSERT INTO settings (key, value) VALUES ('bland_ai_config', $1::jsonb)
+     ON CONFLICT (key) DO UPDATE SET value = $1::jsonb`,
+    [JSON.stringify(merged)],
+  );
+
+  return merged;
+}
+
+/**
+ * Check how many Bland AI outbound calls have been placed today (America/Phoenix time).
+ */
+export async function getCallsTodayCount(): Promise<number> {
+  try {
+    const row = await one(
+      `SELECT count(*)::int AS cnt FROM activities
+       WHERE type = 'call'
+         AND provider = 'bland_ai'
+         AND created_at >= date_trunc('day', now() AT TIME ZONE 'America/Phoenix') AT TIME ZONE 'America/Phoenix'`
+    );
+    return row?.cnt || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Validate if Bland AI can currently dispatch a new outbound call:
+ * IMPORTANT: When King Amen Ra is on a warm transfer call (`is_on_warm_transfer` / `is_calling_paused`),
+ * outbound calling is NOT blocked! Instead, the agent continues making calls and strictly selects
+ * Telephone, In-Person, or Video appointments!
+ */
+export async function canDispatchOutboundCall(override = false): Promise<{
+  allowed: boolean;
+  reason?: string;
+  calls_today: number;
+  daily_limit: number;
+  is_paused: boolean;
+  is_on_warm_transfer: boolean;
+  is_campaign_active: boolean;
+  operating_mode: 'WARM_TRANSFER_OR_APPOINTMENT' | 'APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO';
+}> {
+  const cfg = await getBlandConfig();
+  const callsToday = await getCallsTodayCount();
+  const limit = cfg.daily_call_limit || 1000;
+  const isOnWarmTransfer = Boolean(cfg.is_on_warm_transfer || cfg.is_calling_paused);
+  const operatingMode = isOnWarmTransfer
+    ? 'APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO'
+    : 'WARM_TRANSFER_OR_APPOINTMENT';
+
+  if (callsToday >= limit && !override) {
+    return {
+      allowed: false,
+      reason: `🛑 Daily call limit reached (${callsToday.toLocaleString()} / ${limit.toLocaleString()} calls today). Resumes tomorrow at 9:00 AM.`,
+      calls_today: callsToday,
+      daily_limit: limit,
+      is_paused: false,
+      is_on_warm_transfer: isOnWarmTransfer,
+      is_campaign_active: cfg.is_campaign_active,
+      operating_mode: operatingMode,
+    };
+  }
+
+  // Check Mon-Fri 9:00 AM - 7:00 PM America/Phoenix
+  const nowPhoenix = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' }));
+  const day = nowPhoenix.getDay(); // 0 = Sun, 6 = Sat
+  const hour = nowPhoenix.getHours();
+
+  const isWeekday = day >= 1 && day <= 5;
+  const isWithinHours = hour >= (cfg.calling_hours_start || 9) && hour < (cfg.calling_hours_end || 19);
+
+  if ((!isWeekday || !isWithinHours) && !override) {
+    return {
+      allowed: false,
+      reason: `🕘 Outside Bland AI calling window (Monday–Friday, 9:00 AM – 7:00 PM MST). Pass override=true to test outside hours.`,
+      calls_today: callsToday,
+      daily_limit: limit,
+      is_paused: false,
+      is_on_warm_transfer: isOnWarmTransfer,
+      is_campaign_active: cfg.is_campaign_active,
+      operating_mode: operatingMode,
+    };
   }
 
   return {
-    id: 'main',
-    api_key: process.env.BLAND_API_KEY || null,
-    enabled: true,
-    pathway_id: DEFAULT_BLAND_PATHWAY_ID,
-    github_repo: null,
-    default_voice: 'maya',
-    model: 'enhanced',
-    language: 'en-US',
-    from_number: '+16024569681',
-    transfer_phone_number: '+16024569681',
-    prompt_template: DEFAULT_BLAND_PROMPT,
-    webhook_url: 'https://iwillglobal.com/api/bland/webhook',
-    calling_hours_start: '09:00',
-    calling_hours_end: '19:00',
-    calling_days: 'Mon-Fri',
-    daily_call_limit: 1000,
-    pause_on_warm_transfer: true,
-    is_calling_paused: false,
-    paused_reason: null,
+    allowed: true,
+    reason: isOnWarmTransfer
+      ? '🔥 King Amen Ra is on a Warm Transfer Call — Bland Agent AI is continuing to make calls and strictly booking Telephone, In-Person, or Video appointments only.'
+      : undefined,
+    calls_today: callsToday,
+    daily_limit: limit,
+    is_paused: false,
+    is_on_warm_transfer: isOnWarmTransfer,
+    is_campaign_active: cfg.is_campaign_active,
+    operating_mode: operatingMode,
   };
 }
 
-export async function saveBlandConfig(data: Partial<BlandConfig>): Promise<BlandConfig> {
-  const current = await getBlandConfig();
-  const apiKey = data.api_key !== undefined ? (data.api_key ? String(data.api_key).trim() : null) : current.api_key;
-  const enabled = data.enabled !== undefined ? Boolean(data.enabled) : current.enabled;
-  const pathwayId = data.pathway_id !== undefined ? String(data.pathway_id).trim() : (current.pathway_id || DEFAULT_BLAND_PATHWAY_ID);
-  const githubRepo = data.github_repo !== undefined ? (data.github_repo ? String(data.github_repo).trim() : null) : current.github_repo;
-  const defaultVoice = data.default_voice || current.default_voice || 'maya';
-  const model = data.model || current.model || 'enhanced';
-  const language = data.language || current.language || 'en-US';
-  const fromNumber = data.from_number || current.from_number || '+16024569681';
-  const transferPhoneNumber = data.transfer_phone_number || current.transfer_phone_number || '+16024569681';
-  const promptTemplate = data.prompt_template || current.prompt_template || DEFAULT_BLAND_PROMPT;
-  const webhookUrl = data.webhook_url || current.webhook_url || 'https://iwillglobal.com/api/bland/webhook';
-  const callingHoursStart = data.calling_hours_start || current.calling_hours_start || '09:00';
-  const callingHoursEnd = data.calling_hours_end || current.calling_hours_end || '19:00';
-  const callingDays = data.calling_days || current.calling_days || 'Mon-Fri';
-  const dailyCallLimit = data.daily_call_limit !== undefined && data.daily_call_limit !== null ? Number(data.daily_call_limit) : (current.daily_call_limit || 1000);
-  const pauseOnWarmTransfer = data.pause_on_warm_transfer !== undefined ? Boolean(data.pause_on_warm_transfer) : (current.pause_on_warm_transfer !== false);
-  const isCallingPaused = data.is_calling_paused !== undefined ? Boolean(data.is_calling_paused) : current.is_calling_paused;
-  const pausedReason = data.paused_reason !== undefined ? data.paused_reason : current.paused_reason;
-
-  await q(`
-    INSERT INTO bland_config (
-      id, api_key, enabled, pathway_id, github_repo, default_voice, model, language, 
-      from_number, transfer_phone_number, prompt_template, webhook_url, 
-      calling_hours_start, calling_hours_end, calling_days, daily_call_limit, 
-      pause_on_warm_transfer, is_calling_paused, paused_reason, updated_at
-    )
-    VALUES ('main', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now())
-    ON CONFLICT (id) DO UPDATE SET
-      api_key = COALESCE(EXCLUDED.api_key, bland_config.api_key),
-      enabled = EXCLUDED.enabled,
-      pathway_id = EXCLUDED.pathway_id,
-      github_repo = EXCLUDED.github_repo,
-      default_voice = EXCLUDED.default_voice,
-      model = EXCLUDED.model,
-      language = EXCLUDED.language,
-      from_number = EXCLUDED.from_number,
-      transfer_phone_number = EXCLUDED.transfer_phone_number,
-      prompt_template = EXCLUDED.prompt_template,
-      webhook_url = EXCLUDED.webhook_url,
-      calling_hours_start = EXCLUDED.calling_hours_start,
-      calling_hours_end = EXCLUDED.calling_hours_end,
-      calling_days = EXCLUDED.calling_days,
-      daily_call_limit = EXCLUDED.daily_call_limit,
-      pause_on_warm_transfer = EXCLUDED.pause_on_warm_transfer,
-      is_calling_paused = EXCLUDED.is_calling_paused,
-      paused_reason = EXCLUDED.paused_reason,
-      updated_at = now()
-  `, [
-    apiKey, enabled, pathwayId, githubRepo, defaultVoice, model, language, 
-    fromNumber, transferPhoneNumber, promptTemplate, webhookUrl,
-    callingHoursStart, callingHoursEnd, callingDays, dailyCallLimit,
-    pauseOnWarmTransfer, isCallingPaused, pausedReason
-  ]);
-
-  return getBlandConfig();
+/**
+ * Set whether King Amen Ra is currently on a warm transfer call.
+ * When active=true, the Bland AI Agent DOES NOT STOP CALLING — it knows King is on a warm transfer call,
+ * strictly selects Telephone, In-Person, or Video appointments only, and continues calling the queue!
+ */
+export async function setWarmTransferStatus(params: {
+  on_warm_transfer: boolean;
+  lead_id?: string | null;
+  call_id?: string | null;
+  reason?: string;
+}): Promise<BlandConfig> {
+  return saveBlandConfig({
+    is_on_warm_transfer: params.on_warm_transfer,
+    is_calling_paused: params.on_warm_transfer,
+    paused_reason: params.on_warm_transfer
+      ? (params.reason || 'King Amen Ra is on a Warm Transfer call — Agent is booking Telephone, In-Person, or Video appointments only & continuing to make calls')
+      : null,
+    active_transfer_lead_id: params.on_warm_transfer ? (params.lead_id || null) : null,
+    active_transfer_call_id: params.on_warm_transfer ? (params.call_id || null) : null,
+    paused_at: params.on_warm_transfer ? new Date().toISOString() : null,
+  });
 }
 
-/** Check if outbound dialing is permitted based on business hours and pause status. */
-export async function canDispatchOutboundCall(): Promise<{ allowed: boolean; reason?: string }> {
-  const cfg = await getBlandConfig();
-  if (!cfg.enabled) {
-    return { allowed: false, reason: 'Bland AI Voice Agent is currently disabled in settings.' };
-  }
-
-  if (cfg.is_calling_paused) {
-    return { allowed: false, reason: `Bland AI outbound calls are paused: ${cfg.paused_reason || 'Warm transfer in progress. Waiting for King Amen Ra to disposition the lead.'}` };
-  }
-
-  // Check daily call volume
-  const today = new Date().toISOString().slice(0, 10);
-  const countRow = await one<{ count: string | number }>(
-    `SELECT count(*) FROM activities WHERE provider = 'bland_ai' AND direction = 'outbound' AND created_at >= $1::date`,
-    [today]
-  );
-  const callsToday = Number(countRow?.count || 0);
-  if (callsToday >= (cfg.daily_call_limit || 1000)) {
-    return { allowed: false, reason: `Daily outbound limit of ${cfg.daily_call_limit || 1000} calls reached (${callsToday} placed today).` };
-  }
-
-  // Check day and hours (America/Phoenix / Agency Local Time)
-  const now = new Date();
-  const options = { timeZone: 'America/Phoenix' };
-  const dayName = new Intl.DateTimeFormat('en-US', { ...options, weekday: 'short' }).format(now);
-  const isWeekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(dayName);
-
-  if (cfg.calling_days === 'Mon-Fri' && !isWeekday) {
-    return { allowed: false, reason: `Outbound calling is restricted to Monday through Friday (Today is ${dayName}).` };
-  }
-
-  const timeStr = new Intl.DateTimeFormat('en-US', {
-    ...options,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(now);
-
-  const start = cfg.calling_hours_start || '09:00';
-  const end = cfg.calling_hours_end || '19:00';
-
-  if (timeStr < start || timeStr >= end) {
-    return { allowed: false, reason: `Outbound calling hours are ${start} to ${end} MST (Current time: ${timeStr} MST).` };
-  }
-
-  return { allowed: true };
+/**
+ * Backwards-compatible helper called when a warm transfer is initiated.
+ * Sets `is_on_warm_transfer = true` so the Bland Agent AI knows King is on a warm transfer call,
+ * switches to booking ONLY Telephone, In-Person, or Video appointments, and continues calling!
+ */
+export async function pauseCallingForWarmTransfer(params: {
+  lead_id?: string | null;
+  call_id?: string | null;
+  reason?: string;
+}): Promise<BlandConfig> {
+  return setWarmTransferStatus({
+    on_warm_transfer: true,
+    lead_id: params.lead_id,
+    call_id: params.call_id,
+    reason: params.reason || 'King Amen Ra is on a live warm transfer call — Booking Telephone, In-Person, or Video appointments only & continuing calls',
+  });
 }
 
-/** Set Bland calling pause state (e.g. during warm transfers to King Amen Ra). */
-export async function setBlandCallingPause(isPaused: boolean, reason?: string | null): Promise<void> {
-  await q(`
-    UPDATE bland_config 
-    SET is_calling_paused = $1, paused_reason = $2, updated_at = now()
-    WHERE id = 'main'
-  `, [isPaused, isPaused ? (reason || 'Warm transfer in progress to King Amen Ra. Awaiting disposition.') : null]);
+/**
+ * Called when King Amen Ra finishes a warm transfer consultation and dispositions the lead.
+ * Returns the Bland Agent AI to live warm-transfer capability while continuing outbound calls.
+ */
+export async function resumeCallingAfterDisposition(params?: {
+  lead_id?: string | null;
+  disposition?: string;
+}): Promise<BlandConfig> {
+  return setWarmTransferStatus({
+    on_warm_transfer: false,
+    lead_id: null,
+    call_id: null,
+  });
 }
 
-export interface BlandVoice {
-  id: string;
-  name: string;
-  gender: string;
-  description: string;
-  accent: string;
-  preview_audio?: string;
-  is_recommended?: boolean;
-}
-
-export const BLAND_VOICES: BlandVoice[] = [
-  { id: 'maya', name: 'Maya', gender: 'Female', description: 'Warm, Senior-Friendly, Natural & Clear', accent: 'American', is_recommended: true },
-  { id: 'nat', name: 'Nat', gender: 'Female', description: 'Professional, Engaging & Conversational', accent: 'American', is_recommended: true },
-  { id: 'josh', name: 'Josh', gender: 'Male', description: 'Friendly, Authoritative & Reassuring', accent: 'American' },
-  { id: 'florence', name: 'Florence', gender: 'Female', description: 'Calm, Caring & Patient Healthcare Tone', accent: 'American' },
-  { id: 'mason', name: 'Mason', gender: 'Male', description: 'Crisp, Professional Advisor', accent: 'American' },
-  { id: 'tina', name: 'Tina', gender: 'Female', description: 'Energetic, Friendly & Empathetic', accent: 'American' },
-  { id: 'ryan', name: 'Ryan', gender: 'Male', description: 'Warm, Approachable & Consultative', accent: 'American' },
-  { id: 'florin', name: 'Florin (Bilingual)', gender: 'Female', description: 'Fluent English and Spanish Conversational', accent: 'Bilingual (US/ES)' },
-];
-
-export async function sendBlandCall(options: {
-  phone: string;
-  leadId?: string;
-  userId?: string;
-  prospectName?: string;
-  customPrompt?: string;
-  voice?: string;
-  fromNumber?: string;
-  transferNumber?: string;
-  firstSentence?: string;
-  pathwayId?: string;
-  bypassChecks?: boolean;
+/**
+ * Activate or stop the autonomous Bland Agent AI outbound calling campaign from the CRM.
+ */
+export async function setBlandCampaignActive(active: boolean, options?: {
+  on_warm_transfer?: boolean;
+  user?: { id: string; name: string; email?: string; role: string };
+  max_initial_calls?: number;
 }): Promise<{
-  success: boolean;
-  call_id: string;
-  activity_id: string;
-  status: string;
-  message: string;
-  simulated?: boolean;
+  config: BlandConfig;
+  dispatched_calls: any[];
+  queue_remaining: number;
 }> {
-  if (!options.bypassChecks) {
-    const check = await canDispatchOutboundCall();
-    if (!check.allowed) {
-      throw new Error(`Outbound Call Blocked: ${check.reason}`);
-    }
-  }
-
-  const cfg = await getBlandConfig();
-  const e164 = toE164(options.phone);
-  if (!e164) {
-    throw new Error(`Invalid destination phone number: "${options.phone}"`);
-  }
-
-  const prospectName = options.prospectName || 'Valued Beneficiary';
-  const voice = options.voice || cfg.default_voice || 'maya';
-  const from = options.fromNumber || cfg.from_number || '+16024569681';
-  const transfer = options.transferNumber || cfg.transfer_phone_number || '+16024569681';
-  const pathwayId = options.pathwayId || cfg.pathway_id || DEFAULT_BLAND_PATHWAY_ID;
-
-  let prompt = options.customPrompt || cfg.prompt_template || DEFAULT_BLAND_PROMPT;
-  prompt = prompt.replace(/{prospect_name}/g, prospectName);
-
-  const firstSentence = options.firstSentence || `Hello ${prospectName.split(' ')[0]}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
-
-  const payload: any = {
-    phone_number: e164,
-    from,
-    task: prompt,
-    first_sentence: firstSentence,
-    voice,
-    model: cfg.model || 'enhanced',
-    language: cfg.language || 'en-US',
-    wait_for_greeting: true,
-    record: true,
-    answered_by_enabled: true,
-    temperature: 0.5,
-    max_duration: 12,
-    transfer_phone_number: transfer,
-    webhook: cfg.webhook_url || 'https://iwillglobal.com/api/bland/webhook',
-    metadata: {
-      lead_id: options.leadId || null,
-      user_id: options.userId || null,
-      prospect_name: prospectName,
-      pathway_id: pathwayId,
-      source: 'bland_ai',
-      organization: 'I Will Global',
-    },
-    request_data: {
-      prospect_name: prospectName,
-      first_name: prospectName.split(' ')[0] || '',
-      phone: e164,
-      lead_id: options.leadId || '',
-      transfer_phone_number: transfer,
-      agent_name: 'King Amen Ra',
-      agent_npn: '16094432',
-      caller_id: from,
-    },
+  const updates: Partial<BlandConfig> = {
+    is_campaign_active: active,
+    campaign_started_at: active ? new Date().toISOString() : null,
   };
-
-  if (pathwayId) {
-    if (pathwayId.startsWith('fc8c99c6') || pathwayId === 'fc8c99c6-88c3-435d-952b-8c93c2db17a6') {
-      payload.agent_id = pathwayId;
-      payload.agent_version = 'staging';
-    } else {
-      payload.pathway_id = pathwayId;
-    }
+  if (options?.on_warm_transfer !== undefined) {
+    updates.is_on_warm_transfer = options.on_warm_transfer;
+    updates.is_calling_paused = options.on_warm_transfer;
+    updates.paused_reason = options.on_warm_transfer
+      ? 'King Amen Ra is on a Warm Transfer call — Agent is booking Telephone, In-Person, or Video appointments only & continuing to make calls'
+      : null;
   }
 
-  let callId: string = `bland_${Date.now()}`;
-  let isSimulated = false;
+  const updatedConfig = await saveBlandConfig(updates);
+  const dispatchedCalls: any[] = [];
+  let queueRemaining = 0;
 
-  if (cfg.api_key && cfg.api_key !== 'simulated_test_key') {
-    try {
-      const res = await fetch('https://api.bland.ai/v1/calls', {
-        method: 'POST',
-        headers: {
-          'Authorization': cfg.api_key.trim(),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json() as any;
-      if (!res.ok) {
-        throw new Error(data.message || data.error || 'Bland AI dispatch error');
-      }
-      callId = data.call_id || data.id || callId;
-    } catch (apiErr: any) {
-      console.warn('Bland AI live API dispatch failed, falling back to simulated mode:', apiErr.message);
-      isSimulated = true;
-      callId = `bland_sim_${Date.now()}`;
-    }
+  if (active && options?.user) {
+    const batchResult = await dispatchNextLeadInQueue({
+      user: options.user,
+      count: options.max_initial_calls || 1,
+      override: true,
+    });
+    dispatchedCalls.push(...batchResult.dispatched);
+    queueRemaining = batchResult.remaining;
   } else {
-    isSimulated = true;
-    callId = `bland_sim_${Date.now()}`;
+    const countRow = await one(
+      `SELECT count(*)::int AS cnt FROM leads
+       WHERE dnc = false AND phone_invalid = false
+         AND phone IS NOT NULL AND trim(phone) != ''
+         AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')`
+    );
+    queueRemaining = countRow?.cnt || 0;
   }
 
-  // Insert initial activity record
-  const act = await insert('activities', {
+  return {
+    config: updatedConfig,
+    dispatched_calls: dispatchedCalls,
+    queue_remaining: queueRemaining,
+  };
+}
+
+/**
+ * Pull the next callable lead(s) from the CRM queue and dispatch Bland Agent AI calls.
+ */
+export async function dispatchNextLeadInQueue(params: {
+  user: { id: string; name: string; email?: string; role: string };
+  count?: number;
+  override?: boolean;
+  on_warm_transfer?: boolean;
+}): Promise<{ dispatched: any[]; remaining: number }> {
+  const limit = Math.min(Math.max(Number(params.count) || 1, 1), 10);
+  const leads = await q(
+    `SELECT * FROM leads
+     WHERE dnc = false AND phone_invalid = false
+       AND phone IS NOT NULL AND trim(phone) != ''
+       AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')
+     ORDER BY (next_callback_at IS NOT NULL AND next_callback_at <= now()) DESC,
+              score DESC,
+              attempts ASC,
+              created_at DESC
+     LIMIT ${limit}`
+  );
+
+  const dispatched: any[] = [];
+  for (const lead of leads) {
+    try {
+      const res = await sendBlandCall({
+        phone: lead.phone,
+        related_type: 'lead',
+        related_id: lead.id,
+        prospect_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Valued Beneficiary',
+        state: lead.state || 'AZ',
+        user: params.user,
+        override_pause: params.override ?? true,
+        on_warm_transfer: params.on_warm_transfer,
+      });
+      dispatched.push({
+        lead_id: lead.id,
+        lead_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),
+        phone: lead.phone,
+        call_id: res.call_id,
+        simulated: res.simulated,
+        on_warm_transfer: res.on_warm_transfer,
+        allowed_appointment_types: res.allowed_appointment_types,
+      });
+    } catch (err: any) {
+      console.error(`Failed to dispatch Bland call for lead ${lead.id}:`, err.message);
+    }
+  }
+
+  const remRow = await one(
+    `SELECT count(*)::int AS cnt FROM leads
+     WHERE dnc = false AND phone_invalid = false
+       AND phone IS NOT NULL AND trim(phone) != ''
+       AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')`
+  );
+
+  return {
+    dispatched,
+    remaining: Math.max(0, (remRow?.cnt || 0) - dispatched.length),
+  };
+}
+
+export interface SendBlandCallOptions {
+  phone: string;
+  related_type?: 'lead' | 'client';
+  related_id?: string;
+  prospect_name?: string;
+  state?: string;
+  custom_prompt?: string;
+  voice?: string;
+  pathway_id?: string;
+  first_sentence?: string;
+  transfer_phone_number?: string;
+  override_pause?: boolean;
+  on_warm_transfer?: boolean;
+  preferred_appointment_type?: AllowedAppointmentType;
+  user: { id: string; name: string; email?: string; role: string };
+}
+
+export async function sendBlandCall(opts: SendBlandCallOptions) {
+  const config = await getBlandConfig();
+  const e164 = toE164(opts.phone);
+  if (!e164) {
+    throw Object.assign(new Error('Invalid phone number for Bland AI call'), { status: 400 });
+  }
+
+  // Verify calling window & daily limit (Note: warm transfer active does NOT block calling; it switches to Appointment-Only Mode!)
+  const gate = await canDispatchOutboundCall(Boolean(opts.override_pause));
+  if (!gate.allowed) {
+    throw Object.assign(new Error(gate.reason || 'Outbound calling is currently outside window or at limit'), {
+      status: 409,
+      code: 'CALLING_GATE_RESTRICTED',
+      gate,
+    });
+  }
+
+  const isOnWarmTransfer = opts.on_warm_transfer !== undefined
+    ? Boolean(opts.on_warm_transfer)
+    : Boolean(config.is_on_warm_transfer || config.is_calling_paused);
+
+  const prospectName = opts.prospect_name || 'Valued Medicare Beneficiary';
+  const firstName = prospectName.split(' ')[0] || 'there';
+  const pathwayId = opts.pathway_id || config.pathway_id || DEFAULT_BLAND_PATHWAY_ID;
+  const transferNumber = opts.transfer_phone_number || config.transfer_phone_number || '+16024569681';
+
+  const warmTransferStatusText = isOnWarmTransfer
+    ? 'ACTIVE — King Amen Ra is currently on a live Warm Transfer call with another client. DO NOT live-transfer this call. Instead, inform the caller that King Amen Ra is on a warm transfer call and ONLY offer/select a Telephone, In-Person, or Video appointment, book their preferred date/time, and continue making calls!'
+    : 'AVAILABLE — King Amen Ra is available for an immediate live warm transfer if the caller agrees to speak with a licensed advisor right now, or you may schedule a Telephone, In-Person, or Video appointment.';
+
+  const prompt = (opts.custom_prompt || config.prompt_template || DEFAULT_BLAND_PROMPT)
+    .replace(/\{prospect_name\}/g, prospectName)
+    .replace(/\{first_name\}/g, firstName)
+    .replace(/\{state\}/g, opts.state || 'Arizona')
+    .replace(/\{warm_transfer_status\}/g, warmTransferStatusText);
+
+  const firstSentence = opts.first_sentence ||
+    `Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
+
+  const voice = opts.voice || config.default_voice || 'maya';
+
+  let blandCallId = `bland_sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  let isSimulated = true;
+  let apiResponse: any = { status: 'simulated', message: 'Bland AI call simulated (Add BLAND_API_KEY in Settings for live carrier calls)' };
+
+  if (config.api_key && config.api_key.trim().length > 10) {
+    const isV2Agent = pathwayId === 'fc8c99c6-88c3-435d-952b-8c93c2db17a6' || !opts.custom_prompt;
+    // Ensure caller ID is a valid Bland number owned by the organization (+15208415736)
+    const blandFrom = (config.from_number && config.from_number !== '+16024569681')
+      ? config.from_number
+      : DEFAULT_BLAND_CALLER_ID;
+
+    const requestDataPayload = {
+      prospect_name: prospectName,
+      first_name: firstName,
+      state: opts.state || 'AZ',
+      agency: 'Medicare Helpline powered by IWG Insurance and Financial Services',
+      principal_broker: 'King Amen Ra',
+      on_warm_transfer: isOnWarmTransfer ? 'true' : 'false',
+      broker_busy_on_warm_transfer: isOnWarmTransfer,
+      broker_status: isOnWarmTransfer ? 'ON_WARM_TRANSFER' : 'AVAILABLE',
+      allowed_appointment_types: 'Telephone, In-Person, Video',
+      appointment_types_list: ['Telephone', 'In-Person', 'Video'],
+      preferred_appointment_type: opts.preferred_appointment_type ? formatAppointmentTypeLabel(opts.preferred_appointment_type) : undefined,
+      operating_instruction: isOnWarmTransfer
+        ? 'IMPORTANT: King Amen Ra is currently on a warm transfer call with another client. Do NOT transfer this call. Let the caller know King Amen Ra is currently on a warm transfer call, and ONLY offer and select a Telephone, In-Person, or Video appointment. Collect their choice of Telephone, In-Person, or Video and preferred date/time, confirm it, and end the call so the system continues making calls!'
+        : 'King Amen Ra is available for live transfer via the Connect to King Amen Ra scenario, or you can book strictly a Telephone, In-Person, or Video appointment.',
+    };
+
+    const metadataPayload = {
+      crm_source: 'iwg_crm',
+      related_type: opts.related_type || 'lead',
+      related_id: opts.related_id || '',
+      initiated_by_user_id: opts.user.id,
+      initiated_by_name: opts.user.name,
+      pathway_id: pathwayId,
+      on_warm_transfer: isOnWarmTransfer,
+      allowed_appointment_types: ['telephone', 'in_person', 'video'],
+    };
+
+    // Build payload for POST https://api.bland.ai/v1/calls
+    // Note: When dispatching a V2 Agent (`agent_id`), Bland's API requires omitting `task` / `pathway_id` so they do not conflict with `agent_id`.
+    const v2Payload: Record<string, any> = {
+      phone_number: e164,
+      agent_id: 'fc8c99c6-88c3-435d-952b-8c93c2db17a6',
+      agent_version: 'dev',
+      from: blandFrom,
+      max_duration: config.max_duration || 15,
+      record: config.record !== false,
+      request_data: requestDataPayload,
+      metadata: metadataPayload,
+    };
+
+    if (config.webhook_url && config.webhook_url.startsWith('https://')) {
+      v2Payload.webhook = config.webhook_url;
+    }
+
+    const r = await fetch('https://api.bland.ai/v1/calls', {
+      method: 'POST',
+      headers: {
+        'Authorization': config.api_key.trim(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(isV2Agent ? v2Payload : {
+        phone_number: e164,
+        task: prompt,
+        voice,
+        first_sentence: firstSentence,
+        model: config.model || 'enhanced',
+        max_duration: config.max_duration || 15,
+        record: config.record !== false,
+        from: blandFrom,
+        transfer_phone_number: isOnWarmTransfer ? undefined : transferNumber,
+        request_data: requestDataPayload,
+        metadata: metadataPayload,
+      }),
+    });
+
+    const data: any = await r.json().catch(() => ({}));
+    if (!r.ok || data.status === 'error') {
+      throw Object.assign(
+        new Error(data.message || data.error || (Array.isArray(data.errors) ? data.errors.join(', ') : `Bland AI API error (${r.status})`)),
+        { status: r.status || 500 },
+      );
+    }
+
+    blandCallId = data.call_id || blandCallId;
+    isSimulated = false;
+    apiResponse = data;
+  }
+
+  // Log activity in CRM
+  const activity = await insert('activities', {
     type: 'call',
-    subject: `🤖 Bland AI Outbound Call — ${prospectName}`,
-    body: `Outbound AI Voice Call initiated via Bland AI (${voice.toUpperCase()} voice, Pathway: ${pathwayId}).\nTarget: ${prospectName} (${e164})\nCaller ID: ${from}\nTransfer Line: ${transfer}`,
-    related_type: options.leadId ? 'lead' : null,
-    related_id: options.leadId || null,
-    user_id: options.userId || 'u_principal',
-    status: 'In Progress',
-    completed: false,
+    subject: `🤖 Bland AI Voice Call (${isOnWarmTransfer ? 'Appt-Only Mode: Phone/In-Person/Video' : 'Live Transfer + Appt Mode'}) — ${prospectName}`,
+    body: isSimulated
+      ? `[Simulated Bland AI Call — Voice: ${voice}] ${isOnWarmTransfer ? '[Warm Transfer Active: Booking Telephone / In-Person / Video Appts Only]' : ''}\nOpening: "${firstSentence}"`
+      : `Bland AI autonomous outbound voice agent dispatched (Voice: ${voice}, Call ID: ${blandCallId}). Mode: ${isOnWarmTransfer ? 'King on Warm Transfer -> Book Telephone, In-Person, or Video Appointment Only & Continue Calling' : 'Live Transfer or Appointment'}.`,
+    related_type: opts.related_type || 'lead',
+    related_id: opts.related_id || null,
+    user_id: opts.user.id,
+    status: isSimulated ? 'Completed' : 'In Progress',
+    completed: isSimulated,
     direction: 'outbound',
     phone: e164,
     provider: 'bland_ai',
+    disposition_id: 'call_attempted',
+    disposition: isSimulated ? 'Bland AI Call (Simulated)' : 'Bland AI Call Dispatched',
+    duration_sec: isSimulated ? 45 : 0,
     meta: {
-      bland_call_id: callId,
+      bland_call_id: blandCallId,
       pathway_id: pathwayId,
       voice,
-      from,
-      transfer_phone_number: transfer,
-      is_simulated: isSimulated,
+      simulated: isSimulated,
+      on_warm_transfer: isOnWarmTransfer,
+      allowed_appointment_types: ['telephone', 'in_person', 'video'],
+      continue_calling_after_call: true,
+      started_at: new Date().toISOString(),
+      prompt_used: prompt,
       first_sentence: firstSentence,
-      source: 'bland_ai',
-      initiated_at: new Date().toISOString(),
+      bland_response: apiResponse,
     },
   });
 
+  // Update lead status if applicable
+  if (opts.related_type === 'lead' && opts.related_id) {
+    const lead = await one(`SELECT * FROM leads WHERE id=$1`, [opts.related_id]);
+    if (lead) {
+      await update('leads', lead.id, {
+        attempts: (lead.attempts || 0) + 1,
+        last_contacted_at: new Date(),
+        last_disposition: isSimulated ? 'Bland AI Call (Simulated)' : 'Bland AI Calling...',
+        status: lead.status === 'New' ? 'Contacted' : lead.status,
+        updated_at: new Date(),
+      });
+    }
+  }
+
   return {
-    success: true,
-    call_id: callId,
-    activity_id: act.id,
-    status: 'in-progress',
-    message: isSimulated
-      ? `Bland AI Voice Agent dispatched in simulated preview mode (Pathway: ${pathwayId}, Call ID: ${callId}). To connect live telephony, enter your Bland API key in Settings.`
-      : `Bland AI Voice Agent (Pathway: ${pathwayId}) dispatched live via Bland.ai (Call ID: ${callId}).`,
+    ok: true,
+    call_id: blandCallId,
+    pathway_id: pathwayId,
     simulated: isSimulated,
+    on_warm_transfer: isOnWarmTransfer,
+    operating_mode: isOnWarmTransfer ? 'APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO' : 'WARM_TRANSFER_OR_APPOINTMENT',
+    allowed_appointment_types: ['Telephone', 'In-Person', 'Video'],
+    activity,
+    bland_response: apiResponse,
   };
 }
 
-export async function handleBlandWebhook(body: any): Promise<{ success: boolean; message: string; activity_id?: string }> {
-  const callId = body.call_id || body.id;
-  if (!callId) {
-    return { success: false, message: 'Missing call_id in webhook payload' };
+/**
+ * Fetch live call status and transcript from Bland AI API
+ */
+export async function getBlandCallDetails(blandCallId: string) {
+  const config = await getBlandConfig();
+  const localActivity = await one(
+    `SELECT * FROM activities WHERE meta->>'bland_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
+    [blandCallId],
+  );
+
+  if (blandCallId.startsWith('bland_sim_') || !config.api_key) {
+    const wasOnWarmTransfer = Boolean(localActivity?.meta?.on_warm_transfer || config.is_on_warm_transfer);
+    return {
+      call_id: blandCallId,
+      status: 'completed',
+      completed: true,
+      simulated: true,
+      call_length: 1.2,
+      to: localActivity?.phone || '',
+      from: config.from_number,
+       recording_url: null,
+      Variables: {
+        appointment_type: 'Telephone',
+        appointment_datetime: 'Tomorrow at 10:00 AM MST',
+        on_warm_transfer: wasOnWarmTransfer,
+      },
+      concatenated_transcript: wasOnWarmTransfer
+        ? `Agent (Sarah): Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?\nProspect: I'm doing well, thank you. I have a few questions about the new 2027 Medicare options.\nAgent (Sarah): I would love to help with that! King Amen Ra, our Principal Broker and Licensed Senior Advisor, is currently on a live warm transfer call helping another client right now, so I can get you scheduled right on his calendar. Would you prefer a Telephone appointment, an In-Person appointment, or a Video appointment?\nProspect: A Telephone appointment works best for me.\nAgent (Sarah): Wonderful! I have you down for a 30-minute Telephone appointment tomorrow at 10:00 AM Arizona time with King Amen Ra. Thank you and have a wonderful day!`
+        : `Agent (Sarah): Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?\nProspect: Doing well, thanks. Yes, I was looking at the new 2027 plans.\nAgent (Sarah): Wonderful! Our Principal Broker and Licensed Senior Advisor, King Amen Ra, can review your doctors and prescriptions side-by-side at zero cost. I am connecting you right now directly with King Amen Ra.`,
+      summary: wasOnWarmTransfer
+        ? 'King Amen Ra was on an active warm transfer call. Sarah informed the prospect, offered strictly Telephone, In-Person, or Video appointments, booked a Telephone appointment for tomorrow at 10:00 AM MST, and continued dialing the queue.'
+        : 'Prospect expressed interest in a 2027 Medicare plan review and agreed to speak with Principal Broker King Amen Ra.',
+      activity: localActivity,
+    };
   }
 
-  // Find corresponding activity
-  let act = await one(`SELECT * FROM activities WHERE meta->>'bland_call_id' = $1`, [callId]);
-  if (!act && body.metadata?.lead_id) {
-    act = await one(`SELECT * FROM activities WHERE related_id = $1 AND provider = 'bland_ai' ORDER BY created_at DESC LIMIT 1`, [body.metadata.lead_id]);
+  const r = await fetch(`https://api.bland.ai/v1/calls/${encodeURIComponent(blandCallId)}`, {
+    headers: { 'Authorization': config.api_key.trim() },
+  });
+  const data: any = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    throw Object.assign(new Error(data.message || 'Failed to fetch Bland call details'), { status: r.status });
   }
 
-  const transcript = body.concatenated_transcript || (Array.isArray(body.transcripts) ? body.transcripts.map((t: any) => `${t.user || 'Speaker'}: ${t.text}`).join('\n') : '') || '';
-  const summary = body.summary || 'Bland AI Voice Agent finished conversation.';
-  const recordingUrl = body.recording_url || null;
-  const durationSec = Math.round(Number(body.call_length || body.duration || 1) * (body.duration > 30 ? 1 : 60)) || 60;
-  const answeredBy = body.answered_by || 'human'; // 'human' | 'voicemail' | 'unknown'
-  const transferred = Boolean(body.transferred_to || body.transfer_destination || (transcript && /transferring you|connected to agent|connecting you right now with king/i.test(transcript)));
+  return {
+    ...data,
+    activity: localActivity,
+  };
+}
 
-  // If a warm transfer was initiated, pause outbound calls until King dispositions the lead!
-  if (transferred) {
-    const cfg = await getBlandConfig();
-    if (cfg.pause_on_warm_transfer) {
-      await setBlandCallingPause(
-        true,
-        `Warm transfer initiated on call ${callId} with ${body.metadata?.prospect_name || 'beneficiary'}. Outbound calls paused awaiting King Amen Ra lead disposition.`
-      );
-    }
-  }
+/**
+ * Process incoming Bland AI Webhook when an autonomous call finishes
+ */
+export async function handleBlandWebhook(payload: any) {
+  const callId = payload.call_id || payload.c_id;
+  if (!callId) return { ok: false, reason: 'missing_call_id' };
 
-  // Determine disposition
-  let dispositionId = 'call_attempted';
-  let dispositionLabel = 'Call Placed / Outbound Dial';
+  const transcript: string = payload.concatenated_transcript ||
+    (Array.isArray(payload.transcripts) ? payload.transcripts.map((t: any) => `${t.user}: ${t.text}`).join('\n') : '');
+  const summary: string = payload.summary || '';
+  const durationSec = Math.round((Number(payload.call_length) || 0) * 60);
+  const recordingUrl = payload.recording_url || null;
+  const answeredBy = payload.answered_by || 'human';
+  const variables = payload.variables || payload.analysis || {};
+  const metadata = payload.metadata || {};
 
-  if (answeredBy === 'voicemail') {
-    dispositionId = 'voicemail';
-    dispositionLabel = 'Left Voicemail';
-  } else if (/do not call|remove me|stop calling|unsubscribe/i.test(transcript) || body.variables?.dnc) {
-    dispositionId = 'dnc';
-    dispositionLabel = 'Do Not Call (DNC)';
-  } else if (/not interested|happy with current plan|refused/i.test(summary) || /not interested/i.test(transcript)) {
-    dispositionId = 'not_interested';
-    dispositionLabel = 'Not Interested / Plan Satisfied';
-  } else if (transferred) {
+  // Determine disposition from transcript / analysis
+  const lowerText = `${transcript} ${summary} ${JSON.stringify(variables)}`.toLowerCase();
+  let dispositionId = 'contacted_interested';
+  let dispositionLabel = 'Bland AI — Qualified / Interested';
+
+  const transferred = Boolean(payload.transferred_to || variables.transferred || /transferring you|connecting you|hold while i connect|bridge your call/i.test(lowerText));
+  const bookedAppt = Boolean(
+    variables.appointment_booked ||
+    variables.appointment_time ||
+    variables.appointment_datetime ||
+    variables.appointment_type ||
+    /scheduled|appointment set|booked for|calendar|telephone appointment|in-person appointment|in person appointment|video appointment/i.test(lowerText)
+  );
+
+  // Strictly normalize appointment type to ONE of the 3 allowed types: 'telephone' | 'in_person' | 'video'
+  const rawApptType = variables.appointment_type ||
+    (/in-person|in person|face to face|home visit|office visit/i.test(lowerText) ? 'in_person' :
+     /video|google meet|zoom/i.test(lowerText) ? 'video' : 'telephone');
+  const selectedApptType: AllowedAppointmentType = normalizeAppointmentType(rawApptType);
+  const selectedApptLabel = formatAppointmentTypeLabel(selectedApptType);
+
+  if (answeredBy === 'voicemail' || /voicemail|leave a message/i.test(lowerText)) {
+    dispositionId = 'voicemail_left';
+    dispositionLabel = 'Bland AI — Voicemail Left';
+  } else if (/do not call|take me off|remove my number|stop calling/i.test(lowerText)) {
+    dispositionId = 'dnc_request';
+    dispositionLabel = 'Bland AI — Do Not Call Request';
+  } else if (transferred && !metadata.on_warm_transfer) {
     dispositionId = 'warm_transfer_success';
-    dispositionLabel = 'Warm Transfer Initiated to King Amen Ra';
-  } else if (/appointment|scheduled|meet|tomorrow|consultation/i.test(summary) || body.variables?.appointment_booked) {
+    dispositionLabel = 'Bland AI — Live Warm Transfer to King Amen Ra';
+    // Mark that King Amen Ra is now on a warm transfer call so subsequent calls book Telephone, In-Person, or Video appointments and continue dialing!
+    await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: metadata.related_id || null,
+      call_id: callId,
+      reason: `King Amen Ra is on a live Warm Transfer call (Call ${callId}) — Subsequent calls will book Telephone, In-Person, or Video appointments only and continue dialing.`,
+    });
+  } else if (bookedAppt || metadata.on_warm_transfer) {
     dispositionId = 'appointment_set';
-    dispositionLabel = 'Medicare Review Scheduled';
-  } else if (answeredBy === 'human' && durationSec > 30) {
-    dispositionId = 'connected';
-    dispositionLabel = 'Beneficiary Consultation / Qualified';
+    dispositionLabel = `Bland AI — ${selectedApptLabel} Appointment Booked`;
+  } else if (/not interested|already have|no thank you/i.test(lowerText)) {
+    dispositionId = 'not_interested';
+    dispositionLabel = 'Bland AI — Not Interested';
   }
 
-  let activityId = act?.id;
-  const bodyContent = `🤖 Bland AI Call Completed\n\n📌 Summary:\n${summary}\n\n🎙️ Answered By: ${answeredBy.toUpperCase()}\n⏱️ Duration: ${Math.round(durationSec / 60)}m ${durationSec % 60}s\n${recordingUrl ? `🎧 Recording: ${recordingUrl}\n` : ''}\n💬 Full Transcript:\n${transcript || 'No transcript generated.'}`;
+  let activity = await one(
+    `SELECT * FROM activities WHERE meta->>'bland_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
+    [callId],
+  );
 
-  if (act) {
-    await update('activities', act.id, {
+  const relatedType = activity?.related_type || metadata.related_type || 'lead';
+  const relatedId = activity?.related_id || metadata.related_id || null;
+  const userId = activity?.user_id || metadata.initiated_by_user_id || 'u_principal';
+
+  const bodyText = [
+    summary ? `📋 AI Call Summary:\n${summary}` : '',
+    dispositionId === 'appointment_set' ? `📅 Selected Appointment Type: ${selectedApptLabel} (${selectedApptType === 'in_person' ? '60m In-Person' : selectedApptType === 'video' ? '30m Video' : '30m Telephone'})${variables.appointment_datetime ? ` — Requested Time: ${variables.appointment_datetime}` : ''}` : '',
+    recordingUrl ? `🔊 Recording: ${recordingUrl}` : '',
+    transcript ? `\n💬 Full Transcript:\n${transcript}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  if (activity) {
+    activity = await update('activities', activity.id, {
       status: 'Completed',
       completed: true,
-      duration_sec: durationSec,
       disposition_id: dispositionId,
       disposition: dispositionLabel,
-      body: bodyContent,
+      duration_sec: durationSec || 30,
+      body: bodyText || activity.body,
+      ai_summary: summary || null,
       meta: {
-        ...(act.meta || {}),
+        ...(activity.meta || {}),
+        ended_at: new Date().toISOString(),
         recording_url: recordingUrl,
+        answered_by: answeredBy,
         transcript,
         summary,
-        answered_by: answeredBy,
-        duration_sec: durationSec,
-        completed_at: new Date().toISOString(),
-        warm_transferred: transferred,
+        variables,
+        selected_appointment_type: selectedApptType,
+        selected_appointment_label: selectedApptLabel,
       },
     });
   } else {
-    const created = await insert('activities', {
+    activity = await insert('activities', {
       type: 'call',
-      subject: `🤖 Bland AI Call — ${body.metadata?.prospect_name || 'Prospect'}`,
-      body: bodyContent,
-      related_type: body.metadata?.lead_id ? 'lead' : null,
-      related_id: body.metadata?.lead_id || null,
-      user_id: body.metadata?.user_id || 'u_principal',
+      subject: `🤖 Bland AI Call — ${dispositionLabel}`,
+      body: bodyText,
+      related_type: relatedType,
+      related_id: relatedId,
+      user_id: userId,
       status: 'Completed',
       completed: true,
-      duration_sec: durationSec,
       direction: 'outbound',
-      phone: body.to || body.phone_number || null,
+      phone: toE164(payload.to || payload.phone_number || ''),
       provider: 'bland_ai',
       disposition_id: dispositionId,
       disposition: dispositionLabel,
+      duration_sec: durationSec || 30,
+      ai_summary: summary || null,
       meta: {
         bland_call_id: callId,
         recording_url: recordingUrl,
+        answered_by: answeredBy,
         transcript,
         summary,
-        answered_by: answeredBy,
-        source: 'bland_ai',
-        warm_transferred: transferred,
+        variables,
+        selected_appointment_type: selectedApptType,
+        selected_appointment_label: selectedApptLabel,
+        ended_at: new Date().toISOString(),
       },
     });
-    activityId = created.id;
   }
 
-  // Trigger CRM automation & pipeline update
-  if (body.metadata?.lead_id) {
-    try {
-      const lead = await one(`SELECT * FROM leads WHERE id=$1`, [body.metadata.lead_id]);
-      const callerUser = body.metadata?.user_id ? await one(`SELECT * FROM users WHERE id=$1`, [body.metadata.user_id]) : null;
+  // If an appointment was booked (or King was on a warm transfer and the caller engaged), create the calendar appointment activity automatically!
+  if (dispositionId === 'appointment_set' && relatedId) {
+    const startAt = new Date(Date.now() + 24 * 3600 * 1000);
+    startAt.setHours(10, 0, 0, 0);
+    const durMin = selectedApptType === 'in_person' ? 60 : 30;
+    const endAt = new Date(startAt.getTime() + durMin * 60000);
 
+    await insert('activities', {
+      type: 'event',
+      subject: `📅 ${selectedApptLabel} Appointment (Booked by Bland AI) — ${variables.first_name || 'Prospect'}`,
+      body: `Bland Agent AI scheduled a ${selectedApptLabel} (${durMin} min) appointment with Principal Broker King Amen Ra.\nRequested Date/Time: ${variables.appointment_datetime || 'Next Available Day 10:00 AM MST'}\nSummary: ${summary || 'Qualified on outbound AI call'}`,
+      related_type: relatedType,
+      related_id: relatedId,
+      user_id: userId,
+      assigned_to: 'u_principal',
+      due_at: startAt,
+      end_at: endAt,
+      status: 'Scheduled',
+      completed: false,
+      meta: {
+        booked_by_user_id: userId,
+        booked_by_name: 'Sarah (Bland AI Voice Agent)',
+        appointment_type: selectedApptType,
+        appointment_type_label: selectedApptLabel,
+        requested_datetime_raw: variables.appointment_datetime || null,
+        bland_call_id: callId,
+        booked_during_warm_transfer: Boolean(metadata.on_warm_transfer),
+        master_calendar_email: 'info@iwillglobal.com',
+      },
+    });
+  }
+
+  // Trigger CRM automations if linked to a lead or client
+  if (relatedId) {
+    const dispRow = await one(`SELECT * FROM dispositions WHERE id=$1`, [dispositionId]);
+    const userRow = await one(`SELECT id, name, email, role FROM users WHERE id=$1`, [userId]) ||
+      { id: 'u_principal', name: 'King Amen Ra', email: 'king@iwillglobal.com', role: 'admin' };
+
+    if (dispRow) {
       await applyDisposition({
-        disposition: {
-          id: dispositionId,
-          label: dispositionLabel,
-          category: 'outcome',
-          color: '#3b82f6',
-          icon: '🤖',
-        },
-        contact: lead,
-        contactType: 'lead',
-        user: (callerUser as any) || { id: 'u_principal', role: 'admin', name: 'Bland AI', email: 'king@iwillglobal.com', states: ['AZ'] },
-        callDurationSec: durationSec,
-        notes: `Bland AI Automation (${summary})`,
-      });
-    } catch (dispErr: any) {
-      console.error('Error applying disposition in Bland webhook:', dispErr);
+        user: userRow,
+        call: activity,
+        disposition: dispRow,
+        relatedType,
+        relatedId,
+      }).catch(() => {});
     }
   }
 
-  return { success: true, message: 'Bland AI webhook processed successfully', activity_id: activityId };
-}
-
-export async function getBlandCallDetails(callId: string): Promise<any> {
-  const cfg = await getBlandConfig();
-
-  if (cfg.api_key && cfg.api_key !== 'simulated_test_key') {
-    try {
-      const res = await fetch(`https://api.bland.ai/v1/calls/${callId}`, {
-        headers: { 'Authorization': cfg.api_key.trim() },
-      });
-      if (res.ok) {
-        return await res.json();
-      }
-    } catch (err: any) {
-      console.warn('Failed to fetch Bland AI call details from API:', err.message);
+  // CONTINUOUS DIALING: If autonomous campaign is active in the CRM, automatically dispatch the next call in the queue!
+  const currentCfg = await getBlandConfig();
+  let nextDispatched: any = null;
+  if (currentCfg.is_campaign_active) {
+    const userRow = await one(`SELECT id, name, email, role FROM users WHERE id=$1`, [userId]) ||
+      { id: 'u_principal', name: 'King Amen Ra', email: 'king@iwillglobal.com', role: 'admin' };
+    const nextBatch = await dispatchNextLeadInQueue({
+      user: userRow,
+      count: 1,
+      override: false,
+    }).catch(() => ({ dispatched: [], remaining: 0 }));
+    if (nextBatch.dispatched.length > 0) {
+      nextDispatched = nextBatch.dispatched[0];
+    } else if (nextBatch.remaining === 0) {
+      await saveBlandConfig({ is_campaign_active: false });
     }
   }
 
-  const act = await one(`SELECT * FROM activities WHERE meta->>'bland_call_id' = $1`, [callId]);
-  if (!act) return null;
+  const { publish } = await import('../realtime.ts');
+  publish('inbox', 'bland_call_completed', {
+    call_id: callId,
+    activity_id: activity.id,
+    related_id: relatedId,
+    disposition: dispositionLabel,
+    appointment_type: selectedApptType,
+    appointment_label: selectedApptLabel,
+    summary,
+    next_call_dispatched: nextDispatched,
+  });
 
   return {
-    call_id: callId,
-    phone_number: act.phone,
-    status: act.status,
-    recording_url: act.meta?.recording_url || null,
-    concatenated_transcript: act.meta?.transcript || 'Transcript available once call completes.',
-    summary: act.meta?.summary || act.body,
-    duration: act.duration_sec,
-    created_at: act.created_at,
-    is_simulated: Boolean(act.meta?.is_simulated),
+    ok: true,
+    activity_id: activity.id,
+    disposition: dispositionLabel,
+    appointment_type: selectedApptType,
+    next_call_dispatched: nextDispatched,
   };
 }

@@ -9,6 +9,8 @@ import { RunningLateModal } from './RunningLateModal';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { CallPanel } from './CallPanel';
 import { WarmTransferModal } from './WarmTransferModal';
+import { BlandAgentControlModal } from './BlandAgentControlModal';
+import { api } from '../lib/api';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout, activeRole, setActiveRole } = useAuth();
@@ -24,6 +26,29 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const [isQuotingMenuOpen, setIsQuotingMenuOpen] = useState(false);
   const [copilotDispositionContact, setCopilotDispositionContact] = useState<any>(null);
   const [isWarmTransferOpen, setIsWarmTransferOpen] = useState(false);
+  const [isBlandControlOpen, setIsBlandControlOpen] = useState(false);
+  const [blandStatus, setBlandStatus] = useState<{ is_campaign_active: boolean; is_on_warm_transfer: boolean }>({ is_campaign_active: false, is_on_warm_transfer: false });
+
+  React.useEffect(() => {
+    const refreshBland = () => {
+      api.get('/bland/config')
+        .then((res) => {
+          if (res) {
+            setBlandStatus({
+              is_campaign_active: Boolean(res.is_campaign_active),
+              is_on_warm_transfer: Boolean(res.is_on_warm_transfer),
+            });
+          }
+        })
+        .catch(() => {});
+    };
+    refreshBland();
+    window.addEventListener('iwg-bland-status-changed', refreshBland);
+    window.addEventListener('open-bland-ai-control', () => setIsBlandControlOpen(true));
+    return () => {
+      window.removeEventListener('iwg-bland-status-changed', refreshBland);
+    };
+  }, []);
 
   // Close mobile drawer and quoting menu on route navigation
   React.useEffect(() => {
@@ -367,6 +392,34 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               </button>
             )}
 
+            {/* Activate Bland Agent AI button */}
+            <button
+              type="button"
+              className="btn header-tool-btn"
+              onClick={() => setIsBlandControlOpen(true)}
+              title="Activate Bland Agent AI to begin making calls & manage Warm Transfer Appointment-Only mode (Telephone, In-Person, Video)"
+              style={{
+                background: blandStatus.is_on_warm_transfer
+                  ? 'linear-gradient(135deg, #f59e0b, #7c3aed)'
+                  : blandStatus.is_campaign_active
+                  ? 'linear-gradient(135deg, #059669, #7c3aed)'
+                  : 'linear-gradient(135deg, #7c3aed, #9333ea)',
+                borderColor: blandStatus.is_on_warm_transfer ? '#fbbf24' : '#a855f7',
+                color: '#ffffff',
+                fontWeight: 800,
+                boxShadow: '0 0 14px rgba(139, 92, 246, 0.45)',
+              }}
+            >
+              <span>{blandStatus.is_on_warm_transfer ? '🔥🤖' : '🤖'}</span>
+              <span className="btn-text">
+                {blandStatus.is_on_warm_transfer
+                  ? 'Bland AI (Warm Transfer: Appt Only)'
+                  : blandStatus.is_campaign_active
+                  ? 'Bland AI (Calling Active)'
+                  : 'Activate Bland AI'}
+              </span>
+            </button>
+
             {/* Copilot button */}
             {isCopilotOpen ? (
               <button
@@ -531,6 +584,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <PowerDialer isOpen={isDialerOpen} onClose={() => setIsDialerOpen(false)} />
       <OutboundScriptModal isOpen={isScriptOpen} onClose={() => setIsScriptOpen(false)} />
       <WarmTransferModal isOpen={isWarmTransferOpen} onClose={() => setIsWarmTransferOpen(false)} />
+      <BlandAgentControlModal isOpen={isBlandControlOpen} onClose={() => setIsBlandControlOpen(false)} />
       {isAgentOrAdmin && (
         <RunningLateModal isOpen={isRunningLateOpen} onClose={() => setIsRunningLateOpen(false)} />
       )}

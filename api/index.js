@@ -877,6 +877,845 @@ var init_google = __esm({
   }
 });
 
+// server/src/services/phone.ts
+function toE164(raw, defaultCountry = "1") {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  const digits = trimmed.replace(/\D/g, "");
+  if (trimmed.startsWith("+")) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
+  if (digits.length === 10) return `+${defaultCountry}${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return null;
+}
+function googleVoiceWebUrl(e164, emailOrIndex) {
+  if (typeof emailOrIndex === "string" && emailOrIndex.includes("@")) {
+    const cleanEmail = emailOrIndex.trim().toLowerCase();
+    return `https://voice.google.com/calls?a=nc,${encodeURIComponent(e164)}&authuser=${encodeURIComponent(cleanEmail)}`;
+  }
+  const idx = typeof emailOrIndex === "number" ? emailOrIndex : 0;
+  return `https://voice.google.com/u/${idx}/calls?a=nc,${encodeURIComponent(e164)}`;
+}
+function telUrl(e164) {
+  return `tel:${e164}`;
+}
+function timezoneForState(state) {
+  return STATE_TZ[(state || "AZ").toUpperCase()] || "America/Phoenix";
+}
+function localHour(state, at = /* @__PURE__ */ new Date()) {
+  const h = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: timezoneForState(state) }).format(at);
+  return Number(h) % 24;
+}
+function isWithinCallingHours(state, at = /* @__PURE__ */ new Date()) {
+  const h = localHour(state, at);
+  return h >= 8 && h < 21;
+}
+var STATE_TZ;
+var init_phone = __esm({
+  "server/src/services/phone.ts"() {
+    "use strict";
+    STATE_TZ = {
+      AZ: "America/Phoenix",
+      CA: "America/Los_Angeles",
+      NV: "America/Los_Angeles",
+      OR: "America/Los_Angeles",
+      WA: "America/Los_Angeles",
+      NM: "America/Denver",
+      CO: "America/Denver",
+      UT: "America/Denver",
+      ID: "America/Boise",
+      MT: "America/Denver",
+      WY: "America/Denver",
+      TX: "America/Chicago",
+      OK: "America/Chicago",
+      KS: "America/Chicago",
+      NE: "America/Chicago",
+      SD: "America/Chicago",
+      ND: "America/Chicago",
+      MN: "America/Chicago",
+      IA: "America/Chicago",
+      MO: "America/Chicago",
+      AR: "America/Chicago",
+      LA: "America/Chicago",
+      WI: "America/Chicago",
+      IL: "America/Chicago",
+      MS: "America/Chicago",
+      AL: "America/Chicago",
+      TN: "America/Chicago",
+      FL: "America/New_York",
+      GA: "America/New_York",
+      SC: "America/New_York",
+      NC: "America/New_York",
+      VA: "America/New_York",
+      NY: "America/New_York",
+      NJ: "America/New_York",
+      PA: "America/New_York",
+      OH: "America/New_York",
+      MI: "America/Detroit",
+      IN: "America/Indiana/Indianapolis",
+      KY: "America/New_York",
+      WV: "America/New_York",
+      MD: "America/New_York",
+      DE: "America/New_York",
+      CT: "America/New_York",
+      RI: "America/New_York",
+      MA: "America/New_York",
+      VT: "America/New_York",
+      NH: "America/New_York",
+      ME: "America/New_York",
+      DC: "America/New_York",
+      HI: "Pacific/Honolulu",
+      AK: "America/Anchorage"
+    };
+  }
+});
+
+// server/src/realtime.ts
+var realtime_exports = {};
+__export(realtime_exports, {
+  publish: () => publish,
+  subscribe: () => subscribe
+});
+function subscribe(res, channels) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+  res.write(`event: ready
+data: {}
+
+`);
+  const c = { res, channels: new Set(channels) };
+  clients.add(c);
+  const ping = setInterval(() => res.write(`: ping
+
+`), 25e3);
+  res.on("close", () => {
+    clearInterval(ping);
+    clients.delete(c);
+  });
+}
+function publish(channel, event, data) {
+  const payload = `event: ${event}
+data: ${JSON.stringify(data)}
+
+`;
+  for (const c of clients) if (c.channels.has(channel)) c.res.write(payload);
+}
+var clients;
+var init_realtime = __esm({
+  "server/src/realtime.ts"() {
+    "use strict";
+    clients = /* @__PURE__ */ new Set();
+  }
+});
+
+// server/src/services/bland.ts
+var bland_exports = {};
+__export(bland_exports, {
+  ALLOWED_APPOINTMENT_TYPES: () => ALLOWED_APPOINTMENT_TYPES,
+  ALLOWED_BLAND_APPOINTMENT_TYPES: () => ALLOWED_BLAND_APPOINTMENT_TYPES,
+  BLAND_VOICES: () => BLAND_VOICES,
+  DEFAULT_BLAND_CALLER_ID: () => DEFAULT_BLAND_CALLER_ID,
+  DEFAULT_BLAND_PATHWAY_ID: () => DEFAULT_BLAND_PATHWAY_ID,
+  DEFAULT_BLAND_PROMPT: () => DEFAULT_BLAND_PROMPT,
+  canDispatchOutboundCall: () => canDispatchOutboundCall,
+  dispatchNextLeadInQueue: () => dispatchNextLeadInQueue,
+  formatAppointmentTypeLabel: () => formatAppointmentTypeLabel,
+  getBlandCallDetails: () => getBlandCallDetails,
+  getBlandConfig: () => getBlandConfig,
+  getCallsTodayCount: () => getCallsTodayCount,
+  handleBlandWebhook: () => handleBlandWebhook,
+  normalizeAppointmentType: () => normalizeAppointmentType,
+  pauseCallingForWarmTransfer: () => pauseCallingForWarmTransfer,
+  resumeCallingAfterDisposition: () => resumeCallingAfterDisposition,
+  saveBlandConfig: () => saveBlandConfig,
+  sendBlandCall: () => sendBlandCall,
+  setBlandCampaignActive: () => setBlandCampaignActive,
+  setWarmTransferStatus: () => setWarmTransferStatus
+});
+function normalizeAppointmentType(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (s.includes("person") || s.includes("face") || s.includes("home") || s.includes("office") || s === "in_person" || s === "in-person") {
+    return "in_person";
+  }
+  if (s.includes("video") || s.includes("zoom") || s.includes("meet") || s.includes("virtual")) {
+    return "video";
+  }
+  return "telephone";
+}
+function formatAppointmentTypeLabel(type) {
+  if (type === "in_person") return "In-Person";
+  if (type === "video") return "Video";
+  return "Telephone";
+}
+async function getBlandConfig() {
+  const row = await one(`SELECT value FROM settings WHERE key='bland_ai_config'`);
+  const val = row?.value || {};
+  const envKey = process.env.BLAND_API_KEY || "";
+  let dbWarmTransferActive = false;
+  let dbTransferLeadId = null;
+  let dbTransferCallId = null;
+  try {
+    const activeTransfer = await one(
+      `SELECT id, related_id, status FROM activities
+       WHERE type='call'
+         AND status IN ('Warm Transfer Ringing', 'Warm Transfer Briefing', '3-Way Conference Live')
+         AND created_at >= now() - interval '2 hours'
+       ORDER BY created_at DESC LIMIT 1`
+    );
+    if (activeTransfer) {
+      dbWarmTransferActive = true;
+      dbTransferCallId = activeTransfer.id;
+      dbTransferLeadId = activeTransfer.related_id;
+    }
+  } catch {
+  }
+  const isOnWarmTransfer = Boolean(val.is_on_warm_transfer ?? val.is_calling_paused ?? dbWarmTransferActive);
+  return {
+    api_key: val.api_key || envKey || "",
+    enabled: val.enabled !== void 0 ? Boolean(val.enabled) : true,
+    pathway_id: val.pathway_id || process.env.BLAND_PATHWAY_ID || DEFAULT_BLAND_PATHWAY_ID,
+    github_repo: val.github_repo || process.env.BLAND_GITHUB_REPO || "https://github.com/KingAmenRa/iwillglobal-crm",
+    default_voice: val.default_voice || "maya",
+    model: val.model || "enhanced",
+    max_duration: Number(val.max_duration) || 15,
+    record: val.record !== void 0 ? Boolean(val.record) : true,
+    wait_for_greeting: val.wait_for_greeting !== void 0 ? Boolean(val.wait_for_greeting) : true,
+    from_number: val.from_number || DEFAULT_BLAND_CALLER_ID,
+    transfer_phone_number: val.transfer_phone_number || "+16024569681",
+    prompt_template: val.prompt_template || DEFAULT_BLAND_PROMPT,
+    webhook_url: val.webhook_url || `${config.appUrl}/api/bland/webhook`,
+    calling_hours_start: val.calling_hours_start !== void 0 ? Number(val.calling_hours_start) : 9,
+    calling_hours_end: val.calling_hours_end !== void 0 ? Number(val.calling_hours_end) : 19,
+    calling_days: val.calling_days || "Mon-Fri",
+    daily_call_limit: Number(val.daily_call_limit) || 1e3,
+    pause_on_warm_transfer: val.pause_on_warm_transfer !== void 0 ? Boolean(val.pause_on_warm_transfer) : true,
+    is_calling_paused: isOnWarmTransfer,
+    is_on_warm_transfer: isOnWarmTransfer,
+    is_campaign_active: Boolean(val.is_campaign_active),
+    paused_reason: val.paused_reason || (isOnWarmTransfer ? "King Amen Ra is on a live Warm Transfer call \u2014 Agent is booking Telephone, In-Person, or Video appointments only and continuing to make calls" : null),
+    active_transfer_lead_id: val.active_transfer_lead_id || dbTransferLeadId || null,
+    active_transfer_call_id: val.active_transfer_call_id || dbTransferCallId || null,
+    paused_at: val.paused_at || null,
+    campaign_started_at: val.campaign_started_at || null
+  };
+}
+async function saveBlandConfig(partial) {
+  const current = await getBlandConfig();
+  const merged = {
+    ...current,
+    ...partial,
+    api_key: partial.api_key && partial.api_key.trim() !== "" ? partial.api_key.trim() : current.api_key
+  };
+  if (partial.is_on_warm_transfer !== void 0) {
+    merged.is_calling_paused = Boolean(partial.is_on_warm_transfer);
+  } else if (partial.is_calling_paused !== void 0) {
+    merged.is_on_warm_transfer = Boolean(partial.is_calling_paused);
+  }
+  await q(
+    `INSERT INTO settings (key, value) VALUES ('bland_ai_config', $1::jsonb)
+     ON CONFLICT (key) DO UPDATE SET value = $1::jsonb`,
+    [JSON.stringify(merged)]
+  );
+  return merged;
+}
+async function getCallsTodayCount() {
+  try {
+    const row = await one(
+      `SELECT count(*)::int AS cnt FROM activities
+       WHERE type = 'call'
+         AND provider = 'bland_ai'
+         AND created_at >= date_trunc('day', now() AT TIME ZONE 'America/Phoenix') AT TIME ZONE 'America/Phoenix'`
+    );
+    return row?.cnt || 0;
+  } catch {
+    return 0;
+  }
+}
+async function canDispatchOutboundCall(override = false) {
+  const cfg = await getBlandConfig();
+  const callsToday = await getCallsTodayCount();
+  const limit = cfg.daily_call_limit || 1e3;
+  const isOnWarmTransfer = Boolean(cfg.is_on_warm_transfer || cfg.is_calling_paused);
+  const operatingMode = isOnWarmTransfer ? "APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO" : "WARM_TRANSFER_OR_APPOINTMENT";
+  if (callsToday >= limit && !override) {
+    return {
+      allowed: false,
+      reason: `\u{1F6D1} Daily call limit reached (${callsToday.toLocaleString()} / ${limit.toLocaleString()} calls today). Resumes tomorrow at 9:00 AM.`,
+      calls_today: callsToday,
+      daily_limit: limit,
+      is_paused: false,
+      is_on_warm_transfer: isOnWarmTransfer,
+      is_campaign_active: cfg.is_campaign_active,
+      operating_mode: operatingMode
+    };
+  }
+  const nowPhoenix = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "America/Phoenix" }));
+  const day = nowPhoenix.getDay();
+  const hour = nowPhoenix.getHours();
+  const isWeekday = day >= 1 && day <= 5;
+  const isWithinHours = hour >= (cfg.calling_hours_start || 9) && hour < (cfg.calling_hours_end || 19);
+  if ((!isWeekday || !isWithinHours) && !override) {
+    return {
+      allowed: false,
+      reason: `\u{1F558} Outside Bland AI calling window (Monday\u2013Friday, 9:00 AM \u2013 7:00 PM MST). Pass override=true to test outside hours.`,
+      calls_today: callsToday,
+      daily_limit: limit,
+      is_paused: false,
+      is_on_warm_transfer: isOnWarmTransfer,
+      is_campaign_active: cfg.is_campaign_active,
+      operating_mode: operatingMode
+    };
+  }
+  return {
+    allowed: true,
+    reason: isOnWarmTransfer ? "\u{1F525} King Amen Ra is on a Warm Transfer Call \u2014 Bland Agent AI is continuing to make calls and strictly booking Telephone, In-Person, or Video appointments only." : void 0,
+    calls_today: callsToday,
+    daily_limit: limit,
+    is_paused: false,
+    is_on_warm_transfer: isOnWarmTransfer,
+    is_campaign_active: cfg.is_campaign_active,
+    operating_mode: operatingMode
+  };
+}
+async function setWarmTransferStatus(params) {
+  return saveBlandConfig({
+    is_on_warm_transfer: params.on_warm_transfer,
+    is_calling_paused: params.on_warm_transfer,
+    paused_reason: params.on_warm_transfer ? params.reason || "King Amen Ra is on a Warm Transfer call \u2014 Agent is booking Telephone, In-Person, or Video appointments only & continuing to make calls" : null,
+    active_transfer_lead_id: params.on_warm_transfer ? params.lead_id || null : null,
+    active_transfer_call_id: params.on_warm_transfer ? params.call_id || null : null,
+    paused_at: params.on_warm_transfer ? (/* @__PURE__ */ new Date()).toISOString() : null
+  });
+}
+async function pauseCallingForWarmTransfer(params) {
+  return setWarmTransferStatus({
+    on_warm_transfer: true,
+    lead_id: params.lead_id,
+    call_id: params.call_id,
+    reason: params.reason || "King Amen Ra is on a live warm transfer call \u2014 Booking Telephone, In-Person, or Video appointments only & continuing calls"
+  });
+}
+async function resumeCallingAfterDisposition(params) {
+  return setWarmTransferStatus({
+    on_warm_transfer: false,
+    lead_id: null,
+    call_id: null
+  });
+}
+async function setBlandCampaignActive(active, options) {
+  const updates = {
+    is_campaign_active: active,
+    campaign_started_at: active ? (/* @__PURE__ */ new Date()).toISOString() : null
+  };
+  if (options?.on_warm_transfer !== void 0) {
+    updates.is_on_warm_transfer = options.on_warm_transfer;
+    updates.is_calling_paused = options.on_warm_transfer;
+    updates.paused_reason = options.on_warm_transfer ? "King Amen Ra is on a Warm Transfer call \u2014 Agent is booking Telephone, In-Person, or Video appointments only & continuing to make calls" : null;
+  }
+  const updatedConfig = await saveBlandConfig(updates);
+  const dispatchedCalls = [];
+  let queueRemaining = 0;
+  if (active && options?.user) {
+    const batchResult = await dispatchNextLeadInQueue({
+      user: options.user,
+      count: options.max_initial_calls || 1,
+      override: true
+    });
+    dispatchedCalls.push(...batchResult.dispatched);
+    queueRemaining = batchResult.remaining;
+  } else {
+    const countRow = await one(
+      `SELECT count(*)::int AS cnt FROM leads
+       WHERE dnc = false AND phone_invalid = false
+         AND phone IS NOT NULL AND trim(phone) != ''
+         AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')`
+    );
+    queueRemaining = countRow?.cnt || 0;
+  }
+  return {
+    config: updatedConfig,
+    dispatched_calls: dispatchedCalls,
+    queue_remaining: queueRemaining
+  };
+}
+async function dispatchNextLeadInQueue(params) {
+  const limit = Math.min(Math.max(Number(params.count) || 1, 1), 10);
+  const leads = await q(
+    `SELECT * FROM leads
+     WHERE dnc = false AND phone_invalid = false
+       AND phone IS NOT NULL AND trim(phone) != ''
+       AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')
+     ORDER BY (next_callback_at IS NOT NULL AND next_callback_at <= now()) DESC,
+              score DESC,
+              attempts ASC,
+              created_at DESC
+     LIMIT ${limit}`
+  );
+  const dispatched = [];
+  for (const lead of leads) {
+    try {
+      const res = await sendBlandCall({
+        phone: lead.phone,
+        related_type: "lead",
+        related_id: lead.id,
+        prospect_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim() || "Valued Beneficiary",
+        state: lead.state || "AZ",
+        user: params.user,
+        override_pause: params.override ?? true,
+        on_warm_transfer: params.on_warm_transfer
+      });
+      dispatched.push({
+        lead_id: lead.id,
+        lead_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(),
+        phone: lead.phone,
+        call_id: res.call_id,
+        simulated: res.simulated,
+        on_warm_transfer: res.on_warm_transfer,
+        allowed_appointment_types: res.allowed_appointment_types
+      });
+    } catch (err) {
+      console.error(`Failed to dispatch Bland call for lead ${lead.id}:`, err.message);
+    }
+  }
+  const remRow = await one(
+    `SELECT count(*)::int AS cnt FROM leads
+     WHERE dnc = false AND phone_invalid = false
+       AND phone IS NOT NULL AND trim(phone) != ''
+       AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')`
+  );
+  return {
+    dispatched,
+    remaining: Math.max(0, (remRow?.cnt || 0) - dispatched.length)
+  };
+}
+async function sendBlandCall(opts) {
+  const config2 = await getBlandConfig();
+  const e164 = toE164(opts.phone);
+  if (!e164) {
+    throw Object.assign(new Error("Invalid phone number for Bland AI call"), { status: 400 });
+  }
+  const gate = await canDispatchOutboundCall(Boolean(opts.override_pause));
+  if (!gate.allowed) {
+    throw Object.assign(new Error(gate.reason || "Outbound calling is currently outside window or at limit"), {
+      status: 409,
+      code: "CALLING_GATE_RESTRICTED",
+      gate
+    });
+  }
+  const isOnWarmTransfer = opts.on_warm_transfer !== void 0 ? Boolean(opts.on_warm_transfer) : Boolean(config2.is_on_warm_transfer || config2.is_calling_paused);
+  const prospectName = opts.prospect_name || "Valued Medicare Beneficiary";
+  const firstName = prospectName.split(" ")[0] || "there";
+  const pathwayId = opts.pathway_id || config2.pathway_id || DEFAULT_BLAND_PATHWAY_ID;
+  const transferNumber = opts.transfer_phone_number || config2.transfer_phone_number || "+16024569681";
+  const warmTransferStatusText = isOnWarmTransfer ? "ACTIVE \u2014 King Amen Ra is currently on a live Warm Transfer call with another client. DO NOT live-transfer this call. Instead, inform the caller that King Amen Ra is on a warm transfer call and ONLY offer/select a Telephone, In-Person, or Video appointment, book their preferred date/time, and continue making calls!" : "AVAILABLE \u2014 King Amen Ra is available for an immediate live warm transfer if the caller agrees to speak with a licensed advisor right now, or you may schedule a Telephone, In-Person, or Video appointment.";
+  const prompt = (opts.custom_prompt || config2.prompt_template || DEFAULT_BLAND_PROMPT).replace(/\{prospect_name\}/g, prospectName).replace(/\{first_name\}/g, firstName).replace(/\{state\}/g, opts.state || "Arizona").replace(/\{warm_transfer_status\}/g, warmTransferStatusText);
+  const firstSentence = opts.first_sentence || `Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
+  const voice = opts.voice || config2.default_voice || "maya";
+  let blandCallId = `bland_sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  let isSimulated = true;
+  let apiResponse = { status: "simulated", message: "Bland AI call simulated (Add BLAND_API_KEY in Settings for live carrier calls)" };
+  if (config2.api_key && config2.api_key.trim().length > 10) {
+    const isV2Agent = pathwayId === "fc8c99c6-88c3-435d-952b-8c93c2db17a6" || !opts.custom_prompt;
+    const blandFrom = config2.from_number && config2.from_number !== "+16024569681" ? config2.from_number : DEFAULT_BLAND_CALLER_ID;
+    const requestDataPayload = {
+      prospect_name: prospectName,
+      first_name: firstName,
+      state: opts.state || "AZ",
+      agency: "Medicare Helpline powered by IWG Insurance and Financial Services",
+      principal_broker: "King Amen Ra",
+      on_warm_transfer: isOnWarmTransfer ? "true" : "false",
+      broker_busy_on_warm_transfer: isOnWarmTransfer,
+      broker_status: isOnWarmTransfer ? "ON_WARM_TRANSFER" : "AVAILABLE",
+      allowed_appointment_types: "Telephone, In-Person, Video",
+      appointment_types_list: ["Telephone", "In-Person", "Video"],
+      preferred_appointment_type: opts.preferred_appointment_type ? formatAppointmentTypeLabel(opts.preferred_appointment_type) : void 0,
+      operating_instruction: isOnWarmTransfer ? "IMPORTANT: King Amen Ra is currently on a warm transfer call with another client. Do NOT transfer this call. Let the caller know King Amen Ra is currently on a warm transfer call, and ONLY offer and select a Telephone, In-Person, or Video appointment. Collect their choice of Telephone, In-Person, or Video and preferred date/time, confirm it, and end the call so the system continues making calls!" : "King Amen Ra is available for live transfer via the Connect to King Amen Ra scenario, or you can book strictly a Telephone, In-Person, or Video appointment."
+    };
+    const metadataPayload = {
+      crm_source: "iwg_crm",
+      related_type: opts.related_type || "lead",
+      related_id: opts.related_id || "",
+      initiated_by_user_id: opts.user.id,
+      initiated_by_name: opts.user.name,
+      pathway_id: pathwayId,
+      on_warm_transfer: isOnWarmTransfer,
+      allowed_appointment_types: ["telephone", "in_person", "video"]
+    };
+    const v2Payload = {
+      phone_number: e164,
+      agent_id: "fc8c99c6-88c3-435d-952b-8c93c2db17a6",
+      agent_version: "dev",
+      from: blandFrom,
+      max_duration: config2.max_duration || 15,
+      record: config2.record !== false,
+      request_data: requestDataPayload,
+      metadata: metadataPayload
+    };
+    if (config2.webhook_url && config2.webhook_url.startsWith("https://")) {
+      v2Payload.webhook = config2.webhook_url;
+    }
+    const r = await fetch("https://api.bland.ai/v1/calls", {
+      method: "POST",
+      headers: {
+        "Authorization": config2.api_key.trim(),
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(isV2Agent ? v2Payload : {
+        phone_number: e164,
+        task: prompt,
+        voice,
+        first_sentence: firstSentence,
+        model: config2.model || "enhanced",
+        max_duration: config2.max_duration || 15,
+        record: config2.record !== false,
+        from: blandFrom,
+        transfer_phone_number: isOnWarmTransfer ? void 0 : transferNumber,
+        request_data: requestDataPayload,
+        metadata: metadataPayload
+      })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.status === "error") {
+      throw Object.assign(
+        new Error(data.message || data.error || (Array.isArray(data.errors) ? data.errors.join(", ") : `Bland AI API error (${r.status})`)),
+        { status: r.status || 500 }
+      );
+    }
+    blandCallId = data.call_id || blandCallId;
+    isSimulated = false;
+    apiResponse = data;
+  }
+  const activity = await insert("activities", {
+    type: "call",
+    subject: `\u{1F916} Bland AI Voice Call (${isOnWarmTransfer ? "Appt-Only Mode: Phone/In-Person/Video" : "Live Transfer + Appt Mode"}) \u2014 ${prospectName}`,
+    body: isSimulated ? `[Simulated Bland AI Call \u2014 Voice: ${voice}] ${isOnWarmTransfer ? "[Warm Transfer Active: Booking Telephone / In-Person / Video Appts Only]" : ""}
+Opening: "${firstSentence}"` : `Bland AI autonomous outbound voice agent dispatched (Voice: ${voice}, Call ID: ${blandCallId}). Mode: ${isOnWarmTransfer ? "King on Warm Transfer -> Book Telephone, In-Person, or Video Appointment Only & Continue Calling" : "Live Transfer or Appointment"}.`,
+    related_type: opts.related_type || "lead",
+    related_id: opts.related_id || null,
+    user_id: opts.user.id,
+    status: isSimulated ? "Completed" : "In Progress",
+    completed: isSimulated,
+    direction: "outbound",
+    phone: e164,
+    provider: "bland_ai",
+    disposition_id: "call_attempted",
+    disposition: isSimulated ? "Bland AI Call (Simulated)" : "Bland AI Call Dispatched",
+    duration_sec: isSimulated ? 45 : 0,
+    meta: {
+      bland_call_id: blandCallId,
+      pathway_id: pathwayId,
+      voice,
+      simulated: isSimulated,
+      on_warm_transfer: isOnWarmTransfer,
+      allowed_appointment_types: ["telephone", "in_person", "video"],
+      continue_calling_after_call: true,
+      started_at: (/* @__PURE__ */ new Date()).toISOString(),
+      prompt_used: prompt,
+      first_sentence: firstSentence,
+      bland_response: apiResponse
+    }
+  });
+  if (opts.related_type === "lead" && opts.related_id) {
+    const lead = await one(`SELECT * FROM leads WHERE id=$1`, [opts.related_id]);
+    if (lead) {
+      await update("leads", lead.id, {
+        attempts: (lead.attempts || 0) + 1,
+        last_contacted_at: /* @__PURE__ */ new Date(),
+        last_disposition: isSimulated ? "Bland AI Call (Simulated)" : "Bland AI Calling...",
+        status: lead.status === "New" ? "Contacted" : lead.status,
+        updated_at: /* @__PURE__ */ new Date()
+      });
+    }
+  }
+  return {
+    ok: true,
+    call_id: blandCallId,
+    pathway_id: pathwayId,
+    simulated: isSimulated,
+    on_warm_transfer: isOnWarmTransfer,
+    operating_mode: isOnWarmTransfer ? "APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO" : "WARM_TRANSFER_OR_APPOINTMENT",
+    allowed_appointment_types: ["Telephone", "In-Person", "Video"],
+    activity,
+    bland_response: apiResponse
+  };
+}
+async function getBlandCallDetails(blandCallId) {
+  const config2 = await getBlandConfig();
+  const localActivity = await one(
+    `SELECT * FROM activities WHERE meta->>'bland_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
+    [blandCallId]
+  );
+  if (blandCallId.startsWith("bland_sim_") || !config2.api_key) {
+    const wasOnWarmTransfer = Boolean(localActivity?.meta?.on_warm_transfer || config2.is_on_warm_transfer);
+    return {
+      call_id: blandCallId,
+      status: "completed",
+      completed: true,
+      simulated: true,
+      call_length: 1.2,
+      to: localActivity?.phone || "",
+      from: config2.from_number,
+      recording_url: null,
+      Variables: {
+        appointment_type: "Telephone",
+        appointment_datetime: "Tomorrow at 10:00 AM MST",
+        on_warm_transfer: wasOnWarmTransfer
+      },
+      concatenated_transcript: wasOnWarmTransfer ? `Agent (Sarah): Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?
+Prospect: I'm doing well, thank you. I have a few questions about the new 2027 Medicare options.
+Agent (Sarah): I would love to help with that! King Amen Ra, our Principal Broker and Licensed Senior Advisor, is currently on a live warm transfer call helping another client right now, so I can get you scheduled right on his calendar. Would you prefer a Telephone appointment, an In-Person appointment, or a Video appointment?
+Prospect: A Telephone appointment works best for me.
+Agent (Sarah): Wonderful! I have you down for a 30-minute Telephone appointment tomorrow at 10:00 AM Arizona time with King Amen Ra. Thank you and have a wonderful day!` : `Agent (Sarah): Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?
+Prospect: Doing well, thanks. Yes, I was looking at the new 2027 plans.
+Agent (Sarah): Wonderful! Our Principal Broker and Licensed Senior Advisor, King Amen Ra, can review your doctors and prescriptions side-by-side at zero cost. I am connecting you right now directly with King Amen Ra.`,
+      summary: wasOnWarmTransfer ? "King Amen Ra was on an active warm transfer call. Sarah informed the prospect, offered strictly Telephone, In-Person, or Video appointments, booked a Telephone appointment for tomorrow at 10:00 AM MST, and continued dialing the queue." : "Prospect expressed interest in a 2027 Medicare plan review and agreed to speak with Principal Broker King Amen Ra.",
+      activity: localActivity
+    };
+  }
+  const r = await fetch(`https://api.bland.ai/v1/calls/${encodeURIComponent(blandCallId)}`, {
+    headers: { "Authorization": config2.api_key.trim() }
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    throw Object.assign(new Error(data.message || "Failed to fetch Bland call details"), { status: r.status });
+  }
+  return {
+    ...data,
+    activity: localActivity
+  };
+}
+async function handleBlandWebhook(payload) {
+  const callId = payload.call_id || payload.c_id;
+  if (!callId) return { ok: false, reason: "missing_call_id" };
+  const transcript = payload.concatenated_transcript || (Array.isArray(payload.transcripts) ? payload.transcripts.map((t) => `${t.user}: ${t.text}`).join("\n") : "");
+  const summary = payload.summary || "";
+  const durationSec = Math.round((Number(payload.call_length) || 0) * 60);
+  const recordingUrl = payload.recording_url || null;
+  const answeredBy = payload.answered_by || "human";
+  const variables = payload.variables || payload.analysis || {};
+  const metadata = payload.metadata || {};
+  const lowerText = `${transcript} ${summary} ${JSON.stringify(variables)}`.toLowerCase();
+  let dispositionId = "contacted_interested";
+  let dispositionLabel = "Bland AI \u2014 Qualified / Interested";
+  const transferred = Boolean(payload.transferred_to || variables.transferred || /transferring you|connecting you|hold while i connect|bridge your call/i.test(lowerText));
+  const bookedAppt = Boolean(
+    variables.appointment_booked || variables.appointment_time || variables.appointment_datetime || variables.appointment_type || /scheduled|appointment set|booked for|calendar|telephone appointment|in-person appointment|in person appointment|video appointment/i.test(lowerText)
+  );
+  const rawApptType = variables.appointment_type || (/in-person|in person|face to face|home visit|office visit/i.test(lowerText) ? "in_person" : /video|google meet|zoom/i.test(lowerText) ? "video" : "telephone");
+  const selectedApptType = normalizeAppointmentType(rawApptType);
+  const selectedApptLabel = formatAppointmentTypeLabel(selectedApptType);
+  if (answeredBy === "voicemail" || /voicemail|leave a message/i.test(lowerText)) {
+    dispositionId = "voicemail_left";
+    dispositionLabel = "Bland AI \u2014 Voicemail Left";
+  } else if (/do not call|take me off|remove my number|stop calling/i.test(lowerText)) {
+    dispositionId = "dnc_request";
+    dispositionLabel = "Bland AI \u2014 Do Not Call Request";
+  } else if (transferred && !metadata.on_warm_transfer) {
+    dispositionId = "warm_transfer_success";
+    dispositionLabel = "Bland AI \u2014 Live Warm Transfer to King Amen Ra";
+    await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: metadata.related_id || null,
+      call_id: callId,
+      reason: `King Amen Ra is on a live Warm Transfer call (Call ${callId}) \u2014 Subsequent calls will book Telephone, In-Person, or Video appointments only and continue dialing.`
+    });
+  } else if (bookedAppt || metadata.on_warm_transfer) {
+    dispositionId = "appointment_set";
+    dispositionLabel = `Bland AI \u2014 ${selectedApptLabel} Appointment Booked`;
+  } else if (/not interested|already have|no thank you/i.test(lowerText)) {
+    dispositionId = "not_interested";
+    dispositionLabel = "Bland AI \u2014 Not Interested";
+  }
+  let activity = await one(
+    `SELECT * FROM activities WHERE meta->>'bland_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
+    [callId]
+  );
+  const relatedType = activity?.related_type || metadata.related_type || "lead";
+  const relatedId = activity?.related_id || metadata.related_id || null;
+  const userId = activity?.user_id || metadata.initiated_by_user_id || "u_principal";
+  const bodyText = [
+    summary ? `\u{1F4CB} AI Call Summary:
+${summary}` : "",
+    dispositionId === "appointment_set" ? `\u{1F4C5} Selected Appointment Type: ${selectedApptLabel} (${selectedApptType === "in_person" ? "60m In-Person" : selectedApptType === "video" ? "30m Video" : "30m Telephone"})${variables.appointment_datetime ? ` \u2014 Requested Time: ${variables.appointment_datetime}` : ""}` : "",
+    recordingUrl ? `\u{1F50A} Recording: ${recordingUrl}` : "",
+    transcript ? `
+\u{1F4AC} Full Transcript:
+${transcript}` : ""
+  ].filter(Boolean).join("\n\n");
+  if (activity) {
+    activity = await update("activities", activity.id, {
+      status: "Completed",
+      completed: true,
+      disposition_id: dispositionId,
+      disposition: dispositionLabel,
+      duration_sec: durationSec || 30,
+      body: bodyText || activity.body,
+      ai_summary: summary || null,
+      meta: {
+        ...activity.meta || {},
+        ended_at: (/* @__PURE__ */ new Date()).toISOString(),
+        recording_url: recordingUrl,
+        answered_by: answeredBy,
+        transcript,
+        summary,
+        variables,
+        selected_appointment_type: selectedApptType,
+        selected_appointment_label: selectedApptLabel
+      }
+    });
+  } else {
+    activity = await insert("activities", {
+      type: "call",
+      subject: `\u{1F916} Bland AI Call \u2014 ${dispositionLabel}`,
+      body: bodyText,
+      related_type: relatedType,
+      related_id: relatedId,
+      user_id: userId,
+      status: "Completed",
+      completed: true,
+      direction: "outbound",
+      phone: toE164(payload.to || payload.phone_number || ""),
+      provider: "bland_ai",
+      disposition_id: dispositionId,
+      disposition: dispositionLabel,
+      duration_sec: durationSec || 30,
+      ai_summary: summary || null,
+      meta: {
+        bland_call_id: callId,
+        recording_url: recordingUrl,
+        answered_by: answeredBy,
+        transcript,
+        summary,
+        variables,
+        selected_appointment_type: selectedApptType,
+        selected_appointment_label: selectedApptLabel,
+        ended_at: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+  }
+  if (dispositionId === "appointment_set" && relatedId) {
+    const startAt = new Date(Date.now() + 24 * 3600 * 1e3);
+    startAt.setHours(10, 0, 0, 0);
+    const durMin = selectedApptType === "in_person" ? 60 : 30;
+    const endAt = new Date(startAt.getTime() + durMin * 6e4);
+    await insert("activities", {
+      type: "event",
+      subject: `\u{1F4C5} ${selectedApptLabel} Appointment (Booked by Bland AI) \u2014 ${variables.first_name || "Prospect"}`,
+      body: `Bland Agent AI scheduled a ${selectedApptLabel} (${durMin} min) appointment with Principal Broker King Amen Ra.
+Requested Date/Time: ${variables.appointment_datetime || "Next Available Day 10:00 AM MST"}
+Summary: ${summary || "Qualified on outbound AI call"}`,
+      related_type: relatedType,
+      related_id: relatedId,
+      user_id: userId,
+      assigned_to: "u_principal",
+      due_at: startAt,
+      end_at: endAt,
+      status: "Scheduled",
+      completed: false,
+      meta: {
+        booked_by_user_id: userId,
+        booked_by_name: "Sarah (Bland AI Voice Agent)",
+        appointment_type: selectedApptType,
+        appointment_type_label: selectedApptLabel,
+        requested_datetime_raw: variables.appointment_datetime || null,
+        bland_call_id: callId,
+        booked_during_warm_transfer: Boolean(metadata.on_warm_transfer),
+        master_calendar_email: "info@iwillglobal.com"
+      }
+    });
+  }
+  if (relatedId) {
+    const dispRow = await one(`SELECT * FROM dispositions WHERE id=$1`, [dispositionId]);
+    const userRow = await one(`SELECT id, name, email, role FROM users WHERE id=$1`, [userId]) || { id: "u_principal", name: "King Amen Ra", email: "king@iwillglobal.com", role: "admin" };
+    if (dispRow) {
+      await applyDisposition({
+        user: userRow,
+        call: activity,
+        disposition: dispRow,
+        relatedType,
+        relatedId
+      }).catch(() => {
+      });
+    }
+  }
+  const currentCfg = await getBlandConfig();
+  let nextDispatched = null;
+  if (currentCfg.is_campaign_active) {
+    const userRow = await one(`SELECT id, name, email, role FROM users WHERE id=$1`, [userId]) || { id: "u_principal", name: "King Amen Ra", email: "king@iwillglobal.com", role: "admin" };
+    const nextBatch = await dispatchNextLeadInQueue({
+      user: userRow,
+      count: 1,
+      override: false
+    }).catch(() => ({ dispatched: [], remaining: 0 }));
+    if (nextBatch.dispatched.length > 0) {
+      nextDispatched = nextBatch.dispatched[0];
+    } else if (nextBatch.remaining === 0) {
+      await saveBlandConfig({ is_campaign_active: false });
+    }
+  }
+  const { publish: publish2 } = await Promise.resolve().then(() => (init_realtime(), realtime_exports));
+  publish2("inbox", "bland_call_completed", {
+    call_id: callId,
+    activity_id: activity.id,
+    related_id: relatedId,
+    disposition: dispositionLabel,
+    appointment_type: selectedApptType,
+    appointment_label: selectedApptLabel,
+    summary,
+    next_call_dispatched: nextDispatched
+  });
+  return {
+    ok: true,
+    activity_id: activity.id,
+    disposition: dispositionLabel,
+    appointment_type: selectedApptType,
+    next_call_dispatched: nextDispatched
+  };
+}
+var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, BLAND_VOICES;
+var init_bland = __esm({
+  "server/src/services/bland.ts"() {
+    "use strict";
+    init_db();
+    init_config();
+    init_phone();
+    init_automation();
+    DEFAULT_BLAND_PATHWAY_ID = "fc8c99c6-88c3-435d-952b-8c93c2db17a6";
+    DEFAULT_BLAND_CALLER_ID = "+15208415736";
+    ALLOWED_APPOINTMENT_TYPES = ["telephone", "in_person", "video"];
+    ALLOWED_BLAND_APPOINTMENT_TYPES = ALLOWED_APPOINTMENT_TYPES;
+    DEFAULT_BLAND_PROMPT = `You are Sarah, calling from the Medicare Helpline powered by IWG Insurance and Financial Services, a licensed Medicare and insurance brokerage led by Principal Broker King Amen Ra (NPN: 16094432).
+You are calling {prospect_name} regarding their Medicare benefits and 2027 plan options.
+
+STRICT OPERATING RULES:
+1. REQUIRED OPENING GREETING: Always introduce yourself clearly: "Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+2. CALLING HOURS & CONTINUOUS DIALING: Operate Monday through Friday, 9:00 AM to 7:00 PM local time (up to 1,000 calls per day), and continuously dial through the lead queue without stopping.
+3. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}):
+   - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER), know that King Amen Ra is actively assisting another client on a live warm transfer call.
+   - Do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
+   - Instead, inform {prospect_name} that King Amen Ra is currently on a warm transfer call helping another client, and offer to schedule an appointment strictly from these THREE appointment types ONLY:
+     1) Telephone Appointment (30 minutes)
+     2) In-Person Appointment (60 minutes)
+     3) Video Appointment (30 minutes)
+   - Never offer or select any other appointment format \u2014 ONLY Telephone, In-Person, or Video.
+   - Collect their preferred appointment type (Telephone, In-Person, or Video) and preferred day/time, confirm the booking, and end the call politely so you can immediately continue making calls!
+4. WHEN KING AMEN RA IS AVAILABLE FOR LIVE WARM TRANSFER:
+   - If King Amen Ra is NOT on a warm transfer call and {prospect_name} agrees to speak with a licensed advisor right now, route immediately to the "Connect to King Amen Ra" scenario to bridge the call to King Amen Ra (+16024569681).
+   - If {prospect_name} prefers to schedule for later, only offer and select a Telephone, In-Person, or Video appointment.
+5. PRIVACY & ZERO DISCLOSURE RULE: NEVER recite, speak, or give out our direct phone number or email address to the caller.`;
+    BLAND_VOICES = [
+      { id: "maya", name: "Maya (Warm & Empathetic Female \u2014 Medicare Specialist)", gender: "Female", accent: "American", is_recommended: true },
+      { id: "ryan", name: "Ryan (Trustworthy & Calm Male \u2014 Senior Advisor)", gender: "Male", accent: "American", is_recommended: true },
+      { id: "elena", name: "Elena (Bilingual English / Spanish Female)", gender: "Female", accent: "American/Spanish", is_recommended: false },
+      { id: "mason", name: "Mason (Clear & Articulate Male)", gender: "Male", accent: "American", is_recommended: false },
+      { id: "tina", name: "Tina (Friendly & Patient Receptionist)", gender: "Female", accent: "American", is_recommended: false }
+    ];
+  }
+});
+
 // server/src/services/automation.ts
 var automation_exports = {};
 __export(automation_exports, {
@@ -1149,6 +1988,18 @@ async function applyDisposition(ctx) {
     created.review = task;
     actions.push(`Annual review reminder set for ${reviewAt.toDateString()}`);
   }
+  try {
+    const isKing = ctx.user.id === "3afbca01-76cd-4fa9-91cc-f3a1a4821276" || ctx.user.id === "u_principal" || ctx.user.email?.toLowerCase() === "king@iwillglobal.com" || ctx.user.name?.toLowerCase().includes("king");
+    if (isKing || ctx.user.role === "licensed_agent" || ctx.user.role === "admin" || ctx.user.role === "manager") {
+      const { getBlandConfig: getBlandConfig2, setBlandCallingPause } = await Promise.resolve().then(() => (init_bland(), bland_exports));
+      const bCfg = await getBlandConfig2();
+      if (bCfg.is_calling_paused) {
+        await setBlandCallingPause(false, null);
+        actions.push("Resumed Bland AI outbound dialer following lead disposition");
+      }
+    }
+  } catch (blandErr) {
+  }
   if (a.requeue) actions.push("Returned to dial queue");
   return { actions, created };
 }
@@ -1168,7 +2019,7 @@ var init_automation = __esm({
       { id: "appointment_set", label: "Appointment Set", category: "outcome", color: "#c8963e", icon: "\u{1F4C5}", automation: { needs_appointment: true, lead_status: "Appointment Set" } },
       { id: "app_submitted", label: "Application Submitted", category: "outcome", color: "#059669", icon: "\u{1F3C6}", licensed_only: true, automation: { create_policy: true, opp_stage: "Application Submitted", annual_review: true } },
       { id: "callback", label: "Callback Requested", category: "connected", color: "#0ea5e9", icon: "\u23F0", automation: { needs_callback_time: true, task_subject: "Requested callback" } },
-      { id: "voicemail", label: "Left Voicemail", category: "not_connected", color: "#f59e0b", icon: "\u{1F4FC}", licensed_only: true, automation: { retry_days: 2, requeue: true, task_subject: "Retry after voicemail" } },
+      { id: "voicemail", label: "Left Voicemail", category: "not_connected", color: "#f59e0b", icon: "\u{1F4FC}", automation: { retry_days: 2, requeue: true, task_subject: "Retry after voicemail" } },
       { id: "no_answer", label: "No Answer", category: "not_connected", color: "#94a3b8", icon: "\u{1F4F5}", automation: { retry_days: 1, requeue: true, task_subject: "Retry \u2014 no answer" } },
       { id: "busy", label: "Busy", category: "not_connected", color: "#a3a3a3", icon: "\u26D4", automation: { retry_days: 1, requeue: true, task_subject: "Retry \u2014 busy" } },
       { id: "call_attempted", label: "Call Placed / Outbound Dial", category: "not_connected", color: "#64748b", icon: "\u{1F4DE}", automation: { requeue: true } },
@@ -1382,7 +2233,8 @@ async function ensureSeeded(force = false) {
       }
     }
   }
-  if (alreadySeeded) return;
+  const actCount = await one("SELECT count(*)::int AS n FROM activities");
+  if (!force && count && count.n >= 5 && actCount && actCount.n >= 5) return;
   const campaigns = [
     { id: "cmp_t65_az", name: "Arizona Turning 65 Direct Mail", type: "Direct Mail", status: "Active", start_date: "2026-01-01", end_date: "2026-12-31", budget: 15e3 },
     { id: "cmp_aep_2026", name: "AEP 2026 Annual Review Outreach", type: "Email & SMS", status: "Active", start_date: "2026-09-15", end_date: "2026-12-07", budget: 25e3 },
@@ -1408,7 +2260,7 @@ async function ensureSeeded(force = false) {
       campaign_id: "cmp_t65_az",
       status: "New",
       interest: "Turning 65 / Medicare Advantage",
-      owner_id: "u_sch1",
+      owner_id: "u_jakeeta",
       assigned_agent_id: "u_agent1",
       tcpa_consent: true
     },
@@ -1448,7 +2300,7 @@ async function ensureSeeded(force = false) {
       campaign_id: "cmp_aep_2026",
       status: "Appointment Set",
       interest: "Part D Rx Review",
-      owner_id: "u_sch1",
+      owner_id: "u_jakeeta",
       assigned_agent_id: "u_agent1",
       tcpa_consent: true
     },
@@ -1597,15 +2449,40 @@ async function ensureSeeded(force = false) {
       signer_name: "Eleanor Vance"
     });
   }
-  if (!await one("SELECT id FROM activities WHERE id=$1", ["act_appt_1"])) {
-    await insert("activities", {
+  const sampleActivities = [
+    {
+      id: "act_call_1",
+      type: "call",
+      subject: "Outbound Medicare Call to Arthur Pendleton \u2014 Appointment Set",
+      body: "Contacted Arthur regarding Turning 65 enrollment options in Maricopa County. Discussed Medicare Advantage vs Supplement (Plan G). Scheduled phone appointment with Licensed Agent Robert Chen for consultation.",
+      related_type: "lead",
+      related_id: "lead_1",
+      user_id: "u_jakeeta",
+      assigned_to: "u_agent1",
+      status: "Completed",
+      direction: "outbound",
+      phone: "(480) 555-0144",
+      duration_sec: 245,
+      disposition_id: "appointment_set",
+      disposition: "Confirmed Appointment Set",
+      provider: "google_voice",
+      meta: {
+        scheduler_id: "u_jakeeta",
+        scheduler_name: "JaKeeta Sullivan",
+        booked_by_user_id: "u_jakeeta",
+        booked_by_name: "JaKeeta Sullivan",
+        assigned_agent_id: "u_agent1",
+        assigned_agent_name: "Robert Chen"
+      }
+    },
+    {
       id: "act_appt_1",
       type: "event",
-      subject: "Medicare Telephone Appointment \u2014 George Kovacs",
-      body: "Part D Rx Review & Consultation with Robert Chen.\nPhone: (480) 555-0183\n\u{1F3A5} Agent Google Meet: https://meet.google.com/iwg-rchen\nMaster Calendar: info@iwillglobal.com",
+      subject: "Medicare Telephone Consultation \u2014 Arthur Pendleton",
+      body: "Part D Rx Review & Medicare Advantage Consultation.\nClient: Arthur Pendleton\nPhone: (480) 555-0144\nBooked by Scheduler: JaKeeta Sullivan\nConsultation Agent: Robert Chen\n\u{1F3A5} Google Meet: https://meet.google.com/iwg-rchen",
       related_type: "lead",
-      related_id: "lead_3",
-      user_id: "u_sch1",
+      related_id: "lead_1",
+      user_id: "u_jakeeta",
       assigned_to: "u_agent1",
       due_at: new Date(Date.now() + 864e5 * 2),
       end_at: new Date(Date.now() + 864e5 * 2 + 36e5),
@@ -1613,17 +2490,136 @@ async function ensureSeeded(force = false) {
       completed: false,
       meta: {
         appointment_type: "telephone",
-        location: "Phone: (480) 555-0183",
+        location: "Phone: (480) 555-0144",
         google_meet_url: "https://meet.google.com/iwg-rchen",
+        booked_by_user_id: "u_jakeeta",
+        booked_by_name: "JaKeeta Sullivan",
         assigned_agent_id: "u_agent1",
         assigned_agent_name: "Robert Chen",
-        customer_name: "George Kovacs",
-        customer_phone: "(480) 555-0183",
+        customer_name: "Arthur Pendleton",
+        customer_phone: "(480) 555-0144",
         customer_confirmed: true,
         master_calendar_email: "info@iwillglobal.com",
         master_calendar_synced: true
       }
-    });
+    },
+    {
+      id: "act_transfer_1",
+      type: "call",
+      subject: "Live 3-Way Warm Transfer \u2014 Eleanor Vance to King Amen Ra",
+      body: "Scheduler Kamille Martinez connected prospect Eleanor Vance with Principal Broker King Amen Ra for immediate enrollment review. Prospect has Medicare Parts A & B active.",
+      related_type: "lead",
+      related_id: "lead_2",
+      user_id: "u_sch_kmartinez",
+      assigned_to: "u_principal",
+      status: "3-Way Conference Completed",
+      direction: "outbound",
+      phone: "(602) 555-0192",
+      duration_sec: 430,
+      disposition_id: "warm_transfer_success",
+      disposition: "Warm Transfer Completed (Live Connect)",
+      provider: "telephony_trunk",
+      meta: {
+        scheduler_id: "u_sch_kmartinez",
+        scheduler_name: "Kamille Martinez",
+        booked_by_user_id: "u_sch_kmartinez",
+        booked_by_name: "Kamille Martinez",
+        target_agent_id: "u_principal",
+        target_agent_name: "King Amen Ra",
+        assigned_agent_id: "u_principal",
+        assigned_agent_name: "King Amen Ra",
+        warm_transfer: true,
+        scheduler_credit_status: "Credited",
+        scheduler_credit_amount: 25
+      }
+    },
+    {
+      id: "act_call_2",
+      type: "call",
+      subject: "Outbound Call to George Kovacs \u2014 Callback Requested",
+      body: "Spoke with George. Requested callback tomorrow at 2:00 PM MST to review Aetna and Humana plans.",
+      related_type: "lead",
+      related_id: "lead_3",
+      user_id: "u_sgranger",
+      status: "Completed",
+      direction: "outbound",
+      phone: "(480) 555-0183",
+      duration_sec: 110,
+      disposition_id: "callback_requested",
+      disposition: "Callback Requested",
+      provider: "google_voice",
+      meta: {
+        scheduler_id: "u_sgranger",
+        scheduler_name: "Shakira Granger",
+        booked_by_user_id: "u_sgranger",
+        booked_by_name: "Shakira Granger"
+      }
+    },
+    {
+      id: "act_call_3",
+      type: "call",
+      subject: "Outbound Call to Martha Washington \u2014 Left Voicemail",
+      body: "Left introductory voicemail regarding Medicare Annual Enrollment Period plan options and extra benefits.",
+      related_type: "lead",
+      related_id: "lead_4",
+      user_id: "u_sch_rmccullough",
+      status: "Completed",
+      direction: "outbound",
+      phone: "(520) 555-0177",
+      duration_sec: 38,
+      disposition_id: "voicemail",
+      disposition: "Left Voicemail",
+      provider: "google_voice",
+      meta: {
+        scheduler_id: "u_sch_rmccullough",
+        scheduler_name: "Regina McCullough"
+      }
+    },
+    {
+      id: "act_agent_call_1",
+      type: "call",
+      subject: "Consultation & Enrollment Review \u2014 Eleanor Vance",
+      body: "Conducted Medicare Advantage comparison with Eleanor Vance. Reviewed current prescriptions and primary care network. Electronic SOA executed.",
+      related_type: "lead",
+      related_id: "lead_2",
+      user_id: "u_agent2",
+      assigned_to: "u_agent2",
+      status: "Completed",
+      direction: "outbound",
+      phone: "(602) 555-0192",
+      duration_sec: 840,
+      disposition_id: "soa_signed",
+      disposition: "Scope of Appointment Completed",
+      provider: "google_voice",
+      meta: {
+        assigned_agent_id: "u_agent2",
+        assigned_agent_name: "Amanda Torres"
+      }
+    },
+    {
+      id: "act_task_1",
+      type: "task",
+      subject: "Follow-up: Verify LIS / Extra Help status for Walter White",
+      body: "Check Medicaid level and prescription subsidy before annual plan renewal review.",
+      related_type: "client",
+      related_id: "cli_1",
+      user_id: "u_jakeeta",
+      assigned_to: "u_agent3",
+      priority: "high",
+      status: "Pending",
+      completed: false,
+      due_at: new Date(Date.now() + 864e5 * 3),
+      meta: {
+        created_by_name: "JaKeeta Sullivan",
+        created_by_role: "scheduler",
+        assigned_to_name: "James Wilson"
+      }
+    }
+  ];
+  for (const act of sampleActivities) {
+    if (!await one("SELECT id FROM activities WHERE id=$1", [act.id])) {
+      await insert("activities", act);
+    }
   }
   console.log("\u2705 Database seeded with 20 I Will Global team members, leads, carriers, and sample records.");
 }
@@ -1745,140 +2741,6 @@ var init_db = __esm({
   }
 });
 
-// server/src/services/phone.ts
-function toE164(raw, defaultCountry = "1") {
-  if (!raw) return null;
-  const trimmed = String(raw).trim();
-  const digits = trimmed.replace(/\D/g, "");
-  if (trimmed.startsWith("+")) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
-  if (digits.length === 10) return `+${defaultCountry}${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  return null;
-}
-function googleVoiceWebUrl(e164, emailOrIndex) {
-  if (typeof emailOrIndex === "string" && emailOrIndex.includes("@")) {
-    const cleanEmail = emailOrIndex.trim().toLowerCase();
-    return `https://voice.google.com/calls?a=nc,${encodeURIComponent(e164)}&authuser=${encodeURIComponent(cleanEmail)}`;
-  }
-  const idx = typeof emailOrIndex === "number" ? emailOrIndex : 0;
-  return `https://voice.google.com/u/${idx}/calls?a=nc,${encodeURIComponent(e164)}`;
-}
-function telUrl(e164) {
-  return `tel:${e164}`;
-}
-function timezoneForState(state) {
-  return STATE_TZ[(state || "AZ").toUpperCase()] || "America/Phoenix";
-}
-function localHour(state, at = /* @__PURE__ */ new Date()) {
-  const h = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: timezoneForState(state) }).format(at);
-  return Number(h) % 24;
-}
-function isWithinCallingHours(state, at = /* @__PURE__ */ new Date()) {
-  const h = localHour(state, at);
-  return h >= 8 && h < 21;
-}
-var STATE_TZ;
-var init_phone = __esm({
-  "server/src/services/phone.ts"() {
-    "use strict";
-    STATE_TZ = {
-      AZ: "America/Phoenix",
-      CA: "America/Los_Angeles",
-      NV: "America/Los_Angeles",
-      OR: "America/Los_Angeles",
-      WA: "America/Los_Angeles",
-      NM: "America/Denver",
-      CO: "America/Denver",
-      UT: "America/Denver",
-      ID: "America/Boise",
-      MT: "America/Denver",
-      WY: "America/Denver",
-      TX: "America/Chicago",
-      OK: "America/Chicago",
-      KS: "America/Chicago",
-      NE: "America/Chicago",
-      SD: "America/Chicago",
-      ND: "America/Chicago",
-      MN: "America/Chicago",
-      IA: "America/Chicago",
-      MO: "America/Chicago",
-      AR: "America/Chicago",
-      LA: "America/Chicago",
-      WI: "America/Chicago",
-      IL: "America/Chicago",
-      MS: "America/Chicago",
-      AL: "America/Chicago",
-      TN: "America/Chicago",
-      FL: "America/New_York",
-      GA: "America/New_York",
-      SC: "America/New_York",
-      NC: "America/New_York",
-      VA: "America/New_York",
-      NY: "America/New_York",
-      NJ: "America/New_York",
-      PA: "America/New_York",
-      OH: "America/New_York",
-      MI: "America/Detroit",
-      IN: "America/Indiana/Indianapolis",
-      KY: "America/New_York",
-      WV: "America/New_York",
-      MD: "America/New_York",
-      DE: "America/New_York",
-      CT: "America/New_York",
-      RI: "America/New_York",
-      MA: "America/New_York",
-      VT: "America/New_York",
-      NH: "America/New_York",
-      ME: "America/New_York",
-      DC: "America/New_York",
-      HI: "Pacific/Honolulu",
-      AK: "America/Anchorage"
-    };
-  }
-});
-
-// server/src/realtime.ts
-var realtime_exports = {};
-__export(realtime_exports, {
-  publish: () => publish,
-  subscribe: () => subscribe
-});
-function subscribe(res, channels) {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no"
-  });
-  res.write(`event: ready
-data: {}
-
-`);
-  const c = { res, channels: new Set(channels) };
-  clients.add(c);
-  const ping = setInterval(() => res.write(`: ping
-
-`), 25e3);
-  res.on("close", () => {
-    clearInterval(ping);
-    clients.delete(c);
-  });
-}
-function publish(channel, event, data) {
-  const payload = `event: ${event}
-data: ${JSON.stringify(data)}
-
-`;
-  for (const c of clients) if (c.channels.has(channel)) c.res.write(payload);
-}
-var clients;
-var init_realtime = __esm({
-  "server/src/realtime.ts"() {
-    "use strict";
-    clients = /* @__PURE__ */ new Set();
-  }
-});
-
 // server/src/services/appointments.ts
 var appointments_exports = {};
 __export(appointments_exports, {
@@ -1982,6 +2844,7 @@ async function getAvailableSlots(agentId, dateStr, appointmentType = "telephone"
     throw Object.assign(new Error("No active licensed agent found to check schedule slots"), { status: 404 });
   }
   const isPrincipal = agent.id === "u_principal" || agent.email?.toLowerCase() === "king@iwillglobal.com";
+  const isTransferAgent = agent.id === "u_transfer_agent" || agent.email?.toLowerCase() === "transfer@iwillglobal.com";
   let targetDate = dateStr;
   if (!targetDate) {
     const tomorrow = new Date(Date.now() + 864e5);
@@ -2120,7 +2983,7 @@ async function getAvailableAgents(state = "AZ", appointmentAt, durationMin = 30)
   );
   return agents.map((a) => {
     const isPrincipal = a.id === "u_principal" || a.email?.toLowerCase() === "king@iwillglobal.com";
-    const isTransferAgent2 = Boolean(a.phone && a.phone.replace(/\D/g, "").endsWith("4803319455"));
+    const isTransferAgent = Boolean(a.phone && a.phone.replace(/\D/g, "").endsWith("4803319455"));
     return {
       ...a,
       is_principal: isPrincipal,
@@ -3003,7 +3866,7 @@ async function sendRunningLateAlert(params) {
       }
     });
   }
-  publish("appointment:running_late", {
+  publish("inbox", "appointment:running_late", {
     appointment_id: targetNextAppt.id,
     recipient_name: `${targetNextAppt.customer_first_name} ${targetNextAppt.customer_last_name}`,
     recipient_phone: recipientPhone,
@@ -3039,13 +3902,13 @@ async function sendRunningLateAlert(params) {
 }
 async function autoCheckAndSendRunningLateAlerts(minutesThreshold = 5, systemUser) {
   const activeAgents = await q(`SELECT * FROM users WHERE active AND role IN ('licensed_agent','manager','admin')`);
-  const results2 = [];
+  const results = [];
   const defaultUser = systemUser || {
     id: "u_principal",
     name: "King Amen Ra",
     email: "king@iwillglobal.com",
     role: "admin",
-    active: true
+    states: ["AZ", "CA", "NV", "TX", "FL", "NM", "CO"]
   };
   for (const agent of activeAgents) {
     try {
@@ -3058,13 +3921,13 @@ async function autoCheckAndSendRunningLateAlerts(minutesThreshold = 5, systemUse
             minutes_delayed: status.suggested_delay_minutes,
             sender_user: defaultUser
           });
-          results2.push(sent);
+          results.push(sent);
         }
       }
     } catch {
     }
   }
-  return results2;
+  return results;
 }
 var APPOINTMENT_BUFFER_MINUTES;
 var init_appointments = __esm({
@@ -3408,6 +4271,7 @@ var OBJECTS = {
       "body",
       "related_type",
       "related_id",
+      "user_id",
       "assigned_to",
       "status",
       "priority",
@@ -4772,6 +5636,26 @@ var GoogleVoiceProvider = {
     };
   }
 };
+var BlandAIProvider = {
+  id: "bland_ai",
+  label: "Bland AI Conversational Voice Agent (Outbound Auto-Setter & Qualifier)",
+  prepareDial(phone) {
+    const e164 = toE164(phone);
+    if (!e164) return null;
+    return {
+      provider: "bland_ai",
+      e164,
+      callerIdName: "Medicare Helpline by IWG",
+      cnam: "MEDICARE BY IWG",
+      stirShakenLevel: "A",
+      brandedCalling: true,
+      webUrl: `/dialer?bland_call=${encodeURIComponent(e164)}`,
+      mobileUrl: telUrl(e164),
+      autoLogs: true,
+      records: true
+    };
+  }
+};
 var EnterpriseTrunkProvider = {
   id: "enterprise_trunk",
   label: "Enterprise Carrier Trunk (STIR/SHAKEN Level-A \xB7 Medicare Helpline by IWG \u2713)",
@@ -4926,7 +5810,9 @@ async function placeCarrierTrunkCall(params) {
   };
 }
 function getProvider(id = "enterprise_trunk") {
-  return id === "google_voice" ? GoogleVoiceProvider : EnterpriseTrunkProvider;
+  if (id === "google_voice") return GoogleVoiceProvider;
+  if (id === "bland_ai") return BlandAIProvider;
+  return EnterpriseTrunkProvider;
 }
 
 // server/src/routes/calls.ts
@@ -5469,6 +6355,7 @@ _Demo AI mode \u2014 add a Gemini API key for full conversational answers._`, to
 
 // server/src/routes/calls.ts
 init_config();
+init_bland();
 var calls = Router2();
 async function loadTarget(type, id) {
   if (type === "lead") return one(`SELECT * FROM leads WHERE id=$1`, [id]);
@@ -5633,6 +6520,15 @@ calls.post("/transfer/initiate", async (req, res) => {
   }
   const { notify: notify2 } = await Promise.resolve().then(() => (init_automation(), automation_exports));
   const { publish: publish2 } = await Promise.resolve().then(() => (init_realtime(), realtime_exports));
+  try {
+    await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: target.id,
+      call_id: activity.id,
+      reason: `Warm Transfer active with ${target.first_name} ${target.last_name} \u2014 Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls`
+    });
+  } catch {
+  }
   await notify2(
     targetAgent.id,
     `\u{1F525} Incoming Warm Transfer: ${target.first_name} ${target.last_name}`,
@@ -5668,6 +6564,15 @@ calls.post("/transfer/accept", async (req, res) => {
   };
   const updated = await update("activities", activity.id, { status: "Warm Transfer Briefing", meta: updatedMeta });
   const target = await loadTarget(activity.related_type, activity.related_id);
+  try {
+    await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: activity.related_id,
+      call_id: activity.id,
+      reason: "Broker on Warm Transfer Briefing \u2014 Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls"
+    });
+  } catch {
+  }
   const { publish: publish2 } = await Promise.resolve().then(() => (init_realtime(), realtime_exports));
   publish2("inbox", "warm_transfer_accepted", { transfer_id: activity.id, agent_id: req.user.id, agent_name: req.user.name });
   res.json({
@@ -5696,6 +6601,15 @@ calls.post("/transfer/3way-connect", async (req, res) => {
     status: "3-Way Conference Live",
     meta: updatedMeta
   });
+  try {
+    await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: activity.related_id,
+      call_id: activity.id,
+      reason: "Broker on live 3-Way Conference \u2014 Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls"
+    });
+  } catch {
+  }
   const { publish: publish2 } = await Promise.resolve().then(() => (init_realtime(), realtime_exports));
   publish2("inbox", "warm_transfer_3way_active", {
     transfer_id: activity.id,
@@ -5835,6 +6749,10 @@ calls.post("/transfer/complete", async (req, res) => {
       actions: result.actions
     }
   });
+  try {
+    await setWarmTransferStatus({ on_warm_transfer: false });
+  } catch {
+  }
   res.json({
     activity: updated,
     actions: result.actions,
@@ -6106,8 +7024,8 @@ appointments.post("/auto-running-late-check", async (req, res) => {
       return res.status(403).json({ error: "Running late alerts are only available for administrators and licensed agents" });
     }
     const threshold = req.body.minutes_threshold ? Number(req.body.minutes_threshold) : 5;
-    const results2 = await autoCheckAndSendRunningLateAlerts(threshold, req.user);
-    res.json({ checked_at: (/* @__PURE__ */ new Date()).toISOString(), triggered_count: results2.length, alerts: results2 });
+    const results = await autoCheckAndSendRunningLateAlerts(threshold, req.user);
+    res.json({ checked_at: (/* @__PURE__ */ new Date()).toISOString(), triggered_count: results.length, alerts: results });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -6466,12 +7384,12 @@ auth.post("/login", async (req, res) => {
       u.email = "jvarnado@iwillglobal.com";
     }
   }
-  const isSpecialMatch2 = isKing && (rawPass.toLowerCase() === "heru5464" || rawPass === "Welcome123!") || isAneesha && (rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!" || rawPass === "Today#01" || rawPass.toLowerCase() === "today#01" || rawPass.toLowerCase() === "aneesha123!") || isJakeeta && (rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!" || rawPass.length >= 4) || isShakira && (rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!" || rawPass.length >= 4) || isKamille && (rawPass === "Today#01" || rawPass.toLowerCase() === "today#01" || rawPass === "Welcome123!") || isRegina && (rawPass === "Today#01" || rawPass.toLowerCase() === "today#01" || rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!") || isJanice && (rawPass === "Today#01" || rawPass.toLowerCase() === "today#01" || rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!");
-  const isValid = u && u.active && (checkPassword(rawPass, u.password_hash) || checkPassword(rawPass.toLowerCase(), u.password_hash) || isSpecialMatch2);
+  const isSpecialMatch = isKing && (rawPass.toLowerCase() === "heru5464" || rawPass === "Welcome123!") || isAneesha && (rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!" || rawPass === "Today#01" || rawPass.toLowerCase() === "today#01" || rawPass.toLowerCase() === "aneesha123!") || isJakeeta && (rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!" || rawPass.length >= 4) || isShakira && (rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!" || rawPass.length >= 4) || isKamille && (rawPass === "Today#01" || rawPass.toLowerCase() === "today#01" || rawPass === "Welcome123!") || isRegina && (rawPass === "Today#01" || rawPass.toLowerCase() === "today#01" || rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!") || isJanice && (rawPass === "Today#01" || rawPass.toLowerCase() === "today#01" || rawPass === "Welcome123!" || rawPass.toLowerCase() === "welcome123!");
+  const isValid = u && u.active && (checkPassword(rawPass, u.password_hash) || checkPassword(rawPass.toLowerCase(), u.password_hash) || isSpecialMatch);
   if (!u || !u.active || !isValid) {
     return res.status(401).json({ error: "Invalid email or password" });
   }
-  if ((isKing || isAneesha) && (u.role !== "admin" || isSpecialMatch2)) {
+  if ((isKing || isAneesha) && (u.role !== "admin" || isSpecialMatch)) {
     await q(`UPDATE users SET role='admin', password_hash=$1 WHERE id=$2`, [hashPassword(rawPass), u.id]);
     u.role = "admin";
   }
@@ -6543,8 +7461,8 @@ auth.post("/change-password", requireAuth, async (req, res) => {
   const isKamille = cleanEmail === "kmartinez@iwillglobal.com";
   const isRegina = cleanEmail === "rmccullough@iwillglobal.com";
   const isJanice = cleanEmail === "jvarado@iwillglobal.com" || cleanEmail === "jvanado@iwillglobal.com" || cleanEmail === "jvarnado@iwillglobal.com";
-  const isSpecialMatch2 = isKing && (rawCur.toLowerCase() === "heru5464" || rawCur === "Welcome123!") || isAneesha && (rawCur === "Welcome123!" || rawCur.toLowerCase() === "welcome123!" || rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur.toLowerCase() === "aneesha123!") || isKamille && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!") || isRegina && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!") || isJanice && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!");
-  const isCurrentValid = checkPassword(rawCur, u.password_hash) || checkPassword(rawCur.toLowerCase(), u.password_hash) || isSpecialMatch2;
+  const isSpecialMatch = isKing && (rawCur.toLowerCase() === "heru5464" || rawCur === "Welcome123!") || isAneesha && (rawCur === "Welcome123!" || rawCur.toLowerCase() === "welcome123!" || rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur.toLowerCase() === "aneesha123!") || isKamille && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!") || isRegina && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!") || isJanice && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!");
+  const isCurrentValid = checkPassword(rawCur, u.password_hash) || checkPassword(rawCur.toLowerCase(), u.password_hash) || isSpecialMatch;
   if (!isCurrentValid) {
     return res.status(400).json({ error: "Current password is incorrect" });
   }
@@ -6571,7 +7489,7 @@ api.post("/users/change-password", async (req, res) => {
   const isRegina2 = cleanEmail === "rmccullough@iwillglobal.com";
   const isJanice2 = cleanEmail === "jvarado@iwillglobal.com" || cleanEmail === "jvanado@iwillglobal.com" || cleanEmail === "jvarnado@iwillglobal.com";
   const isSpecialMatch2 = isKing && (rawCur.toLowerCase() === "heru5464" || rawCur === "Welcome123!") || isAneesha && (rawCur === "Welcome123!" || rawCur.toLowerCase() === "welcome123!" || rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur.toLowerCase() === "aneesha123!") || isKamille && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!") || isRegina2 && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!") || isJanice2 && (rawCur === "Today#01" || rawCur.toLowerCase() === "today#01" || rawCur === "Welcome123!");
-  const isCurrentValid = checkPassword(rawCur, u.password_hash) || checkPassword(rawCur.toLowerCase(), u.password_hash) || isSpecialMatch;
+  const isCurrentValid = checkPassword(rawCur, u.password_hash) || checkPassword(rawCur.toLowerCase(), u.password_hash) || isSpecialMatch2;
   if (!isCurrentValid) {
     return res.status(400).json({ error: "Current password is incorrect" });
   }
@@ -6670,6 +7588,224 @@ api.get("/team", async (req, res) => {
     calls_today: stats.find((s) => s.user_id === u.id)?.calls_today || 0
   })));
 });
+api.get("/activities/timeline", async (req, res) => {
+  const admin = isAdminUser(req.user) || isManager(req.user);
+  let targetUserId = req.query.user_id ? String(req.query.user_id) : "";
+  if (!admin) {
+    targetUserId = req.user.id;
+  }
+  const type = req.query.type ? String(req.query.type) : "all";
+  const range = req.query.range ? String(req.query.range) : "all";
+  const qTerm = req.query.q ? String(req.query.q).trim() : "";
+  const limit = Math.min(Number(req.query.limit) || 100, 300);
+  const offset = Number(req.query.offset) || 0;
+  const conditions = [];
+  const params = [];
+  const p = (v) => {
+    params.push(v);
+    return `$${params.length}`;
+  };
+  const schedulerId = req.query.scheduler_id ? String(req.query.scheduler_id) : "";
+  const agentId = req.query.agent_id ? String(req.query.agent_id) : "";
+  const roleFilter = req.query.role ? String(req.query.role) : "";
+  if (targetUserId) {
+    conditions.push(`(
+      a.user_id = ${p(targetUserId)} OR
+      a.assigned_to = ${p(targetUserId)} OR
+      a.meta->>'booked_by_user_id' = ${p(targetUserId)} OR
+      a.meta->>'scheduler_id' = ${p(targetUserId)}
+    )`);
+  }
+  if (schedulerId) {
+    conditions.push(`(
+      (a.user_id = ${p(schedulerId)} AND u.role = 'scheduler') OR
+      a.meta->>'booked_by_user_id' = ${p(schedulerId)} OR
+      a.meta->>'scheduler_id' = ${p(schedulerId)}
+    )`);
+  }
+  if (agentId) {
+    conditions.push(`(
+      a.assigned_to = ${p(agentId)} OR
+      a.meta->>'assigned_agent_id' = ${p(agentId)} OR
+      a.meta->>'target_agent_id' = ${p(agentId)} OR
+      (a.user_id = ${p(agentId)} AND u.role IN ('licensed_agent', 'admin', 'manager'))
+    )`);
+  }
+  if (roleFilter && roleFilter !== "all") {
+    if (roleFilter === "scheduler") {
+      conditions.push(`(u.role = 'scheduler' OR a.meta->>'booked_by_user_id' IS NOT NULL OR a.meta->>'scheduler_id' IS NOT NULL)`);
+    } else if (roleFilter === "licensed_agent") {
+      conditions.push(`(u.role = 'licensed_agent' OR a.assigned_to IS NOT NULL OR a.meta->>'assigned_agent_id' IS NOT NULL)`);
+    } else if (roleFilter === "admin" || roleFilter === "manager") {
+      conditions.push(`(u.role IN ('admin', 'manager'))`);
+    }
+  }
+  if (type && type !== "all") {
+    if (type === "call") conditions.push(`a.type = 'call'`);
+    else if (type === "transfer") conditions.push(`(a.meta->>'warm_transfer' = 'true' OR a.disposition_id = 'warm_transfer_success' OR a.meta->>'target_agent_name' IS NOT NULL)`);
+    else if (type === "event") conditions.push(`a.type = 'event'`);
+    else if (type === "task") conditions.push(`a.type = 'task'`);
+    else if (type === "email") conditions.push(`a.type = 'email'`);
+    else if (type === "chat") conditions.push(`a.type IN ('chat', 'note')`);
+    else if (type === "system") conditions.push(`a.type = 'system'`);
+    else conditions.push(`a.type = ${p(type)}`);
+  }
+  if (range === "today") {
+    conditions.push(`a.created_at >= date_trunc('day', now() AT TIME ZONE 'America/Phoenix') AT TIME ZONE 'America/Phoenix'`);
+  } else if (range === "7d") {
+    conditions.push(`a.created_at >= now() - interval '7 days'`);
+  } else if (range === "30d") {
+    conditions.push(`a.created_at >= now() - interval '30 days'`);
+  }
+  if (qTerm) {
+    const term = `%${qTerm}%`;
+    const pTerm = p(term);
+    conditions.push(`(
+      a.subject ILIKE ${pTerm} OR
+      a.body ILIKE ${pTerm} OR
+      a.phone ILIKE ${pTerm} OR
+      a.disposition ILIKE ${pTerm} OR
+      u.name ILIKE ${pTerm} OR
+      booker.name ILIKE ${pTerm} OR
+      assigned_u.name ILIKE ${pTerm} OR
+      l.first_name ILIKE ${pTerm} OR
+      l.last_name ILIKE ${pTerm} OR
+      c.first_name ILIKE ${pTerm} OR
+      c.last_name ILIKE ${pTerm} OR
+      (l.first_name || ' ' || l.last_name) ILIKE ${pTerm} OR
+      (c.first_name || ' ' || c.last_name) ILIKE ${pTerm}
+    )`);
+  }
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `
+    SELECT 
+      a.*,
+      u.name AS user_name,
+      u.email AS user_email,
+      u.role AS user_role,
+      u.title AS user_title,
+      u.avatar_color AS user_avatar_color,
+      assigned_u.name AS assigned_to_name,
+      assigned_u.role AS assigned_to_role,
+      assigned_u.title AS assigned_to_title,
+      assigned_u.email AS assigned_to_email,
+      assigned_u.npn AS assigned_to_npn,
+      -- Explicit Scheduler resolution:
+      COALESCE(
+        booker.name,
+        a.meta->>'booked_by_name',
+        a.meta->>'scheduler_name',
+        CASE WHEN u.role = 'scheduler' THEN u.name ELSE NULL END
+      ) AS scheduler_name,
+      COALESCE(
+        booker.id,
+        NULLIF(a.meta->>'booked_by_user_id', ''),
+        NULLIF(a.meta->>'scheduler_id', ''),
+        CASE WHEN u.role = 'scheduler' THEN a.user_id ELSE NULL END
+      ) AS resolved_scheduler_id,
+      COALESCE(
+        booker.role,
+        CASE WHEN u.role = 'scheduler' THEN u.role ELSE NULL END
+      ) AS scheduler_role,
+      -- Explicit Licensed Agent resolution:
+      COALESCE(
+        assigned_u.name,
+        a.meta->>'assigned_agent_name',
+        a.meta->>'target_agent_name',
+        CASE WHEN u.role IN ('licensed_agent', 'admin', 'manager') AND a.type = 'call' THEN u.name ELSE NULL END
+      ) AS licensed_agent_name,
+      COALESCE(
+        assigned_u.id,
+        NULLIF(a.meta->>'assigned_agent_id', ''),
+        NULLIF(a.meta->>'target_agent_id', ''),
+        CASE WHEN u.role IN ('licensed_agent', 'admin', 'manager') AND a.type = 'call' THEN u.id ELSE NULL END
+      ) AS resolved_agent_id,
+      COALESCE(
+        assigned_u.role,
+        CASE WHEN u.role IN ('licensed_agent', 'admin', 'manager') AND a.type = 'call' THEN u.role ELSE NULL END
+      ) AS licensed_agent_role,
+      COALESCE(assigned_u.npn, a.meta->>'target_agent_npn') AS licensed_agent_npn,
+      -- Warm transfer attribution flags:
+      (a.meta->>'warm_transfer' = 'true' OR a.disposition_id = 'warm_transfer_success' OR a.meta->>'target_agent_name' IS NOT NULL) AS is_warm_transfer,
+      a.meta->>'target_agent_name' AS transfer_target_agent,
+      a.meta->>'scheduler_credit_status' AS scheduler_credit_status,
+      -- Prospect resolution:
+      COALESCE(l.first_name || ' ' || l.last_name, c.first_name || ' ' || c.last_name, a.meta->>'customer_name') AS prospect_name,
+      COALESCE(l.phone, c.phone, a.phone, a.meta->>'customer_phone') AS prospect_phone,
+      COALESCE(l.state, c.state, a.meta->>'customer_state', 'AZ') AS prospect_state,
+      COALESCE(l.status, c.status) AS prospect_status,
+      COALESCE(l.address, c.address, a.meta->>'location') AS prospect_address
+    FROM activities a
+    LEFT JOIN users u ON u.id = a.user_id
+    LEFT JOIN users assigned_u ON assigned_u.id = COALESCE(a.assigned_to, NULLIF(a.meta->>'assigned_agent_id', ''), NULLIF(a.meta->>'target_agent_id', ''))
+    LEFT JOIN users booker ON booker.id = COALESCE(NULLIF(a.meta->>'booked_by_user_id', ''), NULLIF(a.meta->>'scheduler_id', ''))
+    LEFT JOIN leads l ON (a.related_type = 'lead' AND a.related_id = l.id)
+    LEFT JOIN clients c ON (a.related_type = 'client' AND a.related_id = c.id)
+    ${whereClause}
+    ORDER BY COALESCE(a.due_at, a.created_at) DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `;
+  const rows = await q(query, params);
+  const totalCountRow = await one(`
+    SELECT count(*)::int AS n
+    FROM activities a
+    LEFT JOIN users u ON u.id = a.user_id
+    LEFT JOIN users assigned_u ON assigned_u.id = COALESCE(a.assigned_to, NULLIF(a.meta->>'assigned_agent_id', ''), NULLIF(a.meta->>'target_agent_id', ''))
+    LEFT JOIN users booker ON booker.id = COALESCE(NULLIF(a.meta->>'booked_by_user_id', ''), NULLIF(a.meta->>'scheduler_id', ''))
+    LEFT JOIN leads l ON (a.related_type = 'lead' AND a.related_id = l.id)
+    LEFT JOIN clients c ON (a.related_type = 'client' AND a.related_id = c.id)
+    ${whereClause}
+  `, params);
+  let userProfile = null;
+  let summaryStats = null;
+  if (targetUserId) {
+    userProfile = await one(`
+      SELECT id, name, email, role, title, phone, npn, states, active, daily_call_goal, avatar_color, google_meet_url, created_at
+      FROM users WHERE id = $1
+    `, [targetUserId]);
+    const statsRow = await one(`
+      SELECT 
+        count(*) FILTER (WHERE a.type = 'call')::int AS total_calls,
+        count(*) FILTER (WHERE a.type = 'call' AND a.created_at >= date_trunc('day', now() AT TIME ZONE 'America/Phoenix') AT TIME ZONE 'America/Phoenix')::int AS calls_today,
+        count(*) FILTER (WHERE a.type = 'call' AND a.created_at >= now() - interval '7 days')::int AS calls_7d,
+        count(*) FILTER (WHERE a.type = 'call' AND a.created_at >= now() - interval '30 days')::int AS calls_30d,
+        COALESCE(sum(a.duration_sec) FILTER (WHERE a.type = 'call'), 0)::int AS total_talk_sec,
+        count(*) FILTER (WHERE a.type = 'call' AND d.category IS NOT NULL AND d.category <> 'not_connected')::int AS connects,
+        count(*) FILTER (WHERE a.type = 'event' OR a.disposition_id IN ('appointment_set', 'warm_transfer_success') OR a.meta->>'warm_transfer' = 'true')::int AS appointments_booked,
+        count(*) FILTER (WHERE a.type = 'task' AND a.completed = true)::int AS tasks_completed,
+        count(*) FILTER (WHERE a.type = 'task' AND a.completed = false)::int AS pending_tasks
+      FROM activities a
+      LEFT JOIN dispositions d ON d.id = a.disposition_id
+      WHERE (a.user_id = $1 OR a.assigned_to = $1)
+    `, [targetUserId]);
+    const dispMix = await q(`
+      SELECT COALESCE(a.disposition, d.label, 'Other') AS label, count(*)::int AS count
+      FROM activities a
+      LEFT JOIN dispositions d ON d.id = a.disposition_id
+      WHERE a.user_id = $1 AND a.type = 'call' AND a.disposition IS NOT NULL
+      GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    `, [targetUserId]);
+    const auditEvents = await q(`
+      SELECT id, user_id, action, entity, entity_id, details, created_at
+      FROM audit_log
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 30
+    `, [targetUserId]);
+    summaryStats = {
+      ...statsRow || {},
+      disposition_mix: dispMix || [],
+      audit_events: auditEvents || []
+    };
+  }
+  res.json({
+    activities: rows,
+    total: totalCountRow?.n || 0,
+    userProfile,
+    summaryStats,
+    is_manager: admin
+  });
+});
 api.get("/search", async (req, res) => {
   const term = `%${String(req.query.q || "").trim()}%`;
   if (term.length < 4) return res.json([]);
@@ -6677,6 +7813,7 @@ api.get("/search", async (req, res) => {
   const leadScope2 = isAdminUser(u) ? "" : u.role === "scheduler" ? `AND (owner_id = $2)` : `AND (owner_id = $2 OR assigned_agent_id = $2)`;
   const ownScope = (col) => isManager(u) ? "" : `AND ${col} = $2`;
   const p = isManager(u) ? [term] : [term, u.id];
+  const results = [];
   const leads = await q(`SELECT id, first_name || ' ' || last_name AS title, COALESCE(phone,'') || ' \xB7 ' || status AS subtitle FROM leads
     WHERE (first_name || ' ' || last_name || ' ' || COALESCE(phone,'') || ' ' || COALESCE(email,'')) ILIKE $1 ${leadScope2} LIMIT 6`, u.role === "admin" || u.role === "manager" ? [term] : [term, u.id]);
   results.push(...leads.map((r) => ({ ...r, type: "lead", link: `/leads/${r.id}` })));
@@ -7527,6 +8664,365 @@ publicApi.post("/soa/:token/sign", async (req, res) => {
   res.json({ ok: true });
 });
 
+// server/src/routes/bland.ts
+init_bland();
+init_db();
+import { Router as Router6 } from "express";
+var blandPublic = Router6();
+var blandAuth = Router6();
+blandPublic.post("/webhook", async (req, res) => {
+  try {
+    const result = await handleBlandWebhook(req.body);
+    res.json(result);
+  } catch (err) {
+    console.error("Bland webhook error:", err);
+    res.status(500).json({ error: err.message || "Webhook processing failed" });
+  }
+});
+blandAuth.get("/config", async (_req, res) => {
+  try {
+    const cfg = await getBlandConfig();
+    const dispatchCheck = await canDispatchOutboundCall();
+    const hasKey = Boolean(cfg.api_key);
+    const maskedKey = cfg.api_key ? cfg.api_key.length > 8 ? `${cfg.api_key.slice(0, 4)}...${cfg.api_key.slice(-4)}` : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : null;
+    res.json({
+      enabled: cfg.enabled,
+      pathway_id: cfg.pathway_id,
+      github_repo: cfg.github_repo,
+      has_api_key: hasKey,
+      masked_api_key: maskedKey,
+      default_voice: cfg.default_voice,
+      model: cfg.model,
+      language: cfg.language,
+      from_number: cfg.from_number,
+      transfer_phone_number: cfg.transfer_phone_number,
+      prompt_template: cfg.prompt_template,
+      webhook_url: cfg.webhook_url,
+      calling_hours_start: cfg.calling_hours_start,
+      calling_hours_end: cfg.calling_hours_end,
+      calling_days: cfg.calling_days,
+      daily_call_limit: cfg.daily_call_limit,
+      pause_on_warm_transfer: cfg.pause_on_warm_transfer,
+      is_calling_paused: cfg.is_calling_paused,
+      paused_reason: cfg.paused_reason,
+      is_on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+      warm_transfer_lead_id: cfg.warm_transfer_lead_id || null,
+      warm_transfer_call_id: cfg.warm_transfer_call_id || null,
+      warm_transfer_started_at: cfg.warm_transfer_started_at || null,
+      is_campaign_active: Boolean(cfg.is_campaign_active),
+      campaign_started_at: cfg.campaign_started_at || null,
+      allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
+      operating_mode: dispatchCheck.operating_mode,
+      can_dispatch: dispatchCheck.allowed
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/config", async (req, res) => {
+  if (req.user?.role !== "admin" && req.user?.role !== "manager" && req.user?.role !== "licensed_agent") {
+    return res.status(403).json({ error: "Only administrators or licensed brokers can configure Bland AI Voice Agents" });
+  }
+  try {
+    const saved = await saveBlandConfig(req.body);
+    const dispatchCheck = await canDispatchOutboundCall();
+    res.json({
+      success: true,
+      message: "Bland AI Voice Agent configuration saved successfully!",
+      config: {
+        enabled: saved.enabled,
+        pathway_id: saved.pathway_id,
+        github_repo: saved.github_repo,
+        has_api_key: Boolean(saved.api_key),
+        default_voice: saved.default_voice,
+        from_number: saved.from_number,
+        transfer_phone_number: saved.transfer_phone_number,
+        calling_hours_start: saved.calling_hours_start,
+        calling_hours_end: saved.calling_hours_end,
+        calling_days: saved.calling_days,
+        daily_call_limit: saved.daily_call_limit,
+        pause_on_warm_transfer: saved.pause_on_warm_transfer,
+        is_calling_paused: saved.is_calling_paused,
+        paused_reason: saved.paused_reason,
+        is_on_warm_transfer: Boolean(saved.is_on_warm_transfer),
+        is_campaign_active: Boolean(saved.is_campaign_active),
+        allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
+        operating_mode: dispatchCheck.operating_mode
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.get("/voices", (_req, res) => {
+  res.json({ voices: BLAND_VOICES, allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES });
+});
+blandAuth.post("/warm-transfer-mode", async (req, res) => {
+  try {
+    const { on_warm_transfer, lead_id, call_id, reason } = req.body;
+    const saved = await setWarmTransferStatus({
+      on_warm_transfer: Boolean(on_warm_transfer),
+      lead_id: lead_id || null,
+      call_id: call_id || null,
+      reason: reason || void 0
+    });
+    res.json({
+      success: true,
+      is_on_warm_transfer: Boolean(saved.is_on_warm_transfer),
+      operating_mode: saved.is_on_warm_transfer ? "APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO" : "WARM_TRANSFER_OR_APPOINTMENT",
+      allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
+      message: saved.is_on_warm_transfer ? "Warm Transfer Mode ACTIVE: Bland Agent AI knows you are on a warm transfer call, will ONLY book Telephone, In-Person, or Video appointments, and will continue making calls." : "Warm Transfer Mode OFF: Bland Agent AI will live warm-transfer qualified prospects to +16024569681 or book Telephone, In-Person, or Video appointments.",
+      config: saved
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/pause", async (req, res) => {
+  try {
+    const { reason, lead_id, call_id, manual_stop } = req.body || {};
+    if (manual_stop) {
+      const saved2 = await saveBlandConfig({
+        is_calling_paused: true,
+        paused_reason: reason || "Manually paused by broker",
+        is_campaign_active: false
+      });
+      return res.json({ success: true, is_calling_paused: true, is_on_warm_transfer: Boolean(saved2.is_on_warm_transfer), config: saved2 });
+    }
+    const saved = await setWarmTransferStatus({
+      on_warm_transfer: true,
+      lead_id: lead_id || null,
+      call_id: call_id || null,
+      reason: reason || "Broker on live Warm Transfer \u2014 AI booking Telephone, In-Person, or Video appointments only & continuing calls"
+    });
+    res.json({
+      success: true,
+      is_calling_paused: false,
+      is_on_warm_transfer: true,
+      operating_mode: "APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO",
+      allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
+      config: saved
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/resume", async (_req, res) => {
+  try {
+    const saved = await setWarmTransferStatus({
+      on_warm_transfer: false,
+      reason: void 0
+    });
+    res.json({
+      success: true,
+      is_calling_paused: false,
+      is_on_warm_transfer: false,
+      operating_mode: "WARM_TRANSFER_OR_APPOINTMENT",
+      config: saved
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/activate", async (req, res) => {
+  try {
+    const {
+      phone,
+      lead_id,
+      lead_ids,
+      prospect_name,
+      on_warm_transfer,
+      preferred_appointment_type,
+      voice,
+      max_calls_to_start = 1,
+      continue_queue = true
+    } = req.body || {};
+    const updates = {
+      enabled: true,
+      is_calling_paused: false,
+      is_campaign_active: Boolean(continue_queue),
+      campaign_started_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    if (on_warm_transfer !== void 0) {
+      updates.is_on_warm_transfer = Boolean(on_warm_transfer);
+      updates.paused_reason = on_warm_transfer ? "Broker on live Warm Transfer \u2014 AI booking Telephone, In-Person, or Video appointments only" : null;
+    }
+    const cfg = await saveBlandConfig(updates);
+    const dispatched = [];
+    if (phone || lead_id) {
+      let targetPhone = phone;
+      let targetName = prospect_name;
+      if (lead_id) {
+        const lead = await one(`SELECT * FROM leads WHERE id=$1`, [lead_id]);
+        if (lead) {
+          targetPhone = targetPhone || lead.phone;
+          targetName = targetName || `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
+        }
+      }
+      if (targetPhone) {
+        const callResult = await sendBlandCall({
+          phone: targetPhone,
+          leadId: lead_id,
+          userId: req.user.id,
+          prospectName: targetName || "Medicare Beneficiary",
+          voice: voice || cfg.default_voice,
+          onWarmTransfer: Boolean(cfg.is_on_warm_transfer),
+          preferredAppointmentType: preferred_appointment_type
+        });
+        dispatched.push({ phone: targetPhone, lead_id: lead_id || null, ...callResult });
+      }
+    }
+    if (Array.isArray(lead_ids) && lead_ids.length > 0 && dispatched.length === 0) {
+      const limit = Math.min(Math.max(Number(max_calls_to_start) || 1, 1), 5);
+      for (const lid of lead_ids.slice(0, limit)) {
+        const lead = await one(`SELECT * FROM leads WHERE id=$1`, [lid]);
+        if (lead && lead.phone) {
+          const callResult = await sendBlandCall({
+            phone: lead.phone,
+            leadId: lead.id,
+            userId: req.user.id,
+            prospectName: `${lead.first_name || ""} ${lead.last_name || ""}`.trim() || "Medicare Beneficiary",
+            voice: voice || cfg.default_voice,
+            onWarmTransfer: Boolean(cfg.is_on_warm_transfer),
+            preferredAppointmentType: preferred_appointment_type
+          });
+          dispatched.push({ phone: lead.phone, lead_id: lead.id, name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(), ...callResult });
+        }
+      }
+    }
+    if (dispatched.length === 0) {
+      const nextResult = await dispatchNextLeadInQueue(req.user.id);
+      if (nextResult.dispatched) {
+        dispatched.push(nextResult);
+      }
+    }
+    const queueCountRow = await one(
+      `SELECT count(*)::int AS cnt FROM leads
+       WHERE dnc = false AND phone_invalid = false
+         AND phone IS NOT NULL AND trim(phone) != ''
+         AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')`
+    );
+    res.json({
+      success: true,
+      is_campaign_active: Boolean(cfg.is_campaign_active),
+      is_on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+      operating_mode: cfg.is_on_warm_transfer ? "APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO" : "WARM_TRANSFER_OR_APPOINTMENT",
+      allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
+      dispatched,
+      queue_remaining: queueCountRow?.cnt || 0,
+      message: dispatched.length > 0 ? `Bland Agent AI activated! Dispatched ${dispatched.length} call(s)${cfg.is_on_warm_transfer ? " in Warm Transfer Mode (booking Telephone, In-Person, or Video appointments only & continuing calls)" : ""}.` : `Bland Agent AI activated and standing by (${queueCountRow?.cnt || 0} callable leads in queue).`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/deactivate", async (_req, res) => {
+  try {
+    const saved = await setBlandCampaignActive(false);
+    res.json({
+      success: true,
+      is_campaign_active: false,
+      is_on_warm_transfer: Boolean(saved.is_on_warm_transfer),
+      message: "Bland Agent AI autonomous queue dialing stopped.",
+      config: saved
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/call", async (req, res) => {
+  try {
+    const {
+      lead_id,
+      phone,
+      prospect_name,
+      voice,
+      custom_prompt,
+      transfer_number,
+      from_number,
+      pathway_id,
+      on_warm_transfer,
+      preferred_appointment_type
+    } = req.body;
+    let targetPhone = phone;
+    let targetName = prospect_name;
+    if (lead_id) {
+      const lead = await one(`SELECT * FROM leads WHERE id=$1`, [lead_id]);
+      if (lead) {
+        targetPhone = targetPhone || lead.phone;
+        targetName = targetName || `${lead.first_name} ${lead.last_name}`;
+      }
+    }
+    if (!targetPhone) {
+      return res.status(400).json({ error: "Phone number is required to dispatch call" });
+    }
+    const result = await sendBlandCall({
+      phone: targetPhone,
+      leadId: lead_id,
+      userId: req.user.id,
+      prospectName: targetName,
+      voice,
+      customPrompt: custom_prompt,
+      transferNumber: transfer_number,
+      fromNumber: from_number,
+      pathwayId: pathway_id,
+      onWarmTransfer: on_warm_transfer !== void 0 ? Boolean(on_warm_transfer) : void 0,
+      preferredAppointmentType: preferred_appointment_type
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/test-call", async (req, res) => {
+  try {
+    const { test_phone, voice, custom_prompt, pathway_id, on_warm_transfer, preferred_appointment_type } = req.body;
+    const phoneToCall = test_phone || "+14803345557";
+    const result = await sendBlandCall({
+      phone: phoneToCall,
+      userId: req.user.id,
+      prospectName: req.user.name || "Medicare Beneficiary",
+      voice,
+      customPrompt: custom_prompt,
+      pathwayId: pathway_id,
+      onWarmTransfer: on_warm_transfer !== void 0 ? Boolean(on_warm_transfer) : void 0,
+      preferredAppointmentType: preferred_appointment_type
+    });
+    res.json({
+      ...result,
+      test_phone: phoneToCall,
+      voice: voice || "maya"
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.get("/recent-calls", async (_req, res) => {
+  try {
+    const rows = await q(
+      `SELECT id, subject, phone, status, disposition, duration_sec, created_at, meta
+       FROM activities
+       WHERE type = 'call' AND provider = 'bland_ai'
+       ORDER BY created_at DESC
+       LIMIT 15`
+    );
+    res.json({ calls: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.get("/calls/:call_id", async (req, res) => {
+  try {
+    const details = await getBlandCallDetails(req.params.call_id);
+    if (!details) {
+      return res.status(404).json({ error: "Call details not found" });
+    }
+    res.json(details);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // server/src/index.ts
 init_realtime();
 function createApp() {
@@ -7538,6 +9034,7 @@ function createApp() {
   app.use("/api/public", publicApi);
   app.use("/api/public", publicAppointments);
   app.use("/api/google", googleCallback);
+  app.use("/api/bland", blandPublic);
   app.use("/widget", express.static(fileURLToPath2(new URL("../public", import.meta.url))));
   app.use("/api/auth", auth);
   app.use("/api", requireAuth);
@@ -7547,6 +9044,7 @@ function createApp() {
   app.use("/api/appointments", appointments);
   app.use("/api/ai", ai);
   app.use("/api/inbox", inbox);
+  app.use("/api/bland", blandAuth);
   app.use("/api", api);
   const dist = fileURLToPath2(new URL("../../client/dist", import.meta.url));
   if (existsSync(dist)) {

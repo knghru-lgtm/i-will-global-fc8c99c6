@@ -722,6 +722,27 @@ export const LeadsPage: React.FC = () => {
             </button>
           )}
 
+          {/* Activate Bland Agent AI Button */}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => window.dispatchEvent(new CustomEvent('open-bland-ai-control'))}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              fontWeight: 800,
+              background: 'linear-gradient(135deg, #7c3aed, #9333ea)',
+              borderColor: '#a855f7',
+              color: '#fff',
+              boxShadow: '0 4px 14px rgba(139, 92, 246, 0.4)',
+              cursor: 'pointer',
+            }}
+            title="Activate Bland Agent AI to begin making calls & toggle Warm Transfer Appointment-Only mode (Telephone, In-Person, Video)"
+          >
+            <span>🤖</span> Activate Bland Agent AI
+          </button>
+
           {/* 5 - 500 Master List Bank Assignment Button - ADMIN ONLY */}
           {isAdmin && (
             <button 
