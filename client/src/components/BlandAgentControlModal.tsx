@@ -9,6 +9,9 @@ interface BlandAgentControlModalProps {
 export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ isOpen, onClose }) => {
   const [config, setConfig] = useState<any>(null);
   const [recentCalls, setRecentCalls] = useState<any[]>([]);
+  const [directory, setDirectory] = useState<any[]>([]);
+  const [directorySearch, setDirectorySearch] = useState<string>('');
+  const [showDirectory, setShowDirectory] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [activating, setActivating] = useState<boolean>(false);
   const [togglingWarmTransfer, setTogglingWarmTransfer] = useState<boolean>(false);
@@ -21,12 +24,14 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
   const loadState = async () => {
     setLoading(true);
     try {
-      const [cfgRes, callsRes] = await Promise.all([
+      const [cfgRes, callsRes, dirRes] = await Promise.all([
         api.get('/bland/config').catch(() => null),
         api.get('/bland/recent-calls').catch(() => ({ calls: [] })),
+        api.get('/bland/directory').catch(() => ({ directory: [] })),
       ]);
       if (cfgRes) setConfig(cfgRes);
       if (callsRes?.calls) setRecentCalls(callsRes.calls);
+      if (dirRes?.directory) setDirectory(dirRes.directory);
     } finally {
       setLoading(false);
     }
@@ -435,7 +440,110 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
           </div>
         </div>
 
-        {/* 3. RECENT BLAND AI CALLS */}
+        {/* 3. INBOUND AI RECEPTIONIST & TEAM DIRECTORY TRANSFER */}
+        <div
+          style={{
+            background: 'rgba(16, 185, 129, 0.07)',
+            border: '1.5px solid rgba(16, 185, 129, 0.35)',
+            borderRadius: '12px',
+            padding: '1.15rem 1.25rem',
+            marginBottom: '1.25rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.98rem', color: '#6ee7b7', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>🎧</span>
+                <span>Inbound AI Receptionist & Directory Transfer (+1 520-841-5736)</span>
+                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '999px', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', color: '#a7f3d0' }}>
+                  {directory.length || 42} Directory Members Active
+                </span>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: '0.3rem', lineHeight: 1.45 }}>
+                On inbound calls, Sarah actively listens for requests to speak to <strong>anyone on the I Will Global Directory</strong> (by full name, first name, last name, or role) and immediately whisper-transfers the caller to their direct phone line.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowDirectory((v) => !v)}
+              style={{
+                padding: '0.45rem 0.85rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(16, 185, 129, 0.5)',
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: '#a7f3d0',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              {showDirectory ? 'Hide Directory ▲' : 'View Directory ▼'}
+            </button>
+          </div>
+
+          {showDirectory && (
+            <div style={{ marginTop: '0.85rem' }}>
+              <input
+                type="text"
+                value={directorySearch}
+                onChange={(e) => setDirectorySearch(e.target.value)}
+                placeholder="Search directory by name, role, or phone (e.g., King Amen Ra, Aneesha, Robert Chen, Kamille)..."
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: '8px',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-color)',
+                  color: '#fff',
+                  fontSize: '0.82rem',
+                  marginBottom: '0.65rem',
+                }}
+              />
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+                  gap: '0.45rem',
+                  maxHeight: '190px',
+                  overflowY: 'auto',
+                  paddingRight: '0.25rem',
+                }}
+              >
+                {directory
+                  .filter((d: any) => {
+                    const q = directorySearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      String(d.name || '').toLowerCase().includes(q) ||
+                      String(d.role || '').toLowerCase().includes(q) ||
+                      String(d.phone || '').toLowerCase().includes(q) ||
+                      String(d.department || '').toLowerCase().includes(q)
+                    );
+                  })
+                  .map((d: any) => (
+                    <div
+                      key={d.name}
+                      style={{
+                        padding: '0.45rem 0.65rem',
+                        borderRadius: '8px',
+                        background: 'var(--bg-surface)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        fontSize: '0.76rem',
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, color: '#f8fafc', display: 'flex', justifyContent: 'space-between', gap: '0.3rem' }}>
+                        <span>{d.name}</span>
+                        <span style={{ color: '#6ee7b7', fontFamily: 'monospace', fontSize: '0.72rem' }}>{d.phone}</span>
+                      </div>
+                      <div style={{ color: '#94a3b8', fontSize: '0.7rem', marginTop: '0.15rem' }}>{d.role}</div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 4. RECENT BLAND AI CALLS */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
             <span style={{ fontSize: '0.86rem', fontWeight: 800, color: '#cbd5e1' }}>

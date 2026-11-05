@@ -11,6 +11,7 @@ import {
   setBlandCampaignActive,
   dispatchNextLeadInQueue,
   canDispatchOutboundCall,
+  getInboundDirectory,
 } from '../services/bland.ts';
 import { one, q } from '../db/index.ts';
 
@@ -116,6 +117,16 @@ blandAuth.post('/config', async (req, res) => {
 // 3. List Available Voices
 blandAuth.get('/voices', (_req, res) => {
   res.json({ voices: BLAND_VOICES, allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES });
+});
+
+// 3b. Get Inbound AI Receptionist & Team Directory Transfer Map
+blandAuth.get('/directory', async (_req, res) => {
+  try {
+    const dir = await getInboundDirectory();
+    res.json(dir);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 4. Set Warm Transfer Mode (Agent knows King Amen Ra is on a warm transfer call -> books Telephone, In-Person, or Video appointments only & continues calling)

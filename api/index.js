@@ -1020,12 +1020,14 @@ __export(bland_exports, {
   DEFAULT_BLAND_CALLER_ID: () => DEFAULT_BLAND_CALLER_ID,
   DEFAULT_BLAND_PATHWAY_ID: () => DEFAULT_BLAND_PATHWAY_ID,
   DEFAULT_BLAND_PROMPT: () => DEFAULT_BLAND_PROMPT,
+  IWG_TEAM_DIRECTORY: () => IWG_TEAM_DIRECTORY,
   canDispatchOutboundCall: () => canDispatchOutboundCall,
   dispatchNextLeadInQueue: () => dispatchNextLeadInQueue,
   formatAppointmentTypeLabel: () => formatAppointmentTypeLabel,
   getBlandCallDetails: () => getBlandCallDetails,
   getBlandConfig: () => getBlandConfig,
   getCallsTodayCount: () => getCallsTodayCount,
+  getInboundDirectory: () => getInboundDirectory,
   handleBlandWebhook: () => handleBlandWebhook,
   normalizeAppointmentType: () => normalizeAppointmentType,
   pauseCallingForWarmTransfer: () => pauseCallingForWarmTransfer,
@@ -1049,6 +1051,48 @@ function formatAppointmentTypeLabel(type) {
   if (type === "in_person") return "In-Person";
   if (type === "video") return "Video";
   return "Telephone";
+}
+async function getInboundDirectory() {
+  const byName = /* @__PURE__ */ new Map();
+  for (const item of IWG_TEAM_DIRECTORY) {
+    byName.set(item.name.toLowerCase(), { ...item });
+  }
+  try {
+    const dbUsers = await q(
+      `SELECT name, title, role, phone FROM users WHERE active = true AND phone IS NOT NULL AND trim(phone) != '' ORDER BY name ASC`
+    );
+    for (const u of dbUsers) {
+      const e164 = toE164(u.phone);
+      if (!e164) continue;
+      const key = String(u.name || "").trim().toLowerCase();
+      if (!key) continue;
+      const existing = byName.get(key);
+      const dept = u.role === "admin" || u.role === "manager" ? "Executive & Governance" : u.role === "licensed_agent" ? "Licensed Brokers & Advisors" : "Outbound & Inbound Schedulers";
+      byName.set(key, {
+        name: u.name,
+        role: u.title || existing?.role || u.role,
+        department: existing?.department || dept,
+        phone: u.phone,
+        e164
+      });
+    }
+  } catch {
+  }
+  const directory = Array.from(byName.values());
+  const transfer_list = {
+    default: "+16024569681",
+    "King Amen Ra": "+16024569681",
+    "Principal Broker": "+16024569681"
+  };
+  for (const entry of directory) {
+    transfer_list[entry.name] = entry.e164;
+  }
+  return {
+    inbound_number: DEFAULT_BLAND_CALLER_ID,
+    default_transfer_number: "+16024569681",
+    directory,
+    transfer_list
+  };
 }
 async function getBlandConfig() {
   const row = await one(`SELECT value FROM settings WHERE key='bland_ai_config'`);
@@ -1677,7 +1721,7 @@ Summary: ${summary || "Qualified on outbound AI call"}`,
     next_call_dispatched: nextDispatched
   };
 }
-var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, BLAND_VOICES;
+var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, IWG_TEAM_DIRECTORY, BLAND_VOICES;
 var init_bland = __esm({
   "server/src/services/bland.ts"() {
     "use strict";
@@ -1719,7 +1763,59 @@ STRICT OPERATING RULES & UNIFIED OUTBOUND SCRIPT:
      b) Whisper Briefing to King Amen Ra: "Hi King Amen Ra, this is Sarah with the Medicare Helpline powered by IWG Insurance and Financial Services. I have {prospect_name} from {state} on the line looking for a 2027 plan review. I am merging the call now so you can take over."
      c) 3-Way Merge Introduction: Introduce {prospect_name} and King Amen Ra on the merged line and let King take over.
    - If {prospect_name} prefers to schedule for later, only offer and select a Telephone, In-Person, or Video appointment.
-6. PRIVACY & ZERO DISCLOSURE RULE: NEVER recite, speak, or give out our direct phone number or email address to the caller.`;
+6. INBOUND RECEPTIONIST & DIRECTORY TRANSFER RULES:
+   - When answering an inbound call, greet the caller warmly as the AI Receptionist for the Medicare Helpline powered by IWG Insurance and Financial Services: "Hello, thank you for calling the Medicare Helpline powered by IWG Insurance and Financial Services, this is Sarah. How may I help you today, or who on our directory would you like to be connected with?"
+   - Actively listen for any request to speak to a specific person, broker, advisor, scheduler, or department on the I Will Global Directory (e.g., "Can I speak to King Amen Ra?", "Connect me to Aneesha", "Put me through to Sarah Jenkins", "Is Robert Chen available?", "Transfer me to Kamille", etc.).
+   - As soon as the caller asks for anyone on the directory (by full name, first name, last name, or title/role), resolve their phone number from the I Will Global Directory (transfer_list) and route immediately to the "Inbound Directory Transfer" scenario to transfer the call directly to them!
+7. PRIVACY & ZERO DISCLOSURE RULE: NEVER recite, speak, or give out our direct phone number or email address to the caller.`;
+    IWG_TEAM_DIRECTORY = [
+      // Executive & Principal Leadership
+      { name: "King Amen Ra", role: "Principal & Broker of Record (NPN: 16094432)", department: "Executive & Governance", phone: "(602) 456-9681", e164: "+16024569681" },
+      { name: "Aneesha Sullivan", role: "Chief Operating Officer (COO) & Principal Governance", department: "Executive & Governance", phone: "(602) 412-1945", e164: "+16024121945" },
+      { name: "Sarah Jenkins", role: "Sales Director", department: "Executive & Governance", phone: "(480) 331-9401", e164: "+14803319401" },
+      { name: "Marcus Vance", role: "Inbound & Scheduling Manager", department: "Executive & Governance", phone: "(480) 331-9402", e164: "+14803319402" },
+      { name: "Licensed Transfer Agent", role: "Main Transfer Desk & Master Calendar", department: "Executive & Governance", phone: "(480) 331-9455", e164: "+14803319455" },
+      // Dedicated Core Outbound & Scheduling Specialists
+      { name: "JaKeeta Sullivan", role: "Outbound Scheduling Specialist", department: "Outbound & Inbound Schedulers", phone: "(602) 456-2760", e164: "+16024562760" },
+      { name: "Shakira Granger", role: "Outbound Scheduling Specialist", department: "Outbound & Inbound Schedulers", phone: "(602) 753-6169", e164: "+16027536169" },
+      { name: "Kamille Martinez", role: "Outbound Call Specialist & Appointment Setter", department: "Outbound & Inbound Schedulers", phone: "(602) 456-0293", e164: "+16024560293" },
+      { name: "Regina McCullough", role: "Outbound Call Specialist & Appointment Setter", department: "Outbound & Inbound Schedulers", phone: "(602) 456-5903", e164: "+16024565903" },
+      // Licensed Medicare Brokers & Senior Advisors
+      { name: "Robert Chen", role: "Senior Medicare Specialist", department: "Licensed Brokers & Advisors", phone: "(480) 331-9420", e164: "+14803319420" },
+      { name: "Amanda Torres", role: "Medicare Advisor", department: "Licensed Brokers & Advisors", phone: "(480) 331-9421", e164: "+14803319421" },
+      { name: "James Wilson", role: "Retirement & Health Advisor", department: "Licensed Brokers & Advisors", phone: "(480) 331-9422", e164: "+14803319422" },
+      { name: "Rachel Adams", role: "Medicare Benefits Counselor", department: "Licensed Brokers & Advisors", phone: "(480) 331-9423", e164: "+14803319423" },
+      { name: "Carlos Gomez", role: "Bi-lingual Senior Advisor", department: "Licensed Brokers & Advisors", phone: "(480) 331-9424", e164: "+14803319424" },
+      { name: "Emily Watson", role: "Medicare Specialist", department: "Licensed Brokers & Advisors", phone: "(480) 331-9425", e164: "+14803319425" },
+      { name: "Brian O'Connor", role: "Senior Insurance Broker", department: "Licensed Brokers & Advisors", phone: "(480) 331-9426", e164: "+14803319426" },
+      { name: "Jessica Taylor", role: "Medicare Agent", department: "Licensed Brokers & Advisors", phone: "(480) 331-9427", e164: "+14803319427" },
+      { name: "Michael Chang", role: "Senior Health Broker", department: "Licensed Brokers & Advisors", phone: "(480) 331-9428", e164: "+14803319428" },
+      { name: "Laura Martinez", role: "Medicare Advisor", department: "Licensed Brokers & Advisors", phone: "(480) 331-9429", e164: "+14803319429" },
+      { name: "Kevin Brooks", role: "Senior Specialist", department: "Licensed Brokers & Advisors", phone: "(480) 331-9430", e164: "+14803319430" },
+      { name: "Nicole Foster", role: "Medicare Counselor", department: "Licensed Brokers & Advisors", phone: "(480) 331-9431", e164: "+14803319431" },
+      { name: "Timothy Hays", role: "Insurance Specialist", department: "Licensed Brokers & Advisors", phone: "(480) 331-9432", e164: "+14803319432" },
+      // Outbound & Inbound Scheduling Specialists
+      { name: "David Miller", role: "Outbound Senior Scheduler", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9411", e164: "+14803319411" },
+      { name: "Chloe Bennett", role: "Outbound Call Specialist", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9412", e164: "+14803319412" },
+      { name: "Jordan Rivera", role: "Outbound Lead Coordinator", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9413", e164: "+14803319413" },
+      { name: "Hannah Abbott", role: "Outbound Appointment Setter", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9414", e164: "+14803319414" },
+      { name: "Maya Collins", role: "Outbound Call Specialist", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9415", e164: "+14803319415" },
+      { name: "Tyler Sanders", role: "Outbound Call Scheduler", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9416", e164: "+14803319416" },
+      { name: "Vikram Patel", role: "Outbound Appointment Setter", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9417", e164: "+14803319417" },
+      { name: "Sofia Ramirez", role: "Outbound Lead Qualifier", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9418", e164: "+14803319418" },
+      { name: "Lucas Nelson", role: "Outbound Call Specialist", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9419", e164: "+14803319419" },
+      { name: "Emma Russell", role: "Outbound Appointment Setter", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9433", e164: "+14803319433" },
+      { name: "Kevin Wright", role: "Outbound Call Specialist", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9434", e164: "+14803319434" },
+      { name: "Alicia Diaz", role: "Outbound Call Scheduler", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9435", e164: "+14803319435" },
+      { name: "Nathan Parker", role: "Outbound Lead Coordinator", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9436", e164: "+14803319436" },
+      { name: "Zainab Khouri", role: "Outbound Call Specialist", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9437", e164: "+14803319437" },
+      { name: "Brandon Sullivan", role: "Outbound Appointment Setter", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9438", e164: "+14803319438" },
+      { name: "Jasmine Chen", role: "Outbound Call Specialist", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9439", e164: "+14803319439" },
+      { name: "Marcus Reed", role: "Outbound Call Scheduler", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9440", e164: "+14803319440" },
+      { name: "Kayla Bailey", role: "Outbound Lead Qualifier", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9441", e164: "+14803319441" },
+      { name: "Derek Howard", role: "Outbound Appointment Setter", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9442", e164: "+14803319442" },
+      { name: "Samantha Wood", role: "Outbound Call Specialist", department: "Outbound & Inbound Schedulers", phone: "(480) 331-9443", e164: "+14803319443" }
+    ];
     BLAND_VOICES = [
       { id: "maya", name: "Maya (Warm & Empathetic Female \u2014 Medicare Specialist)", gender: "Female", accent: "American", is_recommended: true },
       { id: "ryan", name: "Ryan (Trustworthy & Calm Male \u2014 Senior Advisor)", gender: "Male", accent: "American", is_recommended: true },
@@ -8770,6 +8866,14 @@ blandAuth.post("/config", async (req, res) => {
 });
 blandAuth.get("/voices", (_req, res) => {
   res.json({ voices: BLAND_VOICES, allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES });
+});
+blandAuth.get("/directory", async (_req, res) => {
+  try {
+    const dir = await getInboundDirectory();
+    res.json(dir);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 blandAuth.post("/warm-transfer-mode", async (req, res) => {
   try {
