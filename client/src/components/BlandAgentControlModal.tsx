@@ -440,7 +440,35 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
           </div>
         </div>
 
-        {/* 3. INBOUND AI RECEPTIONIST & TEAM DIRECTORY TRANSFER */}
+        {/* 2.5 ACTIVE UNIFIED OUTBOUND SCRIPT & AUTOMATIC AI WHISPER FOR ALL */}
+        <div
+          style={{
+            background: 'rgba(200, 150, 62, 0.08)',
+            border: '1.5px solid rgba(200, 150, 62, 0.45)',
+            borderRadius: '12px',
+            padding: '1rem 1.2rem',
+            marginBottom: '1.25rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.45rem' }}>
+            <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#ffd88a', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <span>📜</span>
+              <span>Unified Outbound Script (2027 Medicare Changes) & Automatic AI Whisper</span>
+            </div>
+            <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '999px', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', color: '#a7f3d0', fontWeight: 800 }}>
+              🤖 Auto-Whisper Enabled for All
+            </span>
+          </div>
+          <div style={{ fontSize: '0.82rem', color: '#e2e8f0', lineHeight: 1.5, background: 'rgba(5, 16, 57, 0.65)', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid rgba(200, 150, 62, 0.3)' }}>
+            <div><strong>Opening:</strong> "Hello <em>[Prospect Name]</em>, this is <em>[Caller Name / Sarah]</em> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"</div>
+            <div style={{ marginTop: '0.3rem' }}><strong>Value & 2027 Hook:</strong> "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Medicare plans. <strong>Would you like to know about the changes for 2027?</strong>"</div>
+            <div style={{ marginTop: '0.3rem', color: '#6ee7b7', fontSize: '0.78rem' }}>
+              <strong>Automatic AI Whisper for All:</strong> Sarah AI automatically whispers the private briefing to King Amen Ra and any of the 42 directory members before merging the call.
+            </div>
+          </div>
+        </div>
+
+        {/* 3. INBOUND AI RECEPTIONIST, 6-PRODUCT FUNNEL & TEAM DIRECTORY TRANSFER */}
         <div
           style={{
             background: 'rgba(16, 185, 129, 0.07)',
@@ -454,13 +482,15 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
             <div>
               <div style={{ fontWeight: 800, fontSize: '0.98rem', color: '#6ee7b7', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span>🎧</span>
-                <span>Inbound AI Receptionist & Directory Transfer (+1 520-841-5736)</span>
+                <span>Inbound AI Receptionist, 6-Product Funnel & Directory Transfer (+1 520-841-5736)</span>
                 <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '999px', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', color: '#a7f3d0' }}>
                   {directory.length || 42} Directory Members Active
                 </span>
               </div>
               <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: '0.3rem', lineHeight: 1.45 }}>
-                On inbound calls, Sarah actively listens for requests to speak to <strong>anyone on the I Will Global Directory</strong> (by full name, first name, last name, or role) and immediately whisper-transfers the caller to their direct phone line.
+                <strong>Inbound Greeting:</strong> <em>"Thank you for calling IWG Insurance and Financial Services, how may I direct your call?"</em>
+                <br />
+                Sarah funnels callers to our <strong>6 Product Lines</strong> (<strong>Medicare 2027 Changes</strong>, <strong>Individual & Family Health</strong>, <strong>Group Health 1–50+</strong>, <strong>Investment Grade Life / IUL</strong>, <strong>Asset-Based Long Term Care</strong>, and <strong>Term Life with Living Benefits</strong>) or immediately executes an <strong>Automatic AI Whisper Transfer</strong> to anyone on the <strong>I Will Global Team Directory</strong>.
               </div>
             </div>
             <button

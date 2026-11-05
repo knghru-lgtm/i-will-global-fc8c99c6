@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import IWGBrandedVideoPlayer from '../components/IWGBrandedVideoPlayer';
 import { VideoGuideModal } from '../components/VideoGuideModal';
+import { PublicTeamDirectorySection } from '../components/PublicTeamDirectorySection';
 import './Home.css';
 
 const Home = () => {
@@ -122,6 +123,10 @@ const Home = () => {
               <span className="pill-emoji">⏳</span>
               <span className="pill-name">Term Life (Living Benefits)</span>
             </Link>
+            <a href="#our-team" className="offering-pill">
+              <span className="pill-emoji">👥</span>
+              <span className="pill-name">Our Team Directory</span>
+            </a>
           </div>
         </div>
       </nav>
@@ -356,6 +361,9 @@ const Home = () => {
           </div>
         </div>
       </section>
+
+      {/* Our Team — Complete I Will Global Team Directory */}
+      <PublicTeamDirectorySection />
 
       {/* Comprehensive Action Banner */}
       <section className="resources-highlight">

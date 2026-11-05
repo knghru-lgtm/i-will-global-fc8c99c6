@@ -12,6 +12,7 @@ import {
   dispatchNextLeadInQueue,
   canDispatchOutboundCall,
   getInboundDirectory,
+  dispatchAiWhisperTransfer,
 } from '../services/bland.ts';
 import { one, q } from '../db/index.ts';
 
@@ -26,6 +27,16 @@ blandPublic.post('/webhook', async (req, res) => {
   } catch (err: any) {
     console.error('Bland webhook error:', err);
     res.status(500).json({ error: err.message || 'Webhook processing failed' });
+  }
+});
+
+// Public Team Directory endpoint for the main webpage ("Our Team")
+blandPublic.get('/public-directory', async (_req, res) => {
+  try {
+    const dir = await getInboundDirectory();
+    res.json(dir);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -124,6 +135,36 @@ blandAuth.get('/directory', async (_req, res) => {
   try {
     const dir = await getInboundDirectory();
     res.json(dir);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3c. Automatic AI Whisper Transfer for All Callers & All Directory Members
+blandAuth.post('/whisper-transfer', async (req, res) => {
+  try {
+    const {
+      recipient_name,
+      recipient_phone,
+      prospect_name,
+      prospect_phone,
+      state,
+      notes,
+      place_live_whisper_call,
+    } = req.body || {};
+
+    const result = await dispatchAiWhisperTransfer({
+      recipient_name,
+      recipient_phone,
+      prospect_name,
+      prospect_phone,
+      state,
+      notes,
+      caller_name: req.user?.name || 'Sarah',
+      place_live_whisper_call: Boolean(place_live_whisper_call),
+    });
+
+    res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

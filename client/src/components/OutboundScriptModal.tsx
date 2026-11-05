@@ -65,8 +65,22 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
   const displayName = clientName && clientName !== '[Client Name]' ? clientName : 'Beneficiary';
   const agentName = user?.name || 'Sarah';
 
-  const whisperScriptText = `Hi King Amen Ra, this is ${agentName} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${displayName} on the line looking for a 2027 plan comparison and coverage review. I am merging the call now so you can take over.`;
-  const mergeScriptText = `Thank you so much for holding, ${displayName}! I now have King Amen Ra, our Principal Broker and Licensed Senior Advisor at IWG Insurance and Financial Services, right here on the line with both of us. King, I have whispered a briefing on ${displayName}'s coverage goals, so I will step back and let you two take it from here!`;
+  const whisperScriptText = `Hi King Amen Ra, this is Sarah AI whispering automatically on behalf of ${agentName} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${displayName} on the line asking about the 2027 Medicare changes and plan review. Merging the call automatically now so you can take over!`;
+  const mergeScriptText = `Thank you so much for holding, ${displayName}! I now have King Amen Ra, our Principal Broker and Licensed Senior Advisor at IWG Insurance and Financial Services, right here on the line with both of us. King, Sarah AI has automatically whispered the briefing on ${displayName}'s 2027 Medicare coverage goals, so I will step back and let you two take it from here!`;
+
+  const speakAiWhisperAutomatically = (textToSpeak: string) => {
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        utterance.rate = 1.02;
+        utterance.pitch = 1.05;
+        window.speechSynthesis.speak(utterance);
+      }
+    } catch {
+      // ignore if speech synthesis is unavailable
+    }
+  };
 
   return (
     <div className="slideover-overlay" onClick={onClose}>
@@ -311,39 +325,42 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
             ))}
           </div>
 
-          {/* STEP 1: SARAH'S OPENING GREETING & 6-DIVISION QUALIFICATION */}
+          {/* STEP 1: SARAH'S OPENING GREETING & 2027 MEDICARE CHANGES */}
           {activeStep === 1 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Step 1: Sarah's Required Opening Greeting & Qualification
+                  Step 1: Required Opening Greeting & 2027 Changes Script (Unified for All Callers & Sarah AI)
                 </h4>
 
                 <div style={{ fontSize: '0.92rem', lineHeight: 1.6, color: '#e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ background: 'rgba(200,150,62,0.12)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #c8963e' }}>
                     <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#ffd88a', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                      1. Mandatory Opening Sentence (Word-for-Word with Sarah):
+                      1. Mandatory Opening Sentence (Word-for-Word):
                     </div>
-                    <p style={{ margin: 0, fontWeight: 700, color: '#fff', fontSize: '0.96rem' }}>
+                    <p style={{ margin: '0 0 0.35rem', fontWeight: 700, color: '#fff', fontSize: '0.96rem' }}>
                       "Hello <strong>{displayName}</strong>, this is <strong>{agentName}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
                     </p>
+                    <div style={{ fontSize: '0.76rem', color: '#cbd5e1', fontStyle: 'italic' }}>
+                      Template: "Hello [Prospect Name], this is [Caller Name / Sarah] calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+                    </div>
                   </div>
 
                   <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #38bdf8' }}>
                     <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                      2. Fiduciary Value Proposition & State / Division Discovery:
+                      2. Fiduciary Value Statement:
                     </div>
-                    <p style={{ margin: 0 }}>
-                      "We are a <strong>100% free fiduciary advisory</strong> representing over <strong>104 premier carriers</strong> with <strong>zero broker fees</strong>. To give you the most accurate information, could you tell me which <strong>state</strong> you're located in, and are you looking for <strong>Medicare plans</strong>, <strong>individual and family health</strong>, <strong>group health for businesses</strong>, <strong>life insurance and IUL</strong>, or <strong>asset-based long-term care</strong>?"
+                    <p style={{ margin: 0, fontWeight: 700, color: '#fff', fontSize: '0.95rem' }}>
+                      "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Medicare plans."
                     </p>
                   </div>
 
                   <div style={{ background: 'rgba(16,185,129,0.12)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
                     <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#34d399', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                      3. Transition to Plan Review or Immediate Whisper Warm Transfer:
+                      3. 2027 Changes Question & Automatic AI Whisper Transfer:
                     </div>
-                    <p style={{ margin: '0 0 0.6rem', fontWeight: 600, color: '#f8fafc' }}>
-                      "As you know, plan benefits, doctor networks, and drug formularies change every January 1st. Would you like a personalized 2027 plan comparison or quote with our Principal Broker and Licensed Senior Advisor, <strong>King Amen Ra</strong>?"
+                    <p style={{ margin: '0 0 0.6rem', fontWeight: 800, color: '#6ee7b7', fontSize: '1.02rem' }}>
+                      "Would you like to know about the changes for 2027?"
                     </p>
                     <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
                       <button
@@ -351,11 +368,12 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                         className="btn btn-accent"
                         onClick={() => {
                           setActiveStep(3);
+                          speakAiWhisperAutomatically(whisperScriptText);
                           setIsWarmTransferOpen(true);
                         }}
                         style={{ padding: '0.45rem 0.9rem', fontSize: '0.84rem', fontWeight: 800 }}
                       >
-                        ⚡ Yes (King Available) → Whisper Warm Transfer to (602) 456-9681
+                        🤖 Yes → Automatic AI Whisper Transfer (King / Directory)
                       </button>
                       <button
                         type="button"
@@ -363,7 +381,7 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                         onClick={() => setActiveStep(2)}
                         style={{ padding: '0.45rem 0.9rem', fontSize: '0.84rem', fontWeight: 700 }}
                       >
-                        📊 Review 2027 Medicare Costs & Plan G / Advantage First →
+                        📊 Review 2027 Medicare Changes First →
                       </button>
                     </div>
                   </div>

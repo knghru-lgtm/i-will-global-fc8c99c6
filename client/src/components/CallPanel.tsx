@@ -524,17 +524,20 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                 <strong>🛡️ CMS / TPMO Disclaimer:</strong> "{tpmo}"
               </div>
 
-              {/* Step 1: Sarah Unified Opening Greeting & Qualification */}
+              {/* Step 1: Sarah Unified Opening Greeting & 2027 Changes Question */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid var(--accent)' }}>
                 <div style={{ fontWeight: 800, color: 'var(--accent)', marginBottom: '0.4rem', fontSize: '0.92rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
-                  <span>Step 1: Sarah's Unified Opening Greeting & 6-Division Qualification</span>
-                  <span className="badge badge-gold" style={{ fontSize: '0.68rem' }}>SAME SCRIPT AS SARAH AI</span>
+                  <span>Step 1: Unified Opening Greeting & 2027 Changes Script</span>
+                  <span className="badge badge-gold" style={{ fontSize: '0.68rem' }}>AUTO AI WHISPER FOR ALL</span>
                 </div>
                 <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5, fontWeight: 700, color: '#fff' }}>
                   "Hello <strong>{contact.name || 'Beneficiary'}</strong>, this is <strong>{user?.name || 'Sarah'}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
                 </p>
-                <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5 }}>
-                  "We are a <strong>100% free fiduciary advisory</strong> representing over <strong>104 premier carriers</strong> with <strong>zero broker fees</strong>. To give you the most accurate information, could you tell me which <strong>state</strong> you're located in, and are you looking for <strong>Medicare plans</strong>, <strong>individual and family health</strong>, <strong>group health for businesses</strong>, <strong>life insurance and IUL</strong>, or <strong>asset-based long-term care</strong>?"
+                <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5, fontWeight: 700, color: '#f8fafc' }}>
+                  "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Medicare plans."
+                </p>
+                <p style={{ margin: '0 0 0.5rem', fontWeight: 800, color: '#6ee7b7', fontSize: '0.96rem', lineHeight: 1.5 }}>
+                  "Would you like to know about the changes for 2027?"
                 </p>
                 <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: '#e0ac53', lineHeight: 1.5 }}>
                   "For 2027, Part A has a $0 premium ($1,788 hospital deductible), Part B is $209.50/month ($292 deductible, uncapped 20% coinsurance), and Part D caps out-of-pocket drug costs at $2,400/year ($35 insulin, $0 adult vaccines). We compare Medigap Plan G, Plan N, and Medicare Advantage side-by-side. Would you like a personalized plan comparison or quote with our Principal Broker, <strong>King Amen Ra</strong>?"
@@ -542,24 +545,24 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
 
                 <div style={{ background: 'rgba(59,130,246,0.12)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #3b82f6', marginTop: '0.5rem' }}>
                   <p style={{ margin: '0 0 0.4rem', fontWeight: 700, color: '#60a5fa' }}>
-                    👉 Path A — King Amen Ra Available (Live Whisper Warm Transfer to (602) 456-9681):
+                    👉 Path A — Automatic AI Whisper Warm Transfer (Enabled for All Callers & All Directory Members):
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.85rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span style={{ color: '#10b981', fontWeight: 700 }}>• Tell Caller & Whisper Brief King Amen Ra:</span>
+                      <span style={{ color: '#10b981', fontWeight: 700 }}>• AI Automatically Whispers Briefing for You:</span>
                       <button
                         type="button"
                         className="btn btn-accent"
                         onClick={() => setIsWarmTransferOpen(true)}
                         style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '0.35rem', boxShadow: '0 2px 8px rgba(212, 160, 76, 0.3)' }}
-                        title="Live Whisper Warm Transfer to Principal Broker King Amen Ra at (602) 456-9681"
+                        title="Launch Automatic AI Whisper Warm Transfer to King Amen Ra or any Directory Member"
                       >
-                        ⚡ Whisper Warm Transfer → (602) 456-9681
+                        🤖 Auto AI Whisper Transfer → (602) 456-9681
                       </button>
                     </div>
                     <div style={{ paddingLeft: '0.65rem', color: '#cbd5e1', lineHeight: 1.45, fontStyle: 'italic' }}>
-                      <strong>Say to Prospect:</strong> "I am connecting you right now directly with King Amen Ra, our Principal Broker and Licensed Senior Advisor. Please stay on the line for just a moment while I whisper a quick briefing to him and bridge your call."<br />
-                      <strong>🤫 Whisper to King on Line 2:</strong> "Hi King Amen Ra, this is {user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have {contact.name || 'our prospect'} on hold looking for a 2027 plan review. I am merging the call now so you can take over."
+                      <strong>Say to Prospect:</strong> "I am connecting you right now directly with King Amen Ra, our Principal Broker and Licensed Senior Advisor. Please stay on the line for just a moment while our AI whispers a quick briefing to him and bridges your call."<br />
+                      <strong>🤖 Automatic AI Whisper (Spoken by Sarah AI):</strong> "Hi King Amen Ra, this is Sarah AI whispering automatically on behalf of {user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have {contact.name || 'our prospect'} on hold asking about the 2027 Medicare changes and plan review. Merging the call automatically now so you can take over!"
                     </div>
                   </div>
                 </div>

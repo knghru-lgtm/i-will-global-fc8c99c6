@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import './About.css';
 import './Page.css';
+import { PublicTeamDirectorySection } from '../components/PublicTeamDirectorySection';
 
 const CARRIERS = [
   'UnitedHealthcare',
@@ -256,6 +257,11 @@ const About = () => {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Our Team — Complete I Will Global Team Directory */}
+        <div style={{ margin: '3rem -1.5rem' }}>
+          <PublicTeamDirectorySection />
         </div>
 
         {/* Call to Action Banner */}

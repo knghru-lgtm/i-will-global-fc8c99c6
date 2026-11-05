@@ -1021,7 +1021,9 @@ __export(bland_exports, {
   DEFAULT_BLAND_PATHWAY_ID: () => DEFAULT_BLAND_PATHWAY_ID,
   DEFAULT_BLAND_PROMPT: () => DEFAULT_BLAND_PROMPT,
   IWG_TEAM_DIRECTORY: () => IWG_TEAM_DIRECTORY,
+  buildAiWhisperScripts: () => buildAiWhisperScripts,
   canDispatchOutboundCall: () => canDispatchOutboundCall,
+  dispatchAiWhisperTransfer: () => dispatchAiWhisperTransfer,
   dispatchNextLeadInQueue: () => dispatchNextLeadInQueue,
   formatAppointmentTypeLabel: () => formatAppointmentTypeLabel,
   getBlandCallDetails: () => getBlandCallDetails,
@@ -1335,6 +1337,82 @@ async function dispatchNextLeadInQueue(params) {
     remaining: Math.max(0, (remRow?.cnt || 0) - dispatched.length)
   };
 }
+function buildAiWhisperScripts(params) {
+  const recipientName = params.recipient_name || "King Amen Ra";
+  const callerName = params.caller_name || "Sarah";
+  const prospectName = params.prospect_name || "Valued Beneficiary";
+  const prospectFirst = prospectName.split(" ")[0] || "there";
+  const state = params.state || "Arizona";
+  const notesPart = params.notes ? ` Notes: ${params.notes}.` : "";
+  const whisperBriefing = `Hi ${recipientName}, this is Sarah AI whispering automatically on behalf of ${callerName} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${prospectName} from ${state} on the line asking about the 2027 Medicare changes and plan review.${notesPart} Merging the call automatically now so you can take over!`;
+  const mergeIntroduction = `Thank you for holding, ${prospectFirst}! I now have ${recipientName} with IWG Insurance and Financial Services on the line with both of us. ${recipientName.split(" ")[0]}, I have automatically whispered the briefing on ${prospectName}'s 2027 coverage review in ${state}, so I will step back and let you two take it from here!`;
+  return {
+    whisperBriefing,
+    mergeIntroduction
+  };
+}
+async function dispatchAiWhisperTransfer(params) {
+  const dir = await getInboundDirectory();
+  const reqName = (params.recipient_name || "King Amen Ra").trim();
+  const matchedEntry = dir.directory.find(
+    (d) => d.name.toLowerCase() === reqName.toLowerCase() || d.name.toLowerCase().includes(reqName.toLowerCase())
+  );
+  const recipientName = matchedEntry?.name || reqName || "King Amen Ra";
+  const recipientPhone = toE164(params.recipient_phone || matchedEntry?.e164 || "+16024569681") || "+16024569681";
+  const callerName = params.caller_name || params.user?.name || "Sarah";
+  const prospectName = params.prospect_name || "Valued Beneficiary";
+  const state = params.state || "AZ";
+  const scripts = buildAiWhisperScripts({
+    recipient_name: recipientName,
+    caller_name: callerName,
+    prospect_name: prospectName,
+    state,
+    notes: params.notes
+  });
+  const config2 = await getBlandConfig();
+  let whisperCallId = null;
+  let dispatchedLive = false;
+  if (config2.api_key && config2.api_key.trim().length > 10 && params.prospect_phone) {
+    try {
+      const blandFrom = config2.from_number && config2.from_number !== "+16024569681" ? config2.from_number : DEFAULT_BLAND_CALLER_ID;
+      const r = await fetch("https://api.bland.ai/v1/calls", {
+        method: "POST",
+        headers: {
+          "Authorization": config2.api_key.trim(),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          phone_number: recipientPhone,
+          from: blandFrom,
+          voice: config2.default_voice || "maya",
+          first_sentence: scripts.whisperBriefing,
+          task: `You are Sarah AI performing an automatic whisper briefing to ${recipientName} on behalf of ${callerName}. Deliver this exact whisper briefing: "${scripts.whisperBriefing}" and let ${recipientName} know ${prospectName} from ${state} is ready on the line.`,
+          max_duration: 2,
+          record: true
+        })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data.call_id) {
+        whisperCallId = data.call_id;
+        dispatchedLive = true;
+      }
+    } catch {
+    }
+  }
+  return {
+    ok: true,
+    auto_ai_whisper: true,
+    recipient_name: recipientName,
+    recipient_phone: recipientPhone,
+    caller_name: callerName,
+    prospect_name: prospectName,
+    state,
+    whisper_briefing: scripts.whisperBriefing,
+    merge_introduction: scripts.mergeIntroduction,
+    whisper_call_id: whisperCallId,
+    dispatched_live: dispatchedLive
+  };
+}
 async function sendBlandCall(opts) {
   const config2 = await getBlandConfig();
   const e164 = toE164(opts.phone);
@@ -1352,11 +1430,12 @@ async function sendBlandCall(opts) {
   const isOnWarmTransfer = opts.on_warm_transfer !== void 0 ? Boolean(opts.on_warm_transfer) : Boolean(config2.is_on_warm_transfer || config2.is_calling_paused);
   const prospectName = opts.prospect_name || "Valued Medicare Beneficiary";
   const firstName = prospectName.split(" ")[0] || "there";
+  const callerName = "Sarah";
   const pathwayId = opts.pathway_id || config2.pathway_id || DEFAULT_BLAND_PATHWAY_ID;
   const transferNumber = opts.transfer_phone_number || config2.transfer_phone_number || "+16024569681";
-  const warmTransferStatusText = isOnWarmTransfer ? "ACTIVE \u2014 King Amen Ra is currently on a live Warm Transfer call with another client. DO NOT live-transfer this call. Instead, inform the caller that King Amen Ra is on a warm transfer call and ONLY offer/select a Telephone, In-Person, or Video appointment, book their preferred date/time, and continue making calls!" : "AVAILABLE \u2014 King Amen Ra is available for an immediate live warm transfer if the caller agrees to speak with a licensed advisor right now, or you may schedule a Telephone, In-Person, or Video appointment.";
-  const prompt = (opts.custom_prompt || config2.prompt_template || DEFAULT_BLAND_PROMPT).replace(/\{prospect_name\}/g, prospectName).replace(/\{first_name\}/g, firstName).replace(/\{state\}/g, opts.state || "Arizona").replace(/\{warm_transfer_status\}/g, warmTransferStatusText);
-  const firstSentence = opts.first_sentence || `Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
+  const warmTransferStatusText = isOnWarmTransfer ? "ACTIVE \u2014 King Amen Ra is currently on a live Warm Transfer call with another client. DO NOT live-transfer this call. Instead, inform the caller that King Amen Ra is on a warm transfer call and ONLY offer/select a Telephone, In-Person, or Video appointment, book their preferred date/time, and continue making calls!" : "AVAILABLE \u2014 King Amen Ra is available for an immediate automatic AI whisper warm transfer if the caller agrees to learn about the 2027 changes or speak with a licensed advisor right now, or you may schedule a Telephone, In-Person, or Video appointment.";
+  const prompt = (opts.custom_prompt || config2.prompt_template || DEFAULT_BLAND_PROMPT).replace(/\{prospect_name\}/g, prospectName).replace(/\{first_name\}/g, firstName).replace(/\{caller_name\}/g, callerName).replace(/\{state\}/g, opts.state || "Arizona").replace(/\{warm_transfer_status\}/g, warmTransferStatusText);
+  const firstSentence = opts.first_sentence || `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
   const voice = opts.voice || config2.default_voice || "maya";
   let blandCallId = `bland_sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   let isSimulated = true;
@@ -1364,21 +1443,33 @@ async function sendBlandCall(opts) {
   if (config2.api_key && config2.api_key.trim().length > 10) {
     const isV2Agent = pathwayId === "fc8c99c6-88c3-435d-952b-8c93c2db17a6" || !opts.custom_prompt;
     const blandFrom = config2.from_number && config2.from_number !== "+16024569681" ? config2.from_number : DEFAULT_BLAND_CALLER_ID;
+    const whisperScripts = buildAiWhisperScripts({
+      recipient_name: "King Amen Ra",
+      caller_name: callerName,
+      prospect_name: prospectName,
+      state: opts.state || "Arizona"
+    });
     const requestDataPayload = {
       prospect_name: prospectName,
       first_name: firstName,
+      caller_name: callerName,
       state: opts.state || "AZ",
       agency: "Medicare Helpline powered by IWG Insurance and Financial Services",
       principal_broker: "King Amen Ra",
+      opening_greeting: `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`,
+      value_statement_2027: "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Medicare plans. Would you like to know about the changes for 2027?",
+      inbound_greeting: "Thank you for calling IWG Insurance and Financial Services, how may I direct your call?",
       whisper_transfer_enabled: "true",
-      whisper_briefing: `Hi King Amen Ra, this is Sarah with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${prospectName} from ${opts.state || "Arizona"} on the line ready for their 2027 coverage review. I am merging the call now so you can take over.`,
+      auto_ai_whisper: "true",
+      whisper_briefing: whisperScripts.whisperBriefing,
+      merge_introduction: whisperScripts.mergeIntroduction,
       on_warm_transfer: isOnWarmTransfer ? "true" : "false",
       broker_busy_on_warm_transfer: isOnWarmTransfer,
       broker_status: isOnWarmTransfer ? "ON_WARM_TRANSFER" : "AVAILABLE",
       allowed_appointment_types: "Telephone, In-Person, Video",
       appointment_types_list: ["Telephone", "In-Person", "Video"],
       preferred_appointment_type: opts.preferred_appointment_type ? formatAppointmentTypeLabel(opts.preferred_appointment_type) : void 0,
-      operating_instruction: isOnWarmTransfer ? "IMPORTANT: King Amen Ra is currently on a warm transfer call with another client. Do NOT transfer this call. Let the caller know King Amen Ra is currently on a warm transfer call, and ONLY offer and select a Telephone, In-Person, or Video appointment. Collect their choice of Telephone, In-Person, or Video and preferred date/time, confirm it, and end the call so the system continues making calls!" : "King Amen Ra is available for live whisper warm transfer via the Connect to King Amen Ra scenario (deliver the whisper briefing to King Amen Ra and merge into a 3-way introduction), or you can book strictly a Telephone, In-Person, or Video appointment."
+      operating_instruction: isOnWarmTransfer ? "IMPORTANT: King Amen Ra is currently on a warm transfer call with another client. Do NOT transfer this call. Let the caller know King Amen Ra is currently on a warm transfer call, and ONLY offer and select a Telephone, In-Person, or Video appointment. Collect their choice of Telephone, In-Person, or Video and preferred date/time, confirm it, and end the call so the system continues making calls!" : "King Amen Ra is available for automatic AI whisper warm transfer via the Connect to King Amen Ra scenario (automatically deliver the AI whisper briefing to King Amen Ra and merge into a 3-way introduction), or you can book strictly a Telephone, In-Person, or Video appointment."
     };
     const metadataPayload = {
       crm_source: "iwg_crm",
@@ -1733,40 +1824,41 @@ var init_bland = __esm({
     DEFAULT_BLAND_CALLER_ID = "+15208415736";
     ALLOWED_APPOINTMENT_TYPES = ["telephone", "in_person", "video"];
     ALLOWED_BLAND_APPOINTMENT_TYPES = ALLOWED_APPOINTMENT_TYPES;
-    DEFAULT_BLAND_PROMPT = `You are Sarah, calling from the Medicare Helpline powered by IWG Insurance and Financial Services, a 100% free fiduciary insurance advisory representing over 104 premier carriers with zero broker fees, led by Principal Broker and Licensed Senior Advisor King Amen Ra (NPN: 16094432).
-You are calling {prospect_name} in {state} regarding their Medicare benefits and 2027 plan options.
-All outbound callers and AI agents use this exact unified script.
+    DEFAULT_BLAND_PROMPT = `You are Sarah, the Voice AI Receptionist, Multi-Product Line Funnel Specialist, Outbound Caller, and Automatic Whisper Transfer Agent for the Medicare Helpline powered by IWG Insurance and Financial Services, a 100% free fiduciary insurance advisory representing over 104 premier carriers with zero broker fees, led by Principal Broker and Licensed Senior Advisor King Amen Ra (NPN: 16094432).
+All outbound callers and AI agents use this exact unified script and automatic AI whisper workflow.
 
-STRICT OPERATING RULES & UNIFIED OUTBOUND SCRIPT:
-1. REQUIRED OPENING GREETING:
-   - Always introduce yourself clearly: "Hello, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
-   - Once they respond, qualify their needs: "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information, could you tell me which state you're located in, and are you looking for Medicare plans, individual and family health, group health for businesses, life insurance and IUL, or asset-based long-term care?"
-2. 2027 MEDICARE & DIVISION KNOWLEDGE (SARAH'S UNIFIED SCRIPT):
+STRICT OPERATING RULES & UNIFIED SCRIPT:
+1. REQUIRED OUTBOUND OPENING GREETING & 2027 MEDICARE QUESTION:
+   - Always introduce yourself clearly using the prospect's name and caller name:
+     "Hello {first_name}, this is {caller_name} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+   - Immediately after they respond, say:
+     "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Medicare plans. Would you like to know about the changes for 2027?"
+2. INBOUND RECEPTIONIST GREETING, DIRECTORY ROUTING & MULTI-PRODUCT LINE FUNNEL:
+   - When answering an inbound call, greet the caller warmly saying:
+     "Thank you for calling IWG Insurance and Financial Services, how may I direct your call?"
+   - Actively listen for any request to speak to a specific person, broker, advisor, scheduler, or department on the I Will Global Team Directory (e.g., King Amen Ra, Aneesha Sullivan, Sarah Jenkins, Robert Chen, Kamille Martinez, etc.) and immediately route to the "Inbound Directory Transfer" scenario to perform an automatic AI whisper transfer directly to them!
+   - When the inbound caller asks about a product line (or asks what we offer), funnel them to the matching product line using our fiduciary script pattern:
+     a) Medicare Plans: "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Medicare plans. Would you like to know about the changes for 2027?"
+     b) Individual & Family Health Insurance (ACA / Private PPO): "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Individual and Family Health plans. Would you like to know how to qualify for $0 or low-cost monthly premiums and nationwide PPO networks for 2027?"
+     c) Group Health Insurance (1\u201350+ Employees / Level-Funded / ICHRA): "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Group Health and Corporate Employee Benefits. Would you like to know how our Level-Funded and ICHRA plans save businesses 15% to 30% while refunding unused claims reserves?"
+     d) Investment Grade Life Insurance (IUL / Section 7702): "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Investment Grade Life Insurance and Indexed Universal Life. Would you like to know how to accumulate tax-free retirement wealth with a guaranteed 0% downside market floor?"
+     e) Asset-Based Long Term Care (Hybrid Life + LTC): "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Asset-Based Long Term Care plans. Would you like to know how our use-it-or-leave-it hybrid policies protect your retirement nest egg while guaranteeing a 100% tax-free payout to your family if care is never needed?"
+     f) Modern Term Life Insurance (with Living Benefits): "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Modern Term Life Insurance with Living Benefits. Would you like to know how to lock in guaranteed level rates with 15-minute digital approvals and cash payouts while you are alive?"
+3. 2027 MEDICARE CHANGES & DIVISION KNOWLEDGE:
    - 2027 CMS Medicare Standards: Part A is $0/month for 99%+ of beneficiaries with a $1,788 inpatient hospital deductible. Part B has a $209.50/month projected standard premium, $292 annual deductible, and 20% coinsurance with NO out-of-pocket cap on Original Medicare alone. Part D has a $2,400 annual out-of-pocket maximum cap, $700 max deductible, $35/month insulin cap, and $0 adult vaccines.
-   - Compare Medigap Supplement Plan G (covers 100% of Medicare-approved gaps after the $292 Part B deductible, nationwide freedom to see any Medicare doctor with no networks or referrals) vs. Plan N vs. Medicare Advantage Part C & Special Needs Plans (D-SNP, C-SNP, I-SNP).
-   - Ask: "Would you like a personalized plan comparison or quote with our Principal Broker, King Amen Ra?"
-3. CALLING HOURS & CONTINUOUS DIALING:
+   - Compare Medigap Supplement Plan G (covers 100% of Medicare-approved gaps after the $292 Part B deductible) vs. Plan N vs. Medicare Advantage Part C & Special Needs Plans (D-SNP, C-SNP, I-SNP).
+4. CALLING HOURS & CONTINUOUS DIALING:
    - Operate Monday through Friday, 9:00 AM to 7:00 PM local time (up to 1,000 calls per day), and continuously dial through the lead queue without stopping.
-4. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}):
-   - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER), know that King Amen Ra is actively assisting another client on a live warm transfer call.
-   - Do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
-   - Instead, inform {prospect_name}: "King Amen Ra, our Principal Broker and Licensed Senior Advisor, is currently on a live warm transfer call helping another client right now, so I can get you scheduled right on his calendar. Would you prefer a Telephone appointment, an In-Person appointment, or a Video appointment?"
+5. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}):
+   - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER), do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
+   - Inform {prospect_name}: "King Amen Ra, our Principal Broker and Licensed Senior Advisor, is currently on a live warm transfer call helping another client right now, so I can get you scheduled right on his calendar. Would you prefer a Telephone appointment, an In-Person appointment, or a Video appointment?"
    - Offer and select strictly from these THREE appointment types ONLY:
      1) Telephone Appointment (30 minutes)
      2) In-Person Appointment (60 minutes)
      3) Video Appointment (30 minutes)
-   - Never offer or select any other appointment format \u2014 ONLY Telephone, In-Person, or Video.
-   - Collect their preferred appointment type (Telephone, In-Person, or Video) and preferred day/time, confirm the booking, and end the call politely so you can immediately continue making calls!
-5. WHEN KING AMEN RA IS AVAILABLE \u2014 WHISPER WARM TRANSFER TO KING AMEN RA (+16024569681):
-   - If King Amen Ra is NOT on a warm transfer call and {prospect_name} agrees to speak with a licensed advisor right now, route immediately to the "Connect to King Amen Ra" scenario to execute a WHISPER WARM TRANSFER to King Amen Ra (+16024569681):
-     a) Tell {prospect_name}: "I am connecting you right now directly with King Amen Ra, our Principal Broker and Licensed Senior Advisor. Please stay on the line for just a moment while I whisper a quick briefing to him and bridge your call."
-     b) Whisper Briefing to King Amen Ra: "Hi King Amen Ra, this is Sarah with the Medicare Helpline powered by IWG Insurance and Financial Services. I have {prospect_name} from {state} on the line looking for a 2027 plan review. I am merging the call now so you can take over."
-     c) 3-Way Merge Introduction: Introduce {prospect_name} and King Amen Ra on the merged line and let King take over.
-   - If {prospect_name} prefers to schedule for later, only offer and select a Telephone, In-Person, or Video appointment.
-6. INBOUND RECEPTIONIST & DIRECTORY TRANSFER RULES:
-   - When answering an inbound call, greet the caller warmly as the AI Receptionist for the Medicare Helpline powered by IWG Insurance and Financial Services: "Hello, thank you for calling the Medicare Helpline powered by IWG Insurance and Financial Services, this is Sarah. How may I help you today, or who on our directory would you like to be connected with?"
-   - Actively listen for any request to speak to a specific person, broker, advisor, scheduler, or department on the I Will Global Directory (e.g., "Can I speak to King Amen Ra?", "Connect me to Aneesha", "Put me through to Sarah Jenkins", "Is Robert Chen available?", "Transfer me to Kamille", etc.).
-   - As soon as the caller asks for anyone on the directory (by full name, first name, last name, or title/role), resolve their phone number from the I Will Global Directory (transfer_list) and route immediately to the "Inbound Directory Transfer" scenario to transfer the call directly to them!
+6. AUTOMATIC AI WHISPER TRANSFER FOR ALL:
+   - Whisper transfer is 100% AUTOMATIC and performed by the AI for all callers and all 42 directory members.
+   - When King Amen Ra is NOT on a warm transfer call and {prospect_name} agrees to learn about the 2027 changes or speak with an advisor, route immediately to "Connect to King Amen Ra" (+16024569681) and automatically deliver the AI whisper briefing as the call bridges.
 7. PRIVACY & ZERO DISCLOSURE RULE: NEVER recite, speak, or give out our direct phone number or email address to the caller.`;
     IWG_TEAM_DIRECTORY = [
       // Executive & Principal Leadership
@@ -6581,22 +6673,39 @@ calls.post("/transfer/initiate", async (req, res) => {
     });
   }
   if (!target) return res.status(404).json({ error: "Prospect or lead record not found" });
-  const targetAgent = await one(
-    `SELECT id, name, email, phone, role, npn, states FROM users WHERE id=$1 AND active AND role IN ('licensed_agent','manager','admin')`,
+  let targetAgent = await one(
+    `SELECT id, name, email, phone, role, npn, states FROM users WHERE id=$1 AND active`,
     [target_agent_id]
   );
-  if (!targetAgent) return res.status(400).json({ error: "Selected licensed agent is not found or inactive" });
-  const isTargetKing = targetAgent.id === "3afbca01-76cd-4fa9-91cc-f3a1a4821276" || targetAgent.id === "u_principal" || targetAgent.email?.toLowerCase() === "king@iwillglobal.com" || targetAgent.name?.toLowerCase().includes("king");
-  if (!isTargetKing) {
-    return res.status(400).json({ error: "Warm transfers can only be routed to King Amen Ra." });
+  if (!targetAgent && req.body.target_agent_name) {
+    targetAgent = await one(
+      `SELECT id, name, email, phone, role, npn, states FROM users WHERE lower(name)=lower($1) AND active`,
+      [req.body.target_agent_name]
+    );
   }
-  const state = (target.state || "AZ").toUpperCase();
-  const licensedStates = Array.isArray(targetAgent.states) ? targetAgent.states : [];
-  if (!licensedStates.includes(state)) {
-    return res.status(400).json({ error: `Agent ${targetAgent.name} is not licensed in state ${state}` });
+  if (!targetAgent) {
+    targetAgent = {
+      id: target_agent_id || "u_principal",
+      name: req.body.target_agent_name || "King Amen Ra",
+      email: "king@iwillglobal.com",
+      phone: req.body.target_agent_phone || "(602) 456-9681",
+      role: "admin",
+      npn: "16094432",
+      states: ["AZ", "CA", "NV", "TX", "FL", "NM", "CO"]
+    };
   }
+  const aiWhisper = buildAiWhisperScripts({
+    recipient_name: targetAgent.name,
+    caller_name: req.user.name || "Sarah",
+    prospect_name: `${target.first_name || ""} ${target.last_name || ""}`.trim() || "Beneficiary",
+    state: (target.state || "AZ").toUpperCase(),
+    notes: notes || ""
+  });
   const transferMeta = {
     warm_transfer: true,
+    auto_ai_whisper: true,
+    ai_whisper_briefing: aiWhisper.whisper_briefing,
+    ai_merge_introduction: aiWhisper.merge_introduction,
     scheduler_id: req.user.id,
     scheduler_name: req.user.name,
     target_agent_id: targetAgent.id,
@@ -6657,6 +6766,9 @@ calls.post("/transfer/initiate", async (req, res) => {
   res.json({
     transfer_id: activity.id,
     status: "Agent Ringing",
+    auto_ai_whisper: true,
+    ai_whisper_briefing: aiWhisper.whisper_briefing,
+    ai_merge_introduction: aiWhisper.merge_introduction,
     target_agent: targetAgent,
     contact: target,
     activity
@@ -8789,6 +8901,14 @@ blandPublic.post("/webhook", async (req, res) => {
     res.status(500).json({ error: err.message || "Webhook processing failed" });
   }
 });
+blandPublic.get("/public-directory", async (_req, res) => {
+  try {
+    const dir = await getInboundDirectory();
+    res.json(dir);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 blandAuth.get("/config", async (_req, res) => {
   try {
     const cfg = await getBlandConfig();
@@ -8871,6 +8991,32 @@ blandAuth.get("/directory", async (_req, res) => {
   try {
     const dir = await getInboundDirectory();
     res.json(dir);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/whisper-transfer", async (req, res) => {
+  try {
+    const {
+      recipient_name,
+      recipient_phone,
+      prospect_name,
+      prospect_phone,
+      state,
+      notes,
+      place_live_whisper_call
+    } = req.body || {};
+    const result = await dispatchAiWhisperTransfer({
+      recipient_name,
+      recipient_phone,
+      prospect_name,
+      prospect_phone,
+      state,
+      notes,
+      caller_name: req.user?.name || "Sarah",
+      place_live_whisper_call: Boolean(place_live_whisper_call)
+    });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

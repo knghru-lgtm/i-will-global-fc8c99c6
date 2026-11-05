@@ -85,18 +85,38 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
   const contactName = activeContact?.name || 'Prospect';
   const contactFirstName = (activeContact?.name || 'Prospect').split(' ')[0];
 
+  const [autoAiWhisper, setAutoAiWhisper] = useState<boolean>(true);
+  const [aiWhisperStatus, setAiWhisperStatus] = useState<string>('');
+
+  const speakAiWhisper = (textToSpeak: string) => {
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        utterance.rate = 1.02;
+        utterance.pitch = 1.05;
+        window.speechSynthesis.speak(utterance);
+      }
+    } catch {
+      // ignore if speech synthesis is unavailable
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     setLoading(true);
     setError('');
     setKingPickedUp(false);
+    setAiWhisperStatus('');
 
-    api.get(`/appointments/available-agents?state=${encodeURIComponent(contactState)}`)
-      .then((res) => {
-        // Outbound schedulers warm transfer ONLY to King Amen Ra
-        const kingMatches = (res || []).filter((a: any) => 
-          a.id === '3afbca01-76cd-4fa9-91cc-f3a1a4821276' || 
-          a.id === 'u_principal' || 
+    Promise.all([
+      api.get(`/appointments/available-agents?state=${encodeURIComponent(contactState)}`).catch(() => []),
+      api.get('/bland/directory').catch(() => ({ directory: [] })),
+    ])
+      .then(([res, dirRes]) => {
+        const kingMatches = (res || []).filter((a: any) =>
+          a.id === '3afbca01-76cd-4fa9-91cc-f3a1a4821276' ||
+          a.id === 'u_principal' ||
           a.email?.toLowerCase() === 'king@iwillglobal.com' ||
           a.name?.toLowerCase().includes('king amen ra') ||
           a.name?.toLowerCase().startsWith('king')
@@ -115,7 +135,19 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
           is_principal: true,
         };
 
-        setAgents([kingAgent]);
+        const dirList = (dirRes?.directory || [])
+          .filter((d: any) => !String(d.name || '').toLowerCase().includes('king amen ra'))
+          .map((d: any, idx: number) => ({
+            id: `dir_${idx}_${d.name.replace(/\s+/g, '_').toLowerCase()}`,
+            name: d.name,
+            phone: d.phone || d.e164,
+            title: d.role,
+            department: d.department,
+            is_available: true,
+            is_principal: false,
+          }));
+
+        setAgents([kingAgent, ...dirList]);
         setSelectedAgentId(kingAgent.id);
       })
       .catch((err) => setError(err.message))
@@ -143,7 +175,11 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  const selectedAgent = agents.find((a) => a.id === selectedAgentId);
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
+
+  const whisperBriefingText = `Hi ${selectedAgent?.name || 'King Amen Ra'}, this is Sarah AI whispering automatically on behalf of ${user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${contactName} from ${contactState} on hold on Line 1 asking about the 2027 Medicare changes and plan review${briefingNotes ? ` (${briefingNotes})` : ''}. Merging the call automatically now so you can take over!`;
+
+  const mergeIntroText = `Thank you so much for holding, ${contactFirstName}! I now have ${selectedAgent?.name || 'King Amen Ra'} with IWG Insurance and Financial Services right here on the line with both of us. ${selectedAgent?.name || 'King'}, Sarah AI has automatically whispered a briefing on ${contactName}'s 2027 coverage review in ${contactState}, so I will step back and let you two take it from here!`;
 
   const handleInitiateTransfer = async () => {
     if (!activeContact || !activeContact.id) {
@@ -151,7 +187,7 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
       return;
     }
     if (!selectedAgentId) {
-      setError('Please select an available state-licensed agent.');
+      setError('Please select an available recipient.');
       return;
     }
 
@@ -167,12 +203,28 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
       preOpenedWindow = window.open('about:blank', '_blank');
     } catch (e) {}
 
+    // AUTOMATIC AI WHISPER: Immediately trigger Sarah AI to whisper the briefing for all callers!
+    if (autoAiWhisper) {
+      speakAiWhisper(whisperBriefingText);
+      setAiWhisperStatus(`🤖 Sarah AI is automatically whispering the briefing to ${selectedAgent?.name || 'King Amen Ra'}...`);
+      api.post('/bland/whisper-transfer', {
+        recipient_name: selectedAgent?.name || 'King Amen Ra',
+        recipient_phone: agentPhone,
+        prospect_name: contactName,
+        prospect_phone: activeContact.phone || '',
+        state: contactState,
+        notes: briefingNotes,
+      }).catch(() => {});
+    }
+
     try {
       const res = await api.post('/calls/transfer/initiate', {
         call_id: callId,
         related_type: activeContact.type || 'lead',
         related_id: activeContact.id,
         target_agent_id: selectedAgentId,
+        target_agent_name: selectedAgent?.name || 'King Amen Ra',
+        target_agent_phone: agentPhone,
         notes: briefingNotes,
         prospect_data: {
           first_name: (activeContact.name || 'Prospect').split(' ')[0],
@@ -204,14 +256,16 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
     setKingPickedUp(true);
     setTransferStep('threeway');
     setIsThreeWayLive(true);
+    if (autoAiWhisper) {
+      speakAiWhisper(mergeIntroText);
+      setAiWhisperStatus(`🤖 Sarah AI automatically announced the 3-way merge introduction with ${selectedAgent?.name || 'King Amen Ra'}!`);
+    }
     try {
       if (transferId) {
         await api.post('/calls/transfer/3way-connect', { transfer_id: transferId, call_picked_up_by_king: true });
       }
     } catch (err) {}
   };
-
-  const whisperBriefingText = `Hi ${selectedAgent?.name || 'King Amen Ra'}, this is ${user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${contactName} from ${contactState} on hold on Line 1 looking for a 2027 plan review${briefingNotes ? ` (${briefingNotes})` : ''}. I am merging the call now so you can take over.`;
 
   const handleCopyWhisperScript = () => {
     navigator.clipboard.writeText(whisperBriefingText);
@@ -220,8 +274,7 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
   };
 
   const handleCopyScript = () => {
-    const script = `Thank you so much for holding, ${contactFirstName}! I now have ${selectedAgent?.name || 'King Amen Ra'}, our Principal Broker and Licensed Senior Advisor at IWG Insurance and Financial Services, right here on the line with both of us. ${selectedAgent?.name || 'King'}, I have whispered a briefing on ${contactName}'s coverage goals in ${contactState}, so I will step back and let you two take it from here!`;
-    navigator.clipboard.writeText(script);
+    navigator.clipboard.writeText(mergeIntroText);
     setCopiedScript(true);
     setTimeout(() => setCopiedScript(false), 2500);
   };
@@ -466,106 +519,153 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
                 </ol>
               </div>
 
-              {/* Agents List - KING AMEN RA ONLY */}
+              {/* Automatic AI Whisper Banner & Toggle */}
+              <div style={{ background: 'rgba(16, 185, 129, 0.14)', border: '1.5px solid #10b981', padding: '0.85rem 1rem', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.6rem' }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#34d399', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>🤖</span>
+                    <span>Automatic AI Whisper Enabled for All Transfers</span>
+                    <span style={{ fontSize: '0.7rem', padding: '2px 7px', borderRadius: '10px', background: '#10b981', color: '#051039', fontWeight: 800 }}>
+                      AUTO-WHISPER ON
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginTop: '0.2rem' }}>
+                    Sarah AI automatically speaks and dispatches the private whisper briefing for King Amen Ra and all 42 I Will Global directory members before merging.
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, color: '#a7f3d0' }}>
+                  <input
+                    type="checkbox"
+                    checked={autoAiWhisper}
+                    onChange={(e) => setAutoAiWhisper(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: '#10b981' }}
+                  />
+                  <span>Allow AI to Whisper for All</span>
+                </label>
+              </div>
+
+              {/* Agents List - King Amen Ra + 42 Directory Members */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.4rem' }}>
                   <label style={{ fontWeight: 800, fontSize: '0.92rem', margin: 0, color: '#ffd88a' }}>
-                    👑 Designated Licensed Agent for Warm Transfer (King Amen Ra Only):
+                    👑 Select Transfer Recipient (King Amen Ra or Team Directory):
                   </label>
                   <span className="badge badge-gold" style={{ fontSize: '0.72rem', letterSpacing: '0.5px' }}>
-                    PRINCIPAL BROKER & LICENSED AGENT
+                    AI WHISPER FOR ALL ({agents.length || 1} AVAILABLE)
                   </span>
                 </div>
 
                 {loading ? (
-                  <div style={{ padding: '1.5rem', textAlign: 'center', color: '#94a3b8' }}>Loading Principal Broker King Amen Ra...</div>
+                  <div style={{ padding: '1.5rem', textAlign: 'center', color: '#94a3b8' }}>Loading Principal Broker King Amen Ra & Team Directory...</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                    {agents.map((agent) => {
-                      return (
-                        <div
-                          key={agent.id}
-                          style={{
-                            padding: '1rem 1.15rem',
-                            borderRadius: '10px',
-                            border: '2px solid #c8963e',
-                            backgroundColor: '#16245c',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            boxShadow: '0 4px 15px rgba(200, 150, 62, 0.25)',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                            <div
-                              style={{
-                                width: '44px',
-                                height: '44px',
-                                borderRadius: '50%',
-                                backgroundColor: '#c8963e',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '1.4rem',
-                                color: '#051039',
-                                fontWeight: 800,
-                              }}
-                            >
-                              👑
-                            </div>
-                            <div>
-                              <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                <span>{agent.name}</span>
-                                <span style={{ fontSize: '0.72rem', padding: '1px 8px', borderRadius: '10px', background: '#c8963e', color: '#051039', fontWeight: 800 }}>
-                                  Principal Broker
-                                </span>
-                              </div>
-                              <div style={{ fontSize: '0.82rem', color: '#ffd88a', marginTop: '2px' }}>
-                                Direct Line: <strong>(602) 456-9681</strong> · Main: (480) 331-9455 · NPN: {agent.npn || '16094432'}
-                              </div>
-                              <div style={{ fontSize: '0.76rem', color: '#94a3b8', marginTop: '2px' }}>
-                                Licensed in: AZ, CA, NV, TX, FL, NM, CO · Exclusive Licensed Agent for Warm Transfers
-                              </div>
-                            </div>
-                          </div>
+                    {agents.length > 1 && (
+                      <select
+                        value={selectedAgentId || ''}
+                        onChange={(e) => setSelectedAgentId(String(e.target.value))}
+                        style={{
+                          width: '100%',
+                          padding: '0.65rem 0.85rem',
+                          borderRadius: '8px',
+                          backgroundColor: '#0e1838',
+                          border: '1.5px solid #c8963e',
+                          color: '#ffd88a',
+                          fontWeight: 700,
+                          fontSize: '0.88rem',
+                        }}
+                      >
+                        {agents.map((ag) => (
+                          <option key={ag.id} value={ag.id}>
+                            {ag.is_principal ? '👑 ' : '👤 '}
+                            {ag.name} — {ag.phone} ({ag.title || ag.specialty || 'Directory Member'})
+                          </option>
+                        ))}
+                      </select>
+                    )}
 
-                          <div style={{ textAlign: 'right' }}>
-                            <span
-                              style={{
-                                fontSize: '0.75rem',
-                                padding: '0.25rem 0.6rem',
-                                borderRadius: '12px',
-                                backgroundColor: 'rgba(16,185,129,0.2)',
-                                color: '#34d399',
-                                fontWeight: 700,
-                                border: '1px solid #10b981',
-                              }}
-                            >
-                              ● Ready for Transfers
-                            </span>
-                            <div style={{ fontSize: '0.74rem', color: '#ffd88a', marginTop: '0.35rem', fontWeight: 700 }}>
-                              $25 Lead Credit on Pickup
+                    {selectedAgent && (
+                      <div
+                        key={selectedAgent.id}
+                        style={{
+                          padding: '1rem 1.15rem',
+                          borderRadius: '10px',
+                          border: '2px solid #c8963e',
+                          backgroundColor: '#16245c',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          boxShadow: '0 4px 15px rgba(200, 150, 62, 0.25)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                          <div
+                            style={{
+                              width: '44px',
+                              height: '44px',
+                              borderRadius: '50%',
+                              backgroundColor: '#c8963e',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '1.4rem',
+                              color: '#051039',
+                              fontWeight: 800,
+                            }}
+                          >
+                            {selectedAgent.is_principal ? '👑' : '🤖'}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                              <span>{selectedAgent.name}</span>
+                              <span style={{ fontSize: '0.72rem', padding: '1px 8px', borderRadius: '10px', background: '#c8963e', color: '#051039', fontWeight: 800 }}>
+                                {selectedAgent.is_principal ? 'Principal Broker' : (selectedAgent.title || selectedAgent.specialty || 'Directory Member')}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.82rem', color: '#ffd88a', marginTop: '2px' }}>
+                              Direct Line: <strong>{selectedAgent.phone || '(602) 456-9681'}</strong> · NPN: {selectedAgent.npn || '16094432'}
+                            </div>
+                            <div style={{ fontSize: '0.76rem', color: '#94a3b8', marginTop: '2px' }}>
+                              🤖 Automatic AI Whisper Briefing Enabled · Licensed in: {selectedAgent.licensed_states || 'AZ, CA, NV, TX, FL, NM, CO'}
                             </div>
                           </div>
                         </div>
-                      );
-                    })}
+
+                        <div style={{ textAlign: 'right' }}>
+                          <span
+                            style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.6rem',
+                              borderRadius: '12px',
+                              backgroundColor: 'rgba(16,185,129,0.2)',
+                              color: '#34d399',
+                              fontWeight: 700,
+                              border: '1px solid #10b981',
+                            }}
+                          >
+                            ● AI Whisper Ready
+                          </span>
+                          <div style={{ fontSize: '0.74rem', color: '#ffd88a', marginTop: '0.35rem', fontWeight: 700 }}>
+                            $25 Lead Credit on Pickup
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 <div style={{ marginTop: '0.65rem', padding: '0.65rem 0.85rem', borderRadius: '6px', background: 'rgba(200, 150, 62, 0.12)', border: '1px solid rgba(200, 150, 62, 0.35)', fontSize: '0.8rem', color: '#ffd88a', lineHeight: '1.4' }}>
-                  ℹ️ <strong>Warm Transfer Rule:</strong> Outbound schedulers exclusively warm transfer calls to <strong>King Amen Ra</strong>. Schedulers are only credited ($25) if the call is answered and picked up by King.
+                  ℹ️ <strong>Automatic AI Whisper Rule:</strong> Outbound Medicare warm transfers default to <strong>King Amen Ra (602) 456-9681</strong>, and AI automatic whisper is enabled for King and all 42 I Will Global directory members.
                 </div>
               </div>
 
               {/* Briefing Notes */}
               <div>
                 <label style={{ fontWeight: 600, fontSize: '0.85rem', display: 'block', marginBottom: '0.35rem', color: '#cbd5e1' }}>
-                  Scheduler Briefing Notes for King Amen Ra:
+                  Scheduler Briefing Notes for {selectedAgent?.name || 'King Amen Ra'} (Included in AI Automatic Whisper):
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Summarize prospect doctors, medications, current carrier, or specific questions for King..."
+                  placeholder="Summarize prospect doctors, medications, current carrier, or 2027 Medicare questions..."
                   value={briefingNotes}
                   onChange={(e) => setBriefingNotes(e.target.value)}
                   style={{
@@ -587,7 +687,9 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
                 disabled={submitting || !selectedAgentId}
                 style={{ width: '100%', padding: '0.85rem', fontWeight: 800, fontSize: '0.95rem' }}
               >
-                {submitting ? 'Calling King on Line 2...' : `⚡ Call King Amen Ra & Prepare 3-Way Conference (${selectedAgent?.phone || '(602) 456-9681'})`}
+                {submitting
+                  ? `Calling ${selectedAgent?.name || 'King Amen Ra'} & Running AI Whisper...`
+                  : `⚡ Call ${selectedAgent?.name || 'King Amen Ra'} & Auto-Whisper (${selectedAgent?.phone || '(602) 456-9681'})`}
               </button>
             </>
           )}
@@ -669,27 +771,43 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
                 </div>
               </div>
 
-              {/* Whisper Transfer Briefing Script Box (Line 2 to King Amen Ra) */}
+              {aiWhisperStatus && (
+                <div style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1.5px solid #10b981', borderRadius: '10px', padding: '0.75rem', fontSize: '0.84rem', color: '#a7f3d0', fontWeight: 700, textAlign: 'left' }}>
+                  {aiWhisperStatus}
+                </div>
+              )}
+
+              {/* Whisper Transfer Briefing Script Box (Line 2 to Recipient) */}
               <div style={{ background: '#0e1838', border: '1.5px solid #c8963e', borderRadius: '10px', padding: '1rem', textAlign: 'left' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.4rem' }}>
                   <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#ffd88a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span>🤫</span> <span>Step 1: Whisper Transfer Briefing to King Amen Ra (Before Merging):</span>
+                    <span>🤖</span> <span>Step 1: Automatic AI Whisper Briefing to {selectedAgent?.name || 'King Amen Ra'} (Before Merging):</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleCopyWhisperScript}
-                    className="btn btn-secondary"
-                    style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', fontWeight: 700 }}
-                  >
-                    {copiedWhisperScript ? '✅ Whisper Copied!' : '📋 Copy Whisper Script'}
-                  </button>
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => speakAiWhisper(whisperBriefingText)}
+                      className="btn btn-primary"
+                      style={{ padding: '0.2rem 0.65rem', fontSize: '0.74rem', fontWeight: 800, background: '#10b981', borderColor: '#059669' }}
+                    >
+                      🔊 AI Speak Whisper Now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopyWhisperScript}
+                      className="btn btn-secondary"
+                      style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', fontWeight: 700 }}
+                    >
+                      {copiedWhisperScript ? '✅ Whisper Copied!' : '📋 Copy Whisper Script'}
+                    </button>
+                  </div>
                 </div>
                 <div style={{ background: '#051039', border: '1px solid #1f2e5c', padding: '0.75rem', borderRadius: '6px', fontSize: '0.86rem', lineHeight: 1.5, color: '#e2e8f0', fontStyle: 'italic' }}>
                   "{whisperBriefingText}"
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.8rem', color: '#93c5fd', marginTop: '0.6rem' }}>
-                  <div><strong>Step 2 (Merge Calls):</strong> After whispering the briefing to King Amen Ra, click/tap <strong>"Merge calls"</strong> in Google Voice or your phone.</div>
-                  <div><strong>Step 3 (3-Way Introduction):</strong> Click the green button below to read the 3-way merge introduction and hand off the call!</div>
+                  <div><strong>Step 2 (Merge Calls):</strong> Once Sarah AI completes the automatic whisper briefing to {selectedAgent?.name || 'King Amen Ra'}, click/tap <strong>"Merge calls"</strong> in Google Voice or your phone.</div>
+                  <div><strong>Step 3 (3-Way AI Introduction):</strong> Click the green button below so Sarah AI automatically speaks the 3-way merge introduction and hands off the call!</div>
                 </div>
               </div>
 
