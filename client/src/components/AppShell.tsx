@@ -50,8 +50,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     };
   }, []);
 
-  // Bland AI autonomous dialer heartbeat: while the CRM is open, nudge the server every 60s so every
-  // open line is refilled with the next Bland-assigned prospect (server enforces hours, limits and de-duplication).
+  // Optional Bland AI dialer nudge while the CRM happens to be open. NOT required: the server dials on its own
+  // (call-completion webhook chain + Vercel Cron every 15 minutes), so no one needs to be logged in.
   React.useEffect(() => {
     if (!blandStatus.is_campaign_active) return;
     const beat = () => {

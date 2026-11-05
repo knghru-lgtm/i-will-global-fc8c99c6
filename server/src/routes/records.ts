@@ -278,6 +278,12 @@ records.post('/batch-import/leads', async (req, res) => {
     }
 
     const result = await batchInsertLeads(rawLeads, caller_id || null, guard_duplicates !== false);
+
+    // Imported straight to Bland AI => start dialing immediately (inside calling hours, if the campaign is active)
+    if (caller_id === 'u_bland_ai' && result.imported > 0) {
+      const { runBlandAutoDialerTick } = await import('../services/bland.ts');
+      await runBlandAutoDialerTick({ reason: 'import' }).catch(() => {});
+    }
     await audit(req.user!.id, 'bulk_import', 'leads', '', {
       count: result.imported,
       duplicates_skipped: result.duplicatesSkipped,
@@ -473,6 +479,12 @@ records.post('/leads/assign-bulk', async (req, res) => {
     const updated = await q(sql, params);
     const assignedCount = updated.length;
 
+    // Prospects assigned to Bland AI are dialed right away (inside calling hours, if the campaign is active)
+    if (caller.id === 'u_bland_ai' && assignedCount > 0) {
+      const { runBlandAutoDialerTick } = await import('../services/bland.ts');
+      await runBlandAutoDialerTick({ reason: 'assign_bulk' }).catch(() => {});
+    }
+
     const remaining = await one<{ n: number }>(
       `SELECT count(*)::int AS n FROM leads WHERE (owner_id IS NULL OR owner_id = '') AND status != 'DNC'`
     );
@@ -527,6 +539,12 @@ records.post('/leads/assign-selected', async (req, res) => {
     if (!caller) return res.status(404).json({ error: 'Caller not found' });
 
     await q(`UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2)`, [caller_id, lead_ids]);
+
+    // Prospects assigned to Bland AI are dialed right away (inside calling hours, if the campaign is active)
+    if (caller_id === 'u_bland_ai') {
+      const { runBlandAutoDialerTick } = await import('../services/bland.ts');
+      await runBlandAutoDialerTick({ reason: 'assign_selected' }).catch(() => {});
+    }
 
     await audit(req.user!.id, 'selected_assign', 'leads', '', {
       assigned_to: caller.name,

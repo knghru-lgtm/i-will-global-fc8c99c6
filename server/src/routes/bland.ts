@@ -35,9 +35,9 @@ blandPublic.post('/webhook', async (req, res) => {
   }
 });
 
-// Scheduled auto-dialer trigger (Vercel Cron / external scheduler).
+// Scheduled auto-dialer trigger (Vercel Cron fires every 15 minutes across the calling window; no CRM login required).
 // Idempotent and bounded: only dials Bland-assigned prospects, inside calling hours, within the concurrent-line limit.
-blandPublic.get('/cron/tick', async (req, res) => {
+blandPublic.get(['/cron/tick', '/cron/tick/:slot'], async (req, res) => {
   const secret = process.env.CRON_SECRET;
   if (secret && req.headers.authorization !== `Bearer ${secret}`) {
     return res.status(401).json({ error: 'Unauthorized' });

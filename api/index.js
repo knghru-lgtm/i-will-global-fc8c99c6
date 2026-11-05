@@ -5125,6 +5125,11 @@ records.post("/batch-import/leads", async (req, res) => {
       return res.status(400).json({ error: "No leads provided in payload" });
     }
     const result = await batchInsertLeads(rawLeads, caller_id || null, guard_duplicates !== false);
+    if (caller_id === "u_bland_ai" && result.imported > 0) {
+      const { runBlandAutoDialerTick: runBlandAutoDialerTick2 } = await Promise.resolve().then(() => (init_bland(), bland_exports));
+      await runBlandAutoDialerTick2({ reason: "import" }).catch(() => {
+      });
+    }
     await audit(req.user.id, "bulk_import", "leads", "", {
       count: result.imported,
       duplicates_skipped: result.duplicatesSkipped,
@@ -5285,6 +5290,11 @@ records.post("/leads/assign-bulk", async (req, res) => {
     `;
     const updated = await q(sql, params);
     const assignedCount = updated.length;
+    if (caller.id === "u_bland_ai" && assignedCount > 0) {
+      const { runBlandAutoDialerTick: runBlandAutoDialerTick2 } = await Promise.resolve().then(() => (init_bland(), bland_exports));
+      await runBlandAutoDialerTick2({ reason: "assign_bulk" }).catch(() => {
+      });
+    }
     const remaining = await one(
       `SELECT count(*)::int AS n FROM leads WHERE (owner_id IS NULL OR owner_id = '') AND status != 'DNC'`
     );
@@ -5332,6 +5342,11 @@ records.post("/leads/assign-selected", async (req, res) => {
     );
     if (!caller) return res.status(404).json({ error: "Caller not found" });
     await q(`UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2)`, [caller_id, lead_ids]);
+    if (caller_id === "u_bland_ai") {
+      const { runBlandAutoDialerTick: runBlandAutoDialerTick2 } = await Promise.resolve().then(() => (init_bland(), bland_exports));
+      await runBlandAutoDialerTick2({ reason: "assign_selected" }).catch(() => {
+      });
+    }
     await audit(req.user.id, "selected_assign", "leads", "", {
       assigned_to: caller.name,
       caller_id,
@@ -9268,7 +9283,7 @@ blandPublic.post("/webhook", async (req, res) => {
     res.status(500).json({ error: err.message || "Webhook processing failed" });
   }
 });
-blandPublic.get("/cron/tick", async (req, res) => {
+blandPublic.get(["/cron/tick", "/cron/tick/:slot"], async (req, res) => {
   const secret = process.env.CRON_SECRET;
   if (secret && req.headers.authorization !== `Bearer ${secret}`) {
     return res.status(401).json({ error: "Unauthorized" });
