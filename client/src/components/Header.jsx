@@ -27,9 +27,9 @@ const Header = () => {
             </a>
           </div>
           <div className="agent-locator">
-            <a href="/#our-team" className="contact-link text-accent">
-              <MapPin size={14} /> <span>Our Team Directory</span>
-            </a>
+            <Link to="/meet-the-team" className="contact-link text-accent">
+              <MapPin size={14} /> <span>Meet the Team</span>
+            </Link>
           </div>
         </div>
       </div>
@@ -44,7 +44,7 @@ const Header = () => {
           <nav className="desktop-menu">
             <Link to="/" className={`nav-link ${isActive('/')}`}>Home</Link>
             <Link to="/about-us" className={`nav-link ${isActive('/about-us')}`}>About Us</Link>
-            <a href="/#our-team" className="nav-link">Our Team</a>
+            <Link to="/meet-the-team" className={`nav-link ${isActive('/meet-the-team')}`}>Meet the Team</Link>
             <Link to="/medicare-resources" className={`nav-link ${isActive('/medicare-resources')}`}>Medicare Resources</Link>
             <Link to="/services" className={`nav-link ${isActive('/services')}`}>Other Offerings</Link>
             <a href="/login" className="nav-link" style={{fontWeight: '700', color: 'var(--accent, #c8963e)'}}>Agent Login</a>
@@ -78,7 +78,7 @@ const Header = () => {
             <nav className="mobile-nav-links">
               <Link to="/" className={`mobile-nav-link ${isActive('/')}`} onClick={closeMenu}>Home</Link>
               <Link to="/about-us" className={`mobile-nav-link ${isActive('/about-us')}`} onClick={closeMenu}>About Us</Link>
-              <a href="/#our-team" className="mobile-nav-link" onClick={closeMenu}>Our Team</a>
+              <Link to="/meet-the-team" className={`mobile-nav-link ${isActive('/meet-the-team')}`} onClick={closeMenu}>Meet the Team</Link>
               <Link to="/medicare-resources" className={`mobile-nav-link ${isActive('/medicare-resources')}`} onClick={closeMenu}>Medicare Resources</Link>
               <Link to="/services" className={`mobile-nav-link ${isActive('/services')}`} onClick={closeMenu}>Other Offerings</Link>
               <a href="/login" className="mobile-nav-link" style={{fontWeight: '700', color: 'var(--accent, #c8963e)'}} onClick={closeMenu}>Agent Login</a>

@@ -23,6 +23,7 @@ const Footer = () => {
           <h4>Explore</h4>
           <Link to="/">Home</Link>
           <Link to="/about-us">About Us</Link>
+          <Link to="/meet-the-team">Meet the Team</Link>
           <Link to="/medicare-resources">Medicare Resources</Link>
           <Link to="/services">Other Offerings</Link>
         </div>

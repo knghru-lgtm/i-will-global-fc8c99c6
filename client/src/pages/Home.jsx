@@ -58,11 +58,12 @@ const Home = () => {
               </p>
               <div className="hero-actions">
                 <Link to="/services" className="btn btn-accent btn-large shadow-glow">
-                  Explore All 6 Offerings <ArrowRight size={20} className="ml-2" />
-                </Link>
-                <Link to="/medicare-resources" className="btn btn-white" style={{ padding: '0.95rem 1.65rem', fontSize: '1.02rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <ShieldCheck size={20} /> 2027 Medicare Hub
-                </Link>
+                  Explore All 6 Offerings <ArrowRight size={20} className="ml-2" /></Link>
+
+                <Link to="/medicare-resources" className="btn btn-white" style={{ padding: '0.95rem 1.65rem', fontSize: '1.02rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}><ShieldCheck size={20} /> 2027 Medicare Hub</Link>
+                <a href="#meet-the-team" className="btn btn-secondary shadow-glow" style={{ padding: '0.95rem 1.65rem', fontSize: '1.02rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontWeight: 800, borderColor: '#ffd88a', color: '#ffd88a', background: 'rgba(200, 150, 62, 0.22)' }}>👥 Meet the Team</a>
+
+
                 <button 
                   type="button" 
                   className="btn btn-secondary shadow-glow" 
@@ -125,7 +126,7 @@ const Home = () => {
             </Link>
             <a href="#our-team" className="offering-pill">
               <span className="pill-emoji">👥</span>
-              <span className="pill-name">Our Team Directory</span>
+              <span className="pill-name">Meet the Team</span>
             </a>
           </div>
         </div>
@@ -255,8 +256,8 @@ const Home = () => {
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <Link to="/medicare-resources" className="btn btn-outline" style={{ padding: '0.65rem 1rem', fontSize: '0.88rem', flex: 1, justifyContent: 'space-between', borderColor: '#051039', color: '#051039', fontWeight: 750, background: '#ffffff', minWidth: '150px' }}>
                   <span>Medicare Hub</span>
-                  <ChevronRight size={16} />
-                </Link>
+                  <ChevronRight size={16} /></Link>
+
                 <button 
                   type="button" 
                   className="btn btn-secondary" 

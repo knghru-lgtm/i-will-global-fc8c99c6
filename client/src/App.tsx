@@ -19,6 +19,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { PublicSOAPage } from './pages/PublicSOAPage';
 import { IWillGlobalPortalPage } from './pages/IWillGlobalPortalPage';
 import { PublicChatWidget } from './components/PublicChatWidget';
+import { PublicTeamDirectorySection } from './components/PublicTeamDirectorySection';
 
 // Public Website Components
 // @ts-ignore
@@ -276,6 +277,8 @@ export const App: React.FC = () => {
           {/* Public Website */}
           <Route path="/" element={<PublicLayout><Home /></PublicLayout>} />
           <Route path="/about-us" element={<PublicLayout><About /></PublicLayout>} />
+          <Route path="/meet-the-team" element={<PublicLayout><PublicTeamDirectorySection /></PublicLayout>} />
+          <Route path="/our-team" element={<PublicLayout><PublicTeamDirectorySection /></PublicLayout>} />
           <Route path="/medicare-resources" element={<PublicLayout><MedicareResources /></PublicLayout>} />
           <Route path="/services" element={<PublicLayout><OtherOfferingsPage /></PublicLayout>} />
           <Route path="/offerings" element={<Navigate to="/services" replace />} />

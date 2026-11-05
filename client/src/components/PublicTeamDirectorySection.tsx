@@ -100,7 +100,7 @@ export const PublicTeamDirectorySection: React.FC = () => {
 
   return (
     <section
-      id="our-team"
+      id="meet-the-team"
       style={{
         background: 'linear-gradient(180deg, #051039 0%, #0a1847 100%)',
         padding: '5rem 1.5rem',
@@ -109,7 +109,7 @@ export const PublicTeamDirectorySection: React.FC = () => {
         color: '#ffffff',
       }}
     >
-      <div className="container" style={{ maxWidth: '1240px', margin: '0 auto' }}>
+      <div id="our-team" className="container" style={{ maxWidth: '1240px', margin: '0 auto' }}>
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
           <span
@@ -129,10 +129,10 @@ export const PublicTeamDirectorySection: React.FC = () => {
               marginBottom: '0.85rem',
             }}
           >
-            <Users size={15} /> Our Team & Live Direct Directory
+            <Users size={15} /> Meet the Team & Live Direct Directory
           </span>
           <h2 style={{ fontSize: '2.25rem', fontWeight: 900, color: '#ffffff', margin: '0 0 0.75rem', letterSpacing: '-0.5px' }}>
-            Meet Our Team — IWG Insurance & Financial Services Directory
+            Meet the Team — IWG Insurance & Financial Services Directory
           </h2>
           <p style={{ fontSize: '1.05rem', color: '#cbd5e1', maxWidth: '820px', margin: '0 auto 1.25rem', lineHeight: 1.65 }}>
             Connect directly with our Executive Leadership, Licensed Senior Advisors, or Scheduling Specialists. Call our AI Receptionist Sarah at{' '}
