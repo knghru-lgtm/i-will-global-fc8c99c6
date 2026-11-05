@@ -26,6 +26,8 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
   const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState<number>(1);
   const [isWarmTransferOpen, setIsWarmTransferOpen] = useState<boolean>(false);
+  const [copiedWhisper, setCopiedWhisper] = useState<boolean>(false);
+  const [copiedMerge, setCopiedMerge] = useState<boolean>(false);
 
   const handleExitDialer = useCallback(() => {
     onClose();
@@ -61,14 +63,17 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
   if (!isOpen) return null;
 
   const displayName = clientName && clientName !== '[Client Name]' ? clientName : 'Beneficiary';
-  const agentName = user?.name || '[Your Name]';
+  const agentName = user?.name || 'Sarah';
+
+  const whisperScriptText = `Hi King Amen Ra, this is ${agentName} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${displayName} on the line looking for a 2027 plan comparison and coverage review. I am merging the call now so you can take over.`;
+  const mergeScriptText = `Thank you so much for holding, ${displayName}! I now have King Amen Ra, our Principal Broker and Licensed Senior Advisor at IWG Insurance and Financial Services, right here on the line with both of us. King, I have whispered a briefing on ${displayName}'s coverage goals, so I will step back and let you two take it from here!`;
 
   return (
     <div className="slideover-overlay" onClick={onClose}>
       <div
         className="slideover-panel"
         onClick={(e) => e.stopPropagation()}
-        style={{ width: '720px', maxWidth: '95vw', backgroundColor: '#0b132b', color: '#fff', display: 'flex', flexDirection: 'column' }}
+        style={{ width: '760px', maxWidth: '95vw', backgroundColor: '#0b132b', color: '#fff', display: 'flex', flexDirection: 'column' }}
       >
         {/* Header with Exit to Dashboard & Workflow Buttons */}
         <div
@@ -92,11 +97,14 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
               📜
             </div>
             <div>
-              <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#c8963e' }}>
-                Outbound Call Script: Annual Enrollment Review
+              <div style={{ fontWeight: 800, fontSize: '1.08rem', color: '#c8963e', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <span>Unified Outbound Script (Same as Sarah AI)</span>
+                <span className="badge badge-gold" style={{ fontSize: '0.7rem' }}>
+                  {isLiveCall ? '🟢 LIVE CALL · WHISPER TRANSFER READY' : 'WHISPER TRANSFER ENABLED'}
+                </span>
               </div>
               <div style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>
-                Speaking with: <strong style={{ color: '#fff' }}>{displayName}</strong>
+                Speaking with: <strong style={{ color: '#fff' }}>{displayName}</strong> · Medicare Helpline powered by IWG Insurance and Financial Services
                 {clientAddress && (
                   <span style={{ marginLeft: '0.6rem', color: '#ffd88a' }}>
                     📍 <strong>Address:</strong> {clientAddress}
@@ -127,49 +135,25 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
             >
               <span>🏠</span> <span>Dashboard</span>
             </button>
-            {isLiveCall ? (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setIsWarmTransferOpen(true)}
-                style={{
-                  padding: '0.4rem 0.75rem',
-                  fontSize: '0.82rem',
-                  fontWeight: 800,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                  backgroundColor: 'rgba(200, 150, 62, 0.18)',
-                  borderColor: '#c8963e',
-                  color: '#ffd88a',
-                }}
-                title="Initiate Live 3-Way Warm Transfer (Agent + Scheduler + Prospect)"
-              >
-                <span>⚡</span> <span>3-Way Transfer</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled
-                style={{
-                  padding: '0.4rem 0.75rem',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                  borderColor: 'rgba(255, 255, 255, 0.12)',
-                  color: '#64748b',
-                  cursor: 'not-allowed',
-                  opacity: 0.65,
-                }}
-                title="Only available once connected on a live call with prospect. Dial to connect first."
-              >
-                <span>🔒</span> <span>3-Way Transfer</span>
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsWarmTransferOpen(true)}
+              style={{
+                padding: '0.4rem 0.75rem',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                backgroundColor: 'rgba(200, 150, 62, 0.18)',
+                borderColor: '#c8963e',
+                color: '#ffd88a',
+              }}
+              title="Initiate Live Whisper Warm Transfer to Principal Broker King Amen Ra at (602) 456-9681"
+            >
+              <span>⚡</span> <span>Whisper Transfer → King</span>
+            </button>
             <button
               type="button"
               className="btn btn-secondary"
@@ -243,22 +227,22 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
 
         {/* Body */}
         <div className="slideover-body" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowY: 'auto' }}>
-          {/* Quick Exit Banner */}
+          {/* Unified Script Notice Banner */}
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
               padding: '0.6rem 0.9rem',
-              background: 'rgba(200,150,62,0.08)',
+              background: 'rgba(200,150,62,0.1)',
               borderRadius: '8px',
-              border: '1px solid rgba(200,150,62,0.3)',
+              border: '1px solid rgba(200,150,62,0.35)',
               flexWrap: 'wrap',
               gap: '0.5rem',
             }}
           >
-            <div style={{ fontSize: '0.82rem', color: '#ffd88a', fontWeight: 600 }}>
-              💡 Need to pause or switch? Exit script at anytime:
+            <div style={{ fontSize: '0.82rem', color: '#ffd88a', fontWeight: 700 }}>
+              🎙️ All Outbound Callers & Sarah AI Use This Exact Unified Script + Whisper Warm Transfer to King Amen Ra ((602) 456-9681)
             </div>
             <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
               <button
@@ -308,33 +292,13 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
             </p>
           </div>
 
-          {/* Scheduler Directive - Do Not Leave Voicemails */}
-          <div
-            style={{
-              padding: '0.75rem 1rem',
-              borderRadius: '10px',
-              backgroundColor: 'rgba(239, 68, 68, 0.15)',
-              border: '1.5px solid #ef4444',
-              color: '#fca5a5',
-              fontSize: '0.82rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.6rem',
-            }}
-          >
-            <span style={{ fontSize: '1.25rem' }}>🚫</span>
-            <div>
-              <strong style={{ color: '#fff' }}>SCHEDULER INSTRUCTION — DO NOT LEAVE VOICEMAILS:</strong> If an answering machine or voicemail picks up, <strong>hang up immediately</strong>. Do NOT leave a voice message. Mark the call as <strong>"No Answer"</strong> to keep the lead in active rotation.
-            </div>
-          </div>
-
           {/* Step Progress Bar */}
           <div style={{ display: 'flex', gap: '0.4rem', background: '#111c3a', padding: '0.4rem', borderRadius: '10px' }}>
             {[
-              { num: 1, label: '1. Greeting' },
-              { num: 2, label: '2. Schedule Time' },
-              { num: 3, label: '3. Confirm & Assign Agent' },
-              { num: 4, label: '💡 Objections' },
+              { num: 1, label: '1. Sarah Greeting & Qualify' },
+              { num: 2, label: '2. 2027 Medicare & Plans' },
+              { num: 3, label: '3. Whisper Transfer / Book Appt' },
+              { num: 4, label: '💡 Divisions & Objections' },
             ].map((step) => (
               <button
                 key={step.num}
@@ -347,85 +311,60 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
             ))}
           </div>
 
-          {/* STEP 1: GREETING & PURPOSE */}
+          {/* STEP 1: SARAH'S OPENING GREETING & 6-DIVISION QUALIFICATION */}
           {activeStep === 1 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Step 1: Greeting & Purpose of Call
+                  Step 1: Sarah's Required Opening Greeting & Qualification
                 </h4>
 
                 <div style={{ fontSize: '0.92rem', lineHeight: 1.6, color: '#e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <p style={{ margin: 0, background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #c8963e' }}>
-                    "Hello <strong>{displayName}</strong>, this is <strong>{agentName}</strong> with the Medicare Helpline.
-                  </p>
-                  <p style={{ margin: 0, background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #c8963e' }}>
-                    The reason for my call today is regarding the Medicare Annual Enrollment Period. As you may know, plan benefits, networks, and drug formularies change every January 1st. I’m reaching out to get you scheduled for your complimentary 2027 Annual Plan Review with one of our state-licensed agents to ensure your doctors, prescriptions, and benefits are fully protected."
-                  </p>
-                  <p style={{ margin: 0, background: 'rgba(200,150,62,0.1)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #e0ac53', fontWeight: 600 }}>
-                    "We compare all major Medicare plans in your county to make sure you keep your doctors and don't overpay on copays or prescriptions next year." Do you have any questions about extra benefits?
-                  </p>
-                  <div style={{ background: 'rgba(59,130,246,0.15)', padding: '0.85rem', borderRadius: '8px', borderLeft: '3px solid #3b82f6' }}>
-                    <p style={{ margin: '0 0 0.5rem', fontWeight: 700, color: '#60a5fa' }}>
-                      👉 "Let’s get you connected to one of our trusted licensed agents."
+                  <div style={{ background: 'rgba(200,150,62,0.12)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #c8963e' }}>
+                    <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#ffd88a', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
+                      1. Mandatory Opening Sentence (Word-for-Word with Sarah):
+                    </div>
+                    <p style={{ margin: 0, fontWeight: 700, color: '#fff', fontSize: '0.96rem' }}>
+                      "Hello <strong>{displayName}</strong>, this is <strong>{agentName}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
                     </p>
-                    <div style={{ paddingLeft: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.88rem' }}>
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.3rem' }}>
-                          <strong style={{ color: '#10b981', fontSize: '0.92rem' }}>• If yes (Warm Transfer):</strong>
-                          {isLiveCall ? (
-                            <button
-                              type="button"
-                              className="btn btn-accent"
-                              onClick={() => setIsWarmTransferOpen(true)}
-                              style={{
-                                padding: '0.35rem 0.8rem',
-                                fontSize: '0.82rem',
-                                fontWeight: 800,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.35rem',
-                                boxShadow: '0 2px 10px rgba(212, 160, 76, 0.35)',
-                              }}
-                            >
-                              ⚡ Live 3-Way Transfer → (480) 331-9455
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled
-                              style={{
-                                padding: '0.35rem 0.8rem',
-                                fontSize: '0.82rem',
-                                fontWeight: 700,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.35rem',
-                                background: 'rgba(255, 255, 255, 0.05)',
-                                color: '#64748b',
-                                border: '1px solid rgba(255, 255, 255, 0.12)',
-                                borderRadius: '6px',
-                                cursor: 'not-allowed',
-                                opacity: 0.65,
-                              }}
-                              title="Connect live call with prospect first before initiating warm transfer"
-                            >
-                              🔒 3-Way Transfer (Connect Call First)
-                            </button>
-                          )}
-                        </div>
-                        <div style={{ marginTop: '0.2rem', color: isLiveCall ? '#cbd5e1' : '#94a3b8' }}>
-                          {isLiveCall
-                            ? 'Connect beneficiary immediately via live 3-way conference call to licensed agent at (480) 331-9455 ($25 scheduler credit).'
-                            : 'Must be on a connected live call with beneficiary before warm transfer can be initiated.'}
-                        </div>
-                      </div>
-                      <div>
-                        <strong style={{ color: '#f59e0b' }}>If no:</strong>
-                        <div style={{ marginTop: '0.25rem', color: '#f8fafc', fontWeight: 600 }}>
-                          "Let’s take 30 seconds to pick a convenient time on the calendar for your review. Would morning or afternoon work better for you?"
-                        </div>
-                      </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #38bdf8' }}>
+                    <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
+                      2. Fiduciary Value Proposition & State / Division Discovery:
+                    </div>
+                    <p style={{ margin: 0 }}>
+                      "We are a <strong>100% free fiduciary advisory</strong> representing over <strong>104 premier carriers</strong> with <strong>zero broker fees</strong>. To give you the most accurate information, could you tell me which <strong>state</strong> you're located in, and are you looking for <strong>Medicare plans</strong>, <strong>individual and family health</strong>, <strong>group health for businesses</strong>, <strong>life insurance and IUL</strong>, or <strong>asset-based long-term care</strong>?"
+                    </p>
+                  </div>
+
+                  <div style={{ background: 'rgba(16,185,129,0.12)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
+                    <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#34d399', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
+                      3. Transition to Plan Review or Immediate Whisper Warm Transfer:
+                    </div>
+                    <p style={{ margin: '0 0 0.6rem', fontWeight: 600, color: '#f8fafc' }}>
+                      "As you know, plan benefits, doctor networks, and drug formularies change every January 1st. Would you like a personalized 2027 plan comparison or quote with our Principal Broker and Licensed Senior Advisor, <strong>King Amen Ra</strong>?"
+                    </p>
+                    <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-accent"
+                        onClick={() => {
+                          setActiveStep(3);
+                          setIsWarmTransferOpen(true);
+                        }}
+                        style={{ padding: '0.45rem 0.9rem', fontSize: '0.84rem', fontWeight: 800 }}
+                      >
+                        ⚡ Yes (King Available) → Whisper Warm Transfer to (602) 456-9681
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => setActiveStep(2)}
+                        style={{ padding: '0.45rem 0.9rem', fontSize: '0.84rem', fontWeight: 700 }}
+                      >
+                        📊 Review 2027 Medicare Costs & Plan G / Advantage First →
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -435,148 +374,223 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <button
                   className="btn btn-primary"
-                  onClick={() => {
-                    setActiveStep(2);
-                    if (onScheduleClick) onScheduleClick();
-                  }}
+                  onClick={() => setActiveStep(3)}
                   style={{ padding: '0.85rem', fontWeight: 700, fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
                 >
-                  📅 "Schedule Appointment" → Put on Calendar
+                  ⚡ Whisper Transfer OR 📅 Schedule (Phone / In-Person / Video)
                 </button>
                 <button
                   className="btn btn-secondary"
                   onClick={() => setActiveStep(4)}
                   style={{ padding: '0.85rem', fontWeight: 700, fontSize: '0.9rem', borderColor: '#ef4444', color: '#f87171' }}
                 >
-                  💡 Client Has Objections / Questions
+                  💡 All 6 Divisions & Objection Rebuttals
                 </button>
-              </div>
-
-              <div style={{ background: '#0e1838', padding: '0.85rem', borderRadius: '10px', fontSize: '0.82rem', color: '#94a3b8', border: '1px dashed #243566' }}>
-                💡 <strong>Scheduler Reminder:</strong> Schedulers do not need to triage medical conditions or prescriptions. Your goal is simply to secure the appointment time, assign it to King Amen Ra or an available licensed agent, and place it on the calendar!
               </div>
             </div>
           )}
 
-          {/* STEP 2: SELECT APPOINTMENT TIME */}
+          {/* STEP 2: SARAH'S 2027 MEDICARE COST STANDARDS & PLAN COMPARISON */}
           {activeStep === 2 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Step 2: Select Appointment Time & Mode
+                  Step 2: Sarah's 2027 Medicare Cost Standards & Plan Comparison Script
                 </h4>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem', color: '#e2e8f0' }}>
-                  <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #c8963e', color: '#f8fafc', fontWeight: 600 }}>
-                    👉 "Would you prefer to do that over the phone, via a video link, or in person? Our licensed agents can even come to you. Convenience and service is what we do."
-                  </p>
-                  <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px' }}>
-                    👉 "Would the first part of the week or end of week work best? Is 10:00 AM or closer to 2:00 PM better?"
-                  </p>
-                  <p style={{ margin: 0, background: 'rgba(16,185,129,0.15)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981', color: '#6ee7b7' }}>
-                    👉 "Great, let’s lock that spot in on our calendar with our licensed agent right now."
-                  </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.88rem', color: '#e2e8f0', lineHeight: 1.55 }}>
+                  <div style={{ background: '#16244d', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #c8963e' }}>
+                    <strong style={{ color: '#ffd88a' }}>🏥 2027 Original Medicare (Parts A & B) Cost Standards:</strong>
+                    <ul style={{ margin: '0.4rem 0 0 1.2rem', padding: 0 }}>
+                      <li><strong>Part A (Hospital):</strong> <strong>$0/month premium</strong> for 99%+ of beneficiaries; <strong>$1,788</strong> inpatient hospital deductible per benefit period.</li>
+                      <li><strong>Part B (Medical):</strong> <strong>$209.50/month</strong> projected standard premium; <strong>$292</strong> annual deductible; <strong>20% coinsurance with NO annual out-of-pocket maximum cap</strong> on Original Medicare alone.</li>
+                      <li><strong>Part D (Prescription Drugs):</strong> <strong>$2,400</strong> annual out-of-pocket maximum cap; <strong>$700</strong> maximum deductible; <strong>$35/month</strong> insulin cap; <strong>$0</strong> adult ACIP-recommended vaccines.</li>
+                    </ul>
+                  </div>
+
+                  <div style={{ background: '#16244d', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #38bdf8' }}>
+                    <strong style={{ color: '#38bdf8' }}>🛡️ Medigap Supplement (Plan G vs. Plan N) vs. Medicare Advantage (Part C):</strong>
+                    <p style={{ margin: '0.4rem 0 0' }}>
+                      "Because Original Medicare leaves an uncapped 20% exposure, we compare your two main protection paths side-by-side:<br />
+                      • <strong>Medigap Plan G:</strong> Covers 100% of Medicare-approved gaps after the $292 Part B deductible with nationwide freedom to visit any doctor or hospital that accepts Medicare—no networks and no referrals.<br />
+                      • <strong>Medigap Plan N:</strong> Lower monthly premium in exchange for modest copays (up to $20 doctor / $50 ER).<br />
+                      • <strong>Medicare Advantage (Part C) & Special Needs Plans (D-SNP, C-SNP, I-SNP):</strong> All-in-one plans that bundle Part A, Part B, and Part D with a built-in Maximum Out-of-Pocket cap and extra dental, vision, hearing, and OTC benefits."
+                    </p>
+                  </div>
+
+                  <div style={{ background: 'rgba(16,185,129,0.14)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981', color: '#6ee7b7', fontWeight: 700 }}>
+                    👉 Closing Question (Say This): "Would you like a personalized plan comparison or quote with our Principal Broker, King Amen Ra, right now?"
+                  </div>
                 </div>
               </div>
 
-              {onScheduleClick && (
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-accent"
+                  onClick={() => {
+                    setActiveStep(3);
+                    setIsWarmTransferOpen(true);
+                  }}
+                  style={{ flex: 1, padding: '0.85rem', fontWeight: 800, fontSize: '0.92rem' }}
+                >
+                  ⚡ Launch Whisper Warm Transfer to King Amen Ra →
+                </button>
                 <button
                   className="btn btn-primary"
-                  onClick={() => {
-                    onClose();
-                    onScheduleClick();
-                  }}
-                  style={{ width: '100%', padding: '0.85rem', fontWeight: 800, fontSize: '0.95rem' }}
+                  onClick={() => setActiveStep(3)}
+                  style={{ flex: 1, padding: '0.85rem', fontWeight: 800, fontSize: '0.92rem' }}
                 >
-                  📅 Open Slot Picker & Put on Calendar Now
+                  Proceed to Step 3: Whisper Transfer or Book Appointment →
                 </button>
-              )}
-
-              <button
-                className="btn btn-secondary"
-                onClick={() => setActiveStep(3)}
-                style={{ width: '100%', padding: '0.65rem', fontWeight: 600 }}
-              >
-                Proceed to Step 3: Confirmation & Agent Handoff →
-              </button>
+              </div>
             </div>
           )}
 
-          {/* STEP 3: CONFIRM & ASSIGN AGENT */}
+          {/* STEP 3: WHISPER WARM TRANSFER TO KING AMEN RA OR APPOINTMENT-ONLY BOOKING */}
           {activeStep === 3 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
-                <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Step 3: Confirm Appointment & Auto-Send SMS
-                </h4>
+              {/* Path A: Whisper Warm Transfer when King is Available */}
+              <div style={{ backgroundColor: '#111c3a', border: '2px solid #c8963e', borderRadius: '12px', padding: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <h4 style={{ color: '#ffd88a', margin: 0, fontSize: '1rem', fontWeight: 800 }}>
+                    Path A — When King Amen Ra is Available: Live Whisper Warm Transfer ((602) 456-9681)
+                  </h4>
+                  <button
+                    type="button"
+                    className="btn btn-accent"
+                    onClick={() => setIsWarmTransferOpen(true)}
+                    style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem', fontWeight: 800 }}
+                  >
+                    ⚡ Open 3-Way Whisper Transfer Modal
+                  </button>
+                </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem', color: '#e2e8f0' }}>
-                  <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px' }}>
-                    👉 "I have your appointment confirmed with our state-licensed Medicare specialist on our agency calendar."
-                  </p>
-                  <p style={{ margin: 0, background: 'rgba(16,185,129,0.15)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981', color: '#6ee7b7' }}>
-                    👉 "I am sending a quick text message to your phone right now. When you see it, please reply <strong>YES</strong> to confirm your slot so the agent holds that time for you."
-                  </p>
-                  <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px' }}>
-                    👉 "Please have your current prescription bottles and doctors' names ready for your licensed agent when they connect with you."
-                  </p>
-                  <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px', fontWeight: 700, color: '#c8963e' }}>
-                    👉 "Thank you, <strong>{displayName}</strong>, and have a wonderful day!"
-                  </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.88rem', color: '#e2e8f0' }}>
+                  <div style={{ background: '#16244d', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #38bdf8' }}>
+                    <div style={{ fontWeight: 800, color: '#38bdf8', fontSize: '0.78rem', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
+                      1. Say to {displayName} Before Placing on Hold:
+                    </div>
+                    <em>
+                      "I am connecting you right now directly with <strong>King Amen Ra</strong>, our Principal Broker and Licensed Senior Advisor. Please stay on the line for just a moment while I whisper a quick briefing to him and bridge your call."
+                    </em>
+                  </div>
+
+                  <div style={{ background: 'rgba(200,150,62,0.14)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #c8963e' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                      <div style={{ fontWeight: 800, color: '#ffd88a', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+                        2. 🤫 Whisper Transfer Briefing to King Amen Ra on Line 2 ((602) 456-9681):
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          navigator.clipboard.writeText(whisperScriptText);
+                          setCopiedWhisper(true);
+                          setTimeout(() => setCopiedWhisper(false), 2000);
+                        }}
+                        style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', fontWeight: 700 }}
+                      >
+                        {copiedWhisper ? '✅ Copied Whisper!' : '📋 Copy Whisper Script'}
+                      </button>
+                    </div>
+                    <div style={{ fontStyle: 'italic', color: '#fff', lineHeight: 1.5 }}>
+                      "{whisperScriptText}"
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(16,185,129,0.14)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                      <div style={{ fontWeight: 800, color: '#34d399', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+                        3. 🤝 3-Way Merge Introduction (Say Once Lines Are Merged):
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          navigator.clipboard.writeText(mergeScriptText);
+                          setCopiedMerge(true);
+                          setTimeout(() => setCopiedMerge(false), 2000);
+                        }}
+                        style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', fontWeight: 700 }}
+                      >
+                        {copiedMerge ? '✅ Copied Merge!' : '📋 Copy Merge Intro'}
+                      </button>
+                    </div>
+                    <div style={{ fontStyle: 'italic', color: '#fff', lineHeight: 1.5 }}>
+                      "{mergeScriptText}"
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {onScheduleClick && (
-                <button
-                  className="btn btn-primary"
-                  onClick={() => {
-                    onClose();
-                    onScheduleClick();
-                  }}
-                  style={{ width: '100%', padding: '0.85rem', fontWeight: 800, fontSize: '0.95rem' }}
-                >
-                  📅 Book Appointment & Auto-Send Confirmation Text (YES/Y)
-                </button>
-              )}
+              {/* Path B: When King Amen Ra is on a Warm Transfer Call (Appointment-Only Mode) */}
+              <div style={{ backgroundColor: '#111c3a', border: '1.5px solid #3b82f6', borderRadius: '12px', padding: '1.25rem' }}>
+                <h4 style={{ color: '#60a5fa', margin: '0 0 0.65rem', fontSize: '1rem', fontWeight: 800 }}>
+                  Path B — When King Amen Ra is on a Warm Transfer Call (Or Prospect Prefers to Schedule):
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.88rem', color: '#e2e8f0' }}>
+                  <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #f59e0b' }}>
+                    👉 <strong>Say to {displayName}:</strong> "King Amen Ra, our Principal Broker and Licensed Senior Advisor, is currently on a live warm transfer call helping another client right now, so I will get you scheduled right on his calendar. Would you prefer a <strong>Telephone appointment (30 minutes)</strong>, an <strong>In-Person appointment (60 minutes)</strong>, or a <strong>Video appointment (30 minutes)</strong> with King Amen Ra?"
+                  </p>
+                  <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
+                    👉 <strong>Confirm & Continue Calling:</strong> "Wonderful! I have you confirmed for your <strong>[Telephone / In-Person / Video]</strong> appointment with King Amen Ra on <strong>[Day & Time]</strong>. Please have your current prescription list and doctors' names handy. Thank you, <strong>{displayName}</strong>, and have a wonderful day!"
+                  </p>
+                </div>
+
+                {onScheduleClick && (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => {
+                      onClose();
+                      onScheduleClick();
+                    }}
+                    style={{ width: '100%', marginTop: '0.85rem', padding: '0.85rem', fontWeight: 800, fontSize: '0.95rem' }}
+                  >
+                    📅 Book Telephone, In-Person, or Video Appointment & Continue Calling
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
-          {/* STEP 4: OBJECTIONS */}
+          {/* STEP 4: SARAH'S 6 DIVISIONS & OBJECTION REBUTTALS */}
           {activeStep === 4 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Common Objections & Quick Rebuttals
+                  Sarah's 6 Insurance Divisions & Common Objection Rebuttals
                 </h4>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '0.9rem', border: '1px solid #243566', fontSize: '0.85rem', color: '#e2e8f0' }}>
+                    <div style={{ fontWeight: 800, color: '#ffd88a', marginBottom: '0.35rem' }}>
+                      🏢 Non-Medicare Divisions (When Caller Asks About Other Coverage):
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '1.2rem', lineHeight: 1.5 }}>
+                      <li><strong>Individual & Family Health (Under 65):</strong> ACA Marketplace plans with tax credits vs. Private PPO medically underwritten plans with nationwide networks.</li>
+                      <li><strong>Group Health (2–250+ Employees):</strong> Level-Funded plans with refund of unused claim surplus, Traditional Group Major Medical, or tax-free ICHRA.</li>
+                      <li><strong>Life Insurance & IUL:</strong> Term Life, Final Expense Whole Life, and Tax-Free Retirement Indexed Universal Life (IUL) structured under IRC Section 7702 with 0% market floor.</li>
+                      <li><strong>Asset-Based Hybrid Long-Term Care:</strong> Linked Life + LTC policies that pay tax-free monthly care benefits or return a tax-free death benefit to heirs if care is never needed.</li>
+                    </ul>
+                  </div>
+
                   {/* Objection 1 */}
                   <div style={{ background: '#16244d', borderRadius: '10px', padding: '1rem', border: '1px solid #243566' }}>
                     <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.4rem', fontSize: '0.88rem' }}>
                       ❌ "I’m happy with my current plan and don’t want to change."
                     </div>
                     <div style={{ fontSize: '0.88rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
-                      "That’s great to hear, <strong>{displayName}</strong>, and staying right where you are may very well be the best choice. However, plans change their drug formularies and copays every single year on January 1st. A 10-minute checkup doesn't mean you have to change anything—it simply guarantees there are no surprise bills at the pharmacy counter in January."
+                      "That’s great to hear, <strong>{displayName}</strong>, and staying right where you are may very well be the best choice. Because we are a 100% free fiduciary advisory representing over 104 carriers, our review simply checks that your doctors and prescriptions are still covered at the lowest cost for 2027 so there are no surprise bills in January."
                     </div>
                   </div>
 
                   {/* Objection 2 */}
                   <div style={{ background: '#16244d', borderRadius: '10px', padding: '1rem', border: '1px solid #243566' }}>
                     <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.4rem', fontSize: '0.88rem' }}>
-                      ❌ "I get so many calls and mailers, it’s overwhelming."
+                      ❌ "How much does your service cost?"
                     </div>
                     <div style={{ fontSize: '0.88rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
-                      "I completely understand—seniors are bombarded with hundreds of commercials and letters this time of year. That’s why you work with me as your local broker. You don't have to sift through stacks of mail; we look directly at your exact doctors and prescriptions together and cut through the noise in 15 minutes."
-                    </div>
-                  </div>
-
-                  {/* Objection 3 */}
-                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '1rem', border: '1px solid #243566' }}>
-                    <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.4rem', fontSize: '0.88rem' }}>
-                      ❌ "Can't you just tell me what the best plan is right now?"
-                    </div>
-                    <div style={{ fontSize: '0.88rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
-                      "Medicare has strict guidelines requiring us to complete a Scope of Appointment before reviewing specific plan benefit details. Setting our appointment ensures your call is handled properly, and it gives me time to run your exact medication list through the database so I don't give you guesswork."
+                      "Our advisory service is <strong>100% free</strong> with zero broker fees and zero markup. Medicare and insurance carriers regulate plan rates by law, so you pay the exact same premium whether you enroll alone or have our Principal Broker, King Amen Ra, advocate for you year-round."
                     </div>
                   </div>
                 </div>

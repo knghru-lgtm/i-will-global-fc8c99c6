@@ -524,78 +524,54 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                 <strong>🛡️ CMS / TPMO Disclaimer:</strong> "{tpmo}"
               </div>
 
-              {/* Step 1 */}
+              {/* Step 1: Sarah Unified Opening Greeting & Qualification */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid var(--accent)' }}>
-                <div style={{ fontWeight: 700, color: 'var(--accent)', marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                  Step 1: Greeting & Reason for Call
+                <div style={{ fontWeight: 800, color: 'var(--accent)', marginBottom: '0.4rem', fontSize: '0.92rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+                  <span>Step 1: Sarah's Unified Opening Greeting & 6-Division Qualification</span>
+                  <span className="badge badge-gold" style={{ fontSize: '0.68rem' }}>SAME SCRIPT AS SARAH AI</span>
                 </div>
+                <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5, fontWeight: 700, color: '#fff' }}>
+                  "Hello <strong>{contact.name || 'Beneficiary'}</strong>, this is <strong>{user?.name || 'Sarah'}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+                </p>
                 <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5 }}>
-                  "Hello <strong>{contact.name || 'Beneficiary'}</strong>, this is <strong>{user?.name || 'Agent'}</strong> with the Medicare Helpline.<br/>
-                  The reason for my call today is regarding the Medicare Annual Enrollment Period. As you may know, plan benefits, networks, and drug formularies change every January 1st. I’m reaching out to get you scheduled for your complimentary 2027 Annual Plan Review with one of our state-licensed agents to ensure your doctors, prescriptions, and benefits are fully protected."
+                  "We are a <strong>100% free fiduciary advisory</strong> representing over <strong>104 premier carriers</strong> with <strong>zero broker fees</strong>. To give you the most accurate information, could you tell me which <strong>state</strong> you're located in, and are you looking for <strong>Medicare plans</strong>, <strong>individual and family health</strong>, <strong>group health for businesses</strong>, <strong>life insurance and IUL</strong>, or <strong>asset-based long-term care</strong>?"
                 </p>
                 <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: '#e0ac53', lineHeight: 1.5 }}>
-                  "We compare all major Medicare plans in your county to make sure you keep your doctors and don't overpay on copays or prescriptions next year." Do you have any questions about extra benefits?
+                  "For 2027, Part A has a $0 premium ($1,788 hospital deductible), Part B is $209.50/month ($292 deductible, uncapped 20% coinsurance), and Part D caps out-of-pocket drug costs at $2,400/year ($35 insulin, $0 adult vaccines). We compare Medigap Plan G, Plan N, and Medicare Advantage side-by-side. Would you like a personalized plan comparison or quote with our Principal Broker, <strong>King Amen Ra</strong>?"
                 </p>
 
                 <div style={{ background: 'rgba(59,130,246,0.12)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #3b82f6', marginTop: '0.5rem' }}>
                   <p style={{ margin: '0 0 0.4rem', fontWeight: 700, color: '#60a5fa' }}>
-                    👉 "Let’s get you connected to one of our trusted licensed agents."
+                    👉 Path A — King Amen Ra Available (Live Whisper Warm Transfer to (602) 456-9681):
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.85rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span style={{ color: '#10b981', fontWeight: 700 }}>• If yes (Warm Transfer):</span>
-                      {isLiveCallConnected ? (
-                        <button
-                          type="button"
-                          className="btn btn-accent"
-                          onClick={() => setIsWarmTransferOpen(true)}
-                          style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '0.35rem', boxShadow: '0 2px 8px rgba(212, 160, 76, 0.3)' }}
-                          title="Live Warm Transfer to Agent at (480) 331-9455"
-                        >
-                          ⚡ Live Warm Transfer → (480) 331-9455
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          style={{
-                            padding: '0.35rem 0.75rem',
-                            fontSize: '0.8rem',
-                            fontWeight: 700,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            background: 'rgba(255, 255, 255, 0.05)',
-                            color: '#64748b',
-                            border: '1px solid rgba(255, 255, 255, 0.12)',
-                            borderRadius: '6px',
-                            cursor: 'not-allowed',
-                            opacity: 0.65,
-                          }}
-                          title="Warm transfer is locked: Only available once the scheduler is connected on live call"
-                        >
-                          🔒 Warm Transfer (Locked - Connect Call First)
-                        </button>
-                      )}
+                      <span style={{ color: '#10b981', fontWeight: 700 }}>• Tell Caller & Whisper Brief King Amen Ra:</span>
+                      <button
+                        type="button"
+                        className="btn btn-accent"
+                        onClick={() => setIsWarmTransferOpen(true)}
+                        style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '0.35rem', boxShadow: '0 2px 8px rgba(212, 160, 76, 0.3)' }}
+                        title="Live Whisper Warm Transfer to Principal Broker King Amen Ra at (602) 456-9681"
+                      >
+                        ⚡ Whisper Warm Transfer → (602) 456-9681
+                      </button>
                     </div>
-                    <div style={{ color: '#f59e0b', fontWeight: 600, marginTop: '0.2rem' }}>
-                      • If no:
-                    </div>
-                    <div style={{ paddingLeft: '0.75rem', color: '#e2e8f0', lineHeight: 1.4, fontStyle: 'italic' }}>
-                      "Let’s take 30 seconds to pick a convenient time on the calendar for your review. Would morning or afternoon work better for you?"
+                    <div style={{ paddingLeft: '0.65rem', color: '#cbd5e1', lineHeight: 1.45, fontStyle: 'italic' }}>
+                      <strong>Say to Prospect:</strong> "I am connecting you right now directly with King Amen Ra, our Principal Broker and Licensed Senior Advisor. Please stay on the line for just a moment while I whisper a quick briefing to him and bridge your call."<br />
+                      <strong>🤫 Whisper to King on Line 2:</strong> "Hi King Amen Ra, this is {user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have {contact.name || 'our prospect'} on hold looking for a 2027 plan review. I am merging the call now so you can take over."
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Step 2: Schedule Appointment & Put on Calendar */}
+              {/* Step 2: Path B — When King is on a Warm Transfer Call (Or Prospect Prefers to Schedule) */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid #10b981' }}>
                 <div style={{ fontWeight: 700, color: '#34d399', marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                  Step 2: Schedule Appointment & Put on Calendar
+                  Step 2: When King Amen Ra is on a Warm Transfer Call (Book Telephone, In-Person, or Video Only)
                 </div>
                 <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5 }}>
-                  👉 "Would you prefer to do that over the phone, via a video link, or in person? Our licensed agents can even come to you. Convenience and service is what we do."<br/>
-                  👉 "Would morning or afternoon work best? Is 10:00 AM or closer to 2:00 PM better?"
+                  👉 "King Amen Ra, our Principal Broker and Licensed Senior Advisor, is currently on a live warm transfer call helping another client right now, so I will get you scheduled right on his calendar. Would you prefer a <strong>Telephone appointment (30 minutes)</strong>, an <strong>In-Person appointment (60 minutes)</strong>, or a <strong>Video appointment (30 minutes)</strong> with King Amen Ra?"
                 </p>
                 <button
                   type="button"
@@ -603,27 +579,27 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                   onClick={() => setIsBookApptOpen(true)}
                   style={{ width: '100%', padding: '0.65rem', fontWeight: 800, marginTop: '0.35rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem' }}
                 >
-                  📅 Select Slot & Put on Calendar Now
+                  📅 Book Telephone, In-Person, or Video Appointment Now
                 </button>
               </div>
 
               {/* Step 3: Confirmation & Agent Handoff */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid #3b82f6' }}>
                 <div style={{ fontWeight: 700, color: '#60a5fa', marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                  Step 3: Confirm & Auto-Send Text (YES/Y)
+                  Step 3: Confirm Appointment & Continue Calling
                 </div>
                 <p style={{ margin: 0, lineHeight: 1.5 }}>
-                  "I have your appointment confirmed with our state-licensed Medicare specialist on our agency master calendar. I am sending you a quick confirmation text right now. Please reply <strong>YES</strong> to hold that time!"
+                  "Wonderful! I have your <strong>[Telephone / In-Person / Video]</strong> appointment confirmed with Principal Broker <strong>King Amen Ra</strong> on our calendar. I am sending you a quick confirmation text right now—please reply <strong>YES</strong> to hold that time, and have your doctors and prescription list handy!"
                 </p>
               </div>
 
-              {/* Step 4: Objections */}
+              {/* Step 4: Sarah Rebuttals */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid #f59e0b' }}>
                 <div style={{ fontWeight: 700, color: '#f59e0b', marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                  Step 4: Objections & Rebuttals
+                  Step 4: Sarah's Fiduciary Rebuttals
                 </div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                  <strong>"I'm happy with my plan":</strong> "A 10-minute checkup doesn't mean you have to change anything—it simply guarantees there are no surprise bills at the pharmacy counter in January."
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  <strong>"I'm happy with my plan":</strong> "Staying right where you are may be the best choice! Because we are a 100% free fiduciary advisory representing 104+ carriers with zero broker fees, our review simply verifies your doctors and prescriptions are covered at the lowest cost for 2027."
                 </div>
               </div>
 

@@ -37,6 +37,7 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
   const [isThreeWayLive, setIsThreeWayLive] = useState<boolean>(false);
   const [schedulerDropped, setSchedulerDropped] = useState<boolean>(false);
   const [copiedScript, setCopiedScript] = useState<boolean>(false);
+  const [copiedWhisperScript, setCopiedWhisperScript] = useState<boolean>(false);
   const [kingPickedUp, setKingPickedUp] = useState<boolean>(false);
 
   useEffect(() => {
@@ -157,7 +158,7 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
     setSubmitting(true);
     setError('');
 
-    const agentPhone = selectedAgent?.phone || '4803319455';
+    const agentPhone = selectedAgent?.phone || '6024569681';
     const dialUrl = googleVoiceWebUrl(agentPhone, user?.email);
 
     // Safari-compliant pre-open: opens window during synchronous user click gesture
@@ -210,8 +211,16 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
     } catch (err) {}
   };
 
+  const whisperBriefingText = `Hi ${selectedAgent?.name || 'King Amen Ra'}, this is ${user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${contactName} from ${contactState} on hold on Line 1 looking for a 2027 plan review${briefingNotes ? ` (${briefingNotes})` : ''}. I am merging the call now so you can take over.`;
+
+  const handleCopyWhisperScript = () => {
+    navigator.clipboard.writeText(whisperBriefingText);
+    setCopiedWhisperScript(true);
+    setTimeout(() => setCopiedWhisperScript(false), 2500);
+  };
+
   const handleCopyScript = () => {
-    const script = `Hi ${contactFirstName}, thank you so much for holding! I have ${selectedAgent?.name || 'King Amen Ra'}, our licensed Medicare specialist for ${contactState}, right here on the line with both of us. ${selectedAgent?.name || 'King'}, this is ${contactName}—they are looking for guidance on their Medicare options in ${contactState}, and I've briefed you on their situation. I will let you two take it from here!`;
+    const script = `Thank you so much for holding, ${contactFirstName}! I now have ${selectedAgent?.name || 'King Amen Ra'}, our Principal Broker and Licensed Senior Advisor at IWG Insurance and Financial Services, right here on the line with both of us. ${selectedAgent?.name || 'King'}, I have whispered a briefing on ${contactName}'s coverage goals in ${contactState}, so I will step back and let you two take it from here!`;
     navigator.clipboard.writeText(script);
     setCopiedScript(true);
     setTimeout(() => setCopiedScript(false), 2500);
@@ -660,15 +669,27 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
                 </div>
               </div>
 
-              {/* 3-Way Bridge Instructions Box */}
-              <div style={{ background: '#0e1d4d', border: '1px solid #3b82f6', borderRadius: '10px', padding: '1rem', textAlign: 'left' }}>
-                <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#93c5fd', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-                  <span>📲</span> <span>Step-by-Step: How to Bridge the 3-Way Call with King</span>
+              {/* Whisper Transfer Briefing Script Box (Line 2 to King Amen Ra) */}
+              <div style={{ background: '#0e1838', border: '1.5px solid #c8963e', borderRadius: '10px', padding: '1rem', textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#ffd88a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>🤫</span> <span>Step 1: Whisper Transfer Briefing to King Amen Ra (Before Merging):</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyWhisperScript}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', fontWeight: 700 }}
+                  >
+                    {copiedWhisperScript ? '✅ Whisper Copied!' : '📋 Copy Whisper Script'}
+                  </button>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.83rem', color: '#e2e8f0' }}>
-                  <div><strong>1. Answer & Brief:</strong> When King answers, tell him: <em>"{contactName} is on hold on Line 1 looking for Medicare options in {contactState}."</em></div>
-                  <div><strong>2. Merge Calls:</strong> In Google Voice (or your phone), click/tap <strong>"Merge calls"</strong> or <strong>"Join calls"</strong>.</div>
-                  <div><strong>3. All 3 Connected:</strong> Now you, King, and {contactName} are speaking together on the same call!</div>
+                <div style={{ background: '#051039', border: '1px solid #1f2e5c', padding: '0.75rem', borderRadius: '6px', fontSize: '0.86rem', lineHeight: 1.5, color: '#e2e8f0', fontStyle: 'italic' }}>
+                  "{whisperBriefingText}"
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.8rem', color: '#93c5fd', marginTop: '0.6rem' }}>
+                  <div><strong>Step 2 (Merge Calls):</strong> After whispering the briefing to King Amen Ra, click/tap <strong>"Merge calls"</strong> in Google Voice or your phone.</div>
+                  <div><strong>Step 3 (3-Way Introduction):</strong> Click the green button below to read the 3-way merge introduction and hand off the call!</div>
                 </div>
               </div>
 
@@ -842,7 +863,7 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
                   <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#fff', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {selectedAgent?.name || 'Agent'}
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{selectedAgent?.phone || '(480) 331-9455'}</div>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{selectedAgent?.phone || '(602) 456-9681'}</div>
                   <span style={{ display: 'inline-block', marginTop: '4px', fontSize: '0.68rem', padding: '1px 6px', borderRadius: '10px', background: 'rgba(16,185,129,0.2)', color: '#34d399', fontWeight: 700 }}>
                     ● On 3-Way Call
                   </span>
