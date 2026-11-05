@@ -54,7 +54,14 @@ blandPublic.get(['/cron/tick', '/cron/tick/:slot'], async (req, res) => {
 blandPublic.get('/public-directory', async (_req, res) => {
   try {
     const dir = await getInboundDirectory();
-    res.json(dir);
+    // Public website: desk entries that internally route to King's direct line are shown with the
+    // agency main line (480) 331-9455, which Sarah answers and routes.
+    const directory = dir.directory.map((d) =>
+      d.e164 === '+16024569681' && !d.name.toLowerCase().includes('king amen ra')
+        ? { ...d, phone: '(480) 331-9455', e164: '+14803319455' }
+        : d
+    );
+    res.json({ ...dir, directory });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

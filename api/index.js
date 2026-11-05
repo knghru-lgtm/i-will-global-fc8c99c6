@@ -1014,6 +1014,7 @@ var init_realtime = __esm({
 // server/src/services/bland.ts
 var bland_exports = {};
 __export(bland_exports, {
+  AGENCY_MAIN_LINE_E164: () => AGENCY_MAIN_LINE_E164,
   ALLOWED_APPOINTMENT_TYPES: () => ALLOWED_APPOINTMENT_TYPES,
   ALLOWED_BLAND_APPOINTMENT_TYPES: () => ALLOWED_BLAND_APPOINTMENT_TYPES,
   BLAND_AI_USER: () => BLAND_AI_USER,
@@ -1023,6 +1024,7 @@ __export(bland_exports, {
   DEFAULT_BLAND_PATHWAY_ID: () => DEFAULT_BLAND_PATHWAY_ID,
   DEFAULT_BLAND_PROMPT: () => DEFAULT_BLAND_PROMPT,
   IWG_TEAM_DIRECTORY: () => IWG_TEAM_DIRECTORY,
+  TRANSFER_DESK_E164: () => TRANSFER_DESK_E164,
   buildAiWhisperScripts: () => buildAiWhisperScripts,
   canDispatchOutboundCall: () => canDispatchOutboundCall,
   countBlandAssignedRemaining: () => countBlandAssignedRemaining,
@@ -1071,8 +1073,13 @@ async function getInboundDirectory() {
       `SELECT name, title, role, phone FROM users WHERE active = true AND phone IS NOT NULL AND trim(phone) != '' ORDER BY name ASC`
     );
     for (const u of dbUsers) {
-      const e164 = toE164(u.phone);
+      let e164 = toE164(u.phone);
       if (!e164) continue;
+      let displayPhone = u.phone;
+      if (e164 === AGENCY_MAIN_LINE_E164) {
+        e164 = TRANSFER_DESK_E164;
+        displayPhone = "(602) 456-9681";
+      }
       const rawName = String(u.name || "").trim();
       const isAneesha = rawName.toLowerCase().startsWith("aneesha sullivan");
       const normalizedName = isAneesha ? "Aneesha Sullivan, PA" : rawName;
@@ -1084,7 +1091,7 @@ async function getInboundDirectory() {
         name: normalizedName,
         role: isAneesha ? "Chief Operating Officer (COO), Physician Assistant (PA) & Principal Governance" : u.title || existing?.role || u.role,
         department: existing?.department || dept,
-        phone: u.phone,
+        phone: displayPhone,
         e164
       });
     }
@@ -2091,7 +2098,7 @@ Summary: ${summary || "Qualified on outbound AI call"}`,
     next_call_dispatched: nextDispatched
   };
 }
-var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, IWG_TEAM_DIRECTORY, BLAND_VOICES, BLAND_AI_USER_ID, BLAND_AI_USER, PHOENIX_OFFSET_MS, DAY_NAMES, STATE_TIMEZONES, STATE_LATEST_LOCAL_HOUR, BLAND_ASSIGNED_CALLABLE_SQL;
+var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, AGENCY_MAIN_LINE_E164, TRANSFER_DESK_E164, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, IWG_TEAM_DIRECTORY, BLAND_VOICES, BLAND_AI_USER_ID, BLAND_AI_USER, PHOENIX_OFFSET_MS, DAY_NAMES, STATE_TIMEZONES, STATE_LATEST_LOCAL_HOUR, BLAND_ASSIGNED_CALLABLE_SQL;
 var init_bland = __esm({
   "server/src/services/bland.ts"() {
     "use strict";
@@ -2101,6 +2108,8 @@ var init_bland = __esm({
     init_automation();
     DEFAULT_BLAND_PATHWAY_ID = "fc8c99c6-88c3-435d-952b-8c93c2db17a6";
     DEFAULT_BLAND_CALLER_ID = "+15208415736";
+    AGENCY_MAIN_LINE_E164 = "+14803319455";
+    TRANSFER_DESK_E164 = "+16024569681";
     ALLOWED_APPOINTMENT_TYPES = ["telephone", "in_person", "video"];
     ALLOWED_BLAND_APPOINTMENT_TYPES = ALLOWED_APPOINTMENT_TYPES;
     DEFAULT_BLAND_PROMPT = `You are Sarah, the Voice AI Receptionist, Multi-Product Line Funnel Specialist, Outbound Caller, and Automatic Whisper Transfer Agent for the Medicare Helpline powered by IWG Insurance and Financial Services, a 100% free fiduciary insurance advisory representing over 104 premier carriers with zero broker fees, led by Principal Broker and Licensed Senior Advisor King Amen Ra (NPN: 16094432) and Chief Operating Officer Aneesha Sullivan, PA (Physician Assistant & Principal Governance).
@@ -2147,7 +2156,7 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
       { name: "Aneesha Sullivan, PA", role: "Chief Operating Officer (COO), Physician Assistant (PA) & Principal Governance", department: "Executive & Governance", phone: "(602) 412-1945", e164: "+16024121945" },
       { name: "Sarah Jenkins", role: "Sales Director", department: "Executive & Governance", phone: "(480) 331-9401", e164: "+14803319401" },
       { name: "Marcus Vance", role: "Inbound & Scheduling Manager", department: "Executive & Governance", phone: "(480) 331-9402", e164: "+14803319402" },
-      { name: "Licensed Transfer Agent", role: "Main Transfer Desk & Master Calendar", department: "Executive & Governance", phone: "(480) 331-9455", e164: "+14803319455" },
+      { name: "Licensed Transfer Agent", role: "Main Transfer Desk & Master Calendar (routes to King Amen Ra)", department: "Executive & Governance", phone: "(602) 456-9681", e164: "+16024569681" },
       // Dedicated Core Outbound & Scheduling Specialists
       { name: "JaKeeta Sullivan", role: "Outbound Scheduling Specialist", department: "Outbound & Inbound Schedulers", phone: "(602) 456-2760", e164: "+16024562760" },
       { name: "Shakira Granger", role: "Outbound Scheduling Specialist", department: "Outbound & Inbound Schedulers", phone: "(602) 753-6169", e164: "+16027536169" },
@@ -9298,7 +9307,10 @@ blandPublic.get(["/cron/tick", "/cron/tick/:slot"], async (req, res) => {
 blandPublic.get("/public-directory", async (_req, res) => {
   try {
     const dir = await getInboundDirectory();
-    res.json(dir);
+    const directory = dir.directory.map(
+      (d) => d.e164 === "+16024569681" && !d.name.toLowerCase().includes("king amen ra") ? { ...d, phone: "(480) 331-9455", e164: "+14803319455" } : d
+    );
+    res.json({ ...dir, directory });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

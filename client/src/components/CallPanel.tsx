@@ -942,11 +942,11 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.9rem', color: isLiveCallConnected ? 'var(--accent)' : '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                       <span>{isLiveCallConnected ? '⚡' : '🔒'}</span>
-                      <span>{isLiveCallConnected ? 'Live Warm Transfer → Agent at (480) 331-9455' : 'Warm Transfer (Locked - Connect Call First)'}</span>
+                      <span>{isLiveCallConnected ? 'Live Warm Transfer → King Amen Ra (602) 456-9681' : 'Warm Transfer (Locked - Connect Call First)'}</span>
                     </div>
                     <div style={{ fontSize: '0.76rem', color: isLiveCallConnected ? '#cbd5e1' : '#64748b' }}>
                       {isLiveCallConnected
-                        ? 'Call active! Connect prospect live to state-licensed specialist line (480) 331-9455 ($25 scheduler credit)'
+                        ? 'Call active! Connect prospect live to Principal Broker King Amen Ra (602) 456-9681 ($25 scheduler credit)'
                         : 'Only available once connected on a live call with prospect. Dial above and mark call connected first.'}
                     </div>
                   </div>
@@ -964,10 +964,10 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                         gap: '0.4rem',
                         boxShadow: '0 4px 15px rgba(212, 160, 76, 0.35)',
                       }}
-                      title="Live Warm Transfer to Agent at (480) 331-9455"
+                      title="Live Warm Transfer to King Amen Ra at (602) 456-9681"
                     >
                       <span>⚡</span>
-                      <span>Warm Transfer → (480) 331-9455</span>
+                      <span>Warm Transfer → King (602) 456-9681</span>
                     </button>
                   ) : (
                     <button

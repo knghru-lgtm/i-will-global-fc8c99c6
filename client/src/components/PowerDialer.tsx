@@ -453,7 +453,7 @@ export const PowerDialer: React.FC<{ isOpen: boolean; onClose: () => void }> = (
                   </div>
                   <div style={{ fontSize: '0.78rem', color: isLiveCallActive ? '#e2e8f0' : '#64748b', marginTop: '0.2rem' }}>
                     {isLiveCallActive
-                      ? `Connect ${currentLead.first_name} ${currentLead.last_name} live to agent at (480) 331-9455 ($25 scheduler credit)`
+                      ? `Connect ${currentLead.first_name} ${currentLead.last_name} live to King Amen Ra at (602) 456-9681 ($25 scheduler credit)`
                       : `Only available once connected on a live call with ${currentLead.first_name}. Dial below to connect first.`}
                   </div>
                 </div>
@@ -471,10 +471,10 @@ export const PowerDialer: React.FC<{ isOpen: boolean; onClose: () => void }> = (
                       gap: '0.4rem',
                       boxShadow: '0 4px 15px rgba(212, 160, 76, 0.35)',
                     }}
-                    title="Initiate live 3-way warm transfer handoff to agent at (480) 331-9455"
+                    title="Initiate live 3-way warm transfer handoff to King Amen Ra at (602) 456-9681"
                   >
                     <span>⚡</span>
-                    <span>3-Way Warm Transfer → (480) 331-9455</span>
+                    <span>3-Way Warm Transfer → King (602) 456-9681</span>
                   </button>
                 ) : (
                   <button

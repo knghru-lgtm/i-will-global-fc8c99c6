@@ -572,7 +572,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             }
             setIsMobileMenuOpen(false);
           }}
-          title="Live Warm Transfer (480) 331-9455"
+          title="Live Warm Transfer to King Amen Ra (602) 456-9681"
           style={{ color: 'var(--accent)' }}
         >
           <span>⚡</span>

@@ -37,6 +37,10 @@ export interface BlandConfig {
 
 export const DEFAULT_BLAND_PATHWAY_ID = 'fc8c99c6-88c3-435d-952b-8c93c2db17a6';
 export const DEFAULT_BLAND_CALLER_ID = '+15208415736';
+/** Agency main line — being ported into Bland so Sarah answers every call. Never used as a transfer target. */
+export const AGENCY_MAIN_LINE_E164 = '+14803319455';
+/** Where "Transfer Desk" transfers go (King Amen Ra direct). */
+export const TRANSFER_DESK_E164 = '+16024569681';
 
 export const ALLOWED_APPOINTMENT_TYPES = ['telephone', 'in_person', 'video'] as const;
 export const ALLOWED_BLAND_APPOINTMENT_TYPES = ALLOWED_APPOINTMENT_TYPES;
@@ -112,7 +116,7 @@ export const IWG_TEAM_DIRECTORY: DirectoryEntry[] = [
   { name: 'Aneesha Sullivan, PA', role: 'Chief Operating Officer (COO), Physician Assistant (PA) & Principal Governance', department: 'Executive & Governance', phone: '(602) 412-1945', e164: '+16024121945' },
   { name: 'Sarah Jenkins', role: 'Sales Director', department: 'Executive & Governance', phone: '(480) 331-9401', e164: '+14803319401' },
   { name: 'Marcus Vance', role: 'Inbound & Scheduling Manager', department: 'Executive & Governance', phone: '(480) 331-9402', e164: '+14803319402' },
-  { name: 'Licensed Transfer Agent', role: 'Main Transfer Desk & Master Calendar', department: 'Executive & Governance', phone: '(480) 331-9455', e164: '+14803319455' },
+  { name: 'Licensed Transfer Agent', role: 'Main Transfer Desk & Master Calendar (routes to King Amen Ra)', department: 'Executive & Governance', phone: '(602) 456-9681', e164: '+16024569681' },
 
   // Dedicated Core Outbound & Scheduling Specialists
   { name: 'JaKeeta Sullivan', role: 'Outbound Scheduling Specialist', department: 'Outbound & Inbound Schedulers', phone: '(602) 456-2760', e164: '+16024562760' },
@@ -174,8 +178,15 @@ export async function getInboundDirectory(): Promise<{
       `SELECT name, title, role, phone FROM users WHERE active = true AND phone IS NOT NULL AND trim(phone) != '' ORDER BY name ASC`
     );
     for (const u of dbUsers) {
-      const e164 = toE164(u.phone);
+      let e164 = toE164(u.phone);
       if (!e164) continue;
+      let displayPhone = u.phone;
+      // (480) 331-9455 is the agency main line answered by Sarah (Bland AI). Never transfer a caller back into it —
+      // team members listed on the main line route to King Amen Ra's direct line instead.
+      if (e164 === AGENCY_MAIN_LINE_E164) {
+        e164 = TRANSFER_DESK_E164;
+        displayPhone = '(602) 456-9681';
+      }
       const rawName = String(u.name || '').trim();
       const isAneesha = rawName.toLowerCase().startsWith('aneesha sullivan');
       const normalizedName = isAneesha ? 'Aneesha Sullivan, PA' : rawName;
@@ -194,7 +205,7 @@ export async function getInboundDirectory(): Promise<{
           ? 'Chief Operating Officer (COO), Physician Assistant (PA) & Principal Governance'
           : (u.title || existing?.role || u.role),
         department: existing?.department || dept,
-        phone: u.phone,
+        phone: displayPhone,
         e164,
       });
     }
