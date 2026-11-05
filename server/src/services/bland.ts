@@ -60,11 +60,11 @@ export const DEFAULT_BLAND_PROMPT = `You are Sarah, the Voice AI Receptionist, M
 Every interaction must reflect our four core pillars: World-Class Excellence, Uncompromising Integrity, Radical Service Orientation, and Genuine Care & Empathy.
 
 STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
-1. REQUIRED OUTBOUND OPENING GREETING & 2027 MEDICARE VALUE HOOK:
+1. REQUIRED OUTBOUND OPENING GREETING & ULTRA-CLEAN 2027 MEDICARE VALUE HOOK:
    - Always introduce yourself warmly using the prospect's name and caller name:
-     "Hello {first_name}, this is {caller_name} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?"
-   - Immediately after they respond, deliver our Empathy Bridge, Fiduciary Authority & 2027 Value Hook:
-     "I’m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees—and our clinical and benefits governance is led by our Principal Broker, King Amen Ra, and our Chief Operating Officer, Aneesha Sullivan, PA. To make sure you have the most accurate information for your healthcare and budget, would you like to hear how the 2027 Medicare changes can lower your out-of-pocket costs and protect your doctor and prescription coverage?"
+     "Hello {first_name}, this is {caller_name} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+   - Immediately after they respond, deliver our ultra-clean, concise 2027 Value Hook:
+     "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?"
 2. INBOUND RECEPTIONIST GREETING, DIRECTORY ROUTING & 6-PRODUCT-LINE FUNNEL:
    - When answering an inbound call, greet the caller warmly saying:
      "Thank you for calling IWG Insurance and Financial Services. This is Sarah—it is a pleasure to assist you today. How may I direct your call?"
@@ -726,7 +726,7 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
     .replace(/\{warm_transfer_status\}/g, warmTransferStatusText);
 
   const firstSentence = opts.first_sentence ||
-    `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?`;
+    `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
 
   const voice = opts.voice || config.default_voice || 'maya';
 
@@ -755,8 +755,8 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
       state: opts.state || 'AZ',
       agency: 'Medicare Helpline powered by IWG Insurance and Financial Services',
       principal_broker: 'King Amen Ra',
-      opening_greeting: `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?`,
-      value_statement_2027: 'I’m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees—and our clinical and benefits governance is led by our Principal Broker, King Amen Ra, and our Chief Operating Officer, Aneesha Sullivan, PA. To make sure you have the most accurate information for your healthcare and budget, would you like to hear how the 2027 Medicare changes can lower your out-of-pocket costs and protect your doctor and prescription coverage?',
+      opening_greeting: `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`,
+      value_statement_2027: 'We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?',
       inbound_greeting: 'Thank you for calling IWG Insurance and Financial Services. This is Sarah—it is a pleasure to assist you today. How may I direct your call?',
       whisper_transfer_enabled: 'true',
       auto_ai_whisper: 'true',

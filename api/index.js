@@ -1438,7 +1438,7 @@ async function sendBlandCall(opts) {
   const transferNumber = opts.transfer_phone_number || config2.transfer_phone_number || "+16024569681";
   const warmTransferStatusText = isOnWarmTransfer ? "ACTIVE \u2014 King Amen Ra is currently on a live Warm Transfer call with another client. DO NOT live-transfer this call. Instead, inform the caller that King Amen Ra is on a warm transfer call and ONLY offer/select a Telephone, In-Person, or Video appointment, book their preferred date/time, and continue making calls!" : "AVAILABLE \u2014 King Amen Ra is available for an immediate automatic AI whisper warm transfer if the caller agrees to learn about the 2027 changes or speak with a licensed advisor right now, or you may schedule a Telephone, In-Person, or Video appointment.";
   const prompt = (opts.custom_prompt || config2.prompt_template || DEFAULT_BLAND_PROMPT).replace(/\{prospect_name\}/g, prospectName).replace(/\{first_name\}/g, firstName).replace(/\{caller_name\}/g, callerName).replace(/\{state\}/g, opts.state || "Arizona").replace(/\{warm_transfer_status\}/g, warmTransferStatusText);
-  const firstSentence = opts.first_sentence || `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?`;
+  const firstSentence = opts.first_sentence || `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
   const voice = opts.voice || config2.default_voice || "maya";
   let blandCallId = `bland_sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   let isSimulated = true;
@@ -1459,8 +1459,8 @@ async function sendBlandCall(opts) {
       state: opts.state || "AZ",
       agency: "Medicare Helpline powered by IWG Insurance and Financial Services",
       principal_broker: "King Amen Ra",
-      opening_greeting: `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?`,
-      value_statement_2027: "I\u2019m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees\u2014and our clinical and benefits governance is led by our Principal Broker, King Amen Ra, and our Chief Operating Officer, Aneesha Sullivan, PA. To make sure you have the most accurate information for your healthcare and budget, would you like to hear how the 2027 Medicare changes can lower your out-of-pocket costs and protect your doctor and prescription coverage?",
+      opening_greeting: `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`,
+      value_statement_2027: "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?",
       inbound_greeting: "Thank you for calling IWG Insurance and Financial Services. This is Sarah\u2014it is a pleasure to assist you today. How may I direct your call?",
       whisper_transfer_enabled: "true",
       auto_ai_whisper: "true",
@@ -1831,11 +1831,11 @@ var init_bland = __esm({
 Every interaction must reflect our four core pillars: World-Class Excellence, Uncompromising Integrity, Radical Service Orientation, and Genuine Care & Empathy.
 
 STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
-1. REQUIRED OUTBOUND OPENING GREETING & 2027 MEDICARE VALUE HOOK:
+1. REQUIRED OUTBOUND OPENING GREETING & ULTRA-CLEAN 2027 MEDICARE VALUE HOOK:
    - Always introduce yourself warmly using the prospect's name and caller name:
-     "Hello {first_name}, this is {caller_name} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?"
-   - Immediately after they respond, deliver our Empathy Bridge, Fiduciary Authority & 2027 Value Hook:
-     "I\u2019m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees\u2014and our clinical and benefits governance is led by our Principal Broker, King Amen Ra, and our Chief Operating Officer, Aneesha Sullivan, PA. To make sure you have the most accurate information for your healthcare and budget, would you like to hear how the 2027 Medicare changes can lower your out-of-pocket costs and protect your doctor and prescription coverage?"
+     "Hello {first_name}, this is {caller_name} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+   - Immediately after they respond, deliver our ultra-clean, concise 2027 Value Hook:
+     "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?"
 2. INBOUND RECEPTIONIST GREETING, DIRECTORY ROUTING & 6-PRODUCT-LINE FUNNEL:
    - When answering an inbound call, greet the caller warmly saying:
      "Thank you for calling IWG Insurance and Financial Services. This is Sarah\u2014it is a pleasure to assist you today. How may I direct your call?"

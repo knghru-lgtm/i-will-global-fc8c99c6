@@ -524,20 +524,17 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                 <strong>🛡️ CMS / TPMO Disclaimer:</strong> "{tpmo}"
               </div>
 
-              {/* Step 1: World-Class Opening Greeting & 2027 Value Hook */}
+              {/* Step 1: Ultra-Clean Opening Greeting & 2027 Value Hook */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid var(--accent)' }}>
                 <div style={{ fontWeight: 800, color: 'var(--accent)', marginBottom: '0.4rem', fontSize: '0.92rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
-                  <span>Step 1: World-Class Opening Greeting & 2027 Value Hook</span>
+                  <span>Step 1: Ultra-Clean Opening Greeting & 2027 Value Hook</span>
                   <span className="badge badge-gold" style={{ fontSize: '0.68rem' }}>AUTO AI WHISPER FOR ALL</span>
                 </div>
                 <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5, fontWeight: 700, color: '#fff' }}>
-                  "Hello <strong>{contact.name || 'Beneficiary'}</strong>, this is <strong>{user?.name || 'Sarah'}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?"
-                </p>
-                <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5, fontWeight: 700, color: '#f8fafc' }}>
-                  "I’m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees—and our clinical and benefits governance is led by our Principal Broker, <strong>King Amen Ra</strong>, and our Chief Operating Officer, <strong>Aneesha Sullivan, PA</strong>."
+                  "Hello <strong>{contact.name || 'Beneficiary'}</strong>, this is <strong>{user?.name || 'Sarah'}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
                 </p>
                 <p style={{ margin: '0 0 0.5rem', fontWeight: 800, color: '#6ee7b7', fontSize: '0.95rem', lineHeight: 1.5 }}>
-                  "To make sure you have the most accurate information for your healthcare and budget, would you like to hear how the <strong>2027 Medicare changes</strong> can lower your out-of-pocket costs and protect your doctor and prescription coverage?"
+                  "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?"
                 </p>
                 <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: '#e0ac53', lineHeight: 1.5 }}>
                   "Original Medicare leaves a $1,788 hospital deductible and uncapped 20% coinsurance, while 2027 Part D caps drug costs at $2,400/year ($35 insulin, $0 adult vaccines). We run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage side-by-side. Our Principal Broker <strong>King Amen Ra</strong> is available right now—let me introduce you so you can get your questions answered first-hand, okay?"

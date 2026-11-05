@@ -330,7 +330,7 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Step 1: World-Class Opening Greeting & 2027 Value Hook (Unified for All Callers & Sarah AI)
+                  Step 1: Ultra-Clean Opening Greeting & 2027 Value Hook (Unified for All Callers & Sarah AI)
                 </h4>
 
                 <div style={{ fontSize: '0.92rem', lineHeight: 1.6, color: '#e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -339,28 +339,19 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                       1. Warm Opening Greeting (Line 1):
                     </div>
                     <p style={{ margin: '0 0 0.35rem', fontWeight: 700, color: '#fff', fontSize: '0.96rem' }}>
-                      "Hello <strong>{displayName}</strong>, this is <strong>{agentName}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?"
+                      "Hello <strong>{displayName}</strong>, this is <strong>{agentName}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
                     </p>
                     <div style={{ fontSize: '0.76rem', color: '#cbd5e1', fontStyle: 'italic' }}>
                       Inbound Receptionist Greeting: "Thank you for calling IWG Insurance and Financial Services. This is Sarah—it is a pleasure to assist you today. How may I direct your call?"
                     </div>
                   </div>
 
-                  <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #38bdf8' }}>
-                    <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                      2. Empathy Bridge + Clinical & Fiduciary Authority:
-                    </div>
-                    <p style={{ margin: 0, fontWeight: 700, color: '#fff', fontSize: '0.95rem' }}>
-                      "I’m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees—and our clinical and benefits governance is led by our Principal Broker, <strong>King Amen Ra</strong>, and our Chief Operating Officer, <strong>Aneesha Sullivan, PA</strong>."
-                    </p>
-                  </div>
-
                   <div style={{ background: 'rgba(16,185,129,0.12)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
                     <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#34d399', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                      3. High-Conversion 2027 Value Question & Automatic AI Whisper Transfer:
+                      2. Ultra-Clean & Concise 2027 Value Hook:
                     </div>
                     <p style={{ margin: '0 0 0.6rem', fontWeight: 800, color: '#6ee7b7', fontSize: '1.02rem' }}>
-                      "To make sure you have the most accurate information for your healthcare and budget, would you like to hear how the <strong>2027 Medicare changes</strong> can lower your out-of-pocket costs and protect your doctor and prescription coverage?"
+                      "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?"
                     </p>
                     <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
                       <button

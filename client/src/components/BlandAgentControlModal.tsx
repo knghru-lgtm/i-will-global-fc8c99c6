@@ -460,8 +460,8 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
             </span>
           </div>
           <div style={{ fontSize: '0.82rem', color: '#e2e8f0', lineHeight: 1.5, background: 'rgba(5, 16, 57, 0.65)', padding: '0.65rem 0.85rem', borderRadius: '8px', border: '1px solid rgba(200, 150, 62, 0.3)' }}>
-            <div><strong>Opening:</strong> "Hello <em>[Prospect Name]</em>, this is <em>[Caller Name / Sarah]</em> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?"</div>
-            <div style={{ marginTop: '0.3rem' }}><strong>Empathy Bridge & 2027 Value Hook:</strong> "I’m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees—and our clinical and benefits governance is led by our Principal Broker, <strong>King Amen Ra</strong>, and our Chief Operating Officer, <strong>Aneesha Sullivan, PA</strong>. To make sure you have the most accurate information for your healthcare and budget, <strong>would you like to hear how the 2027 Medicare changes can lower your out-of-pocket costs and protect your doctor and prescription coverage?</strong>"</div>
+            <div><strong>Opening:</strong> "Hello <em>[Prospect Name]</em>, this is <em>[Caller Name / Sarah]</em> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"</div>
+            <div style={{ marginTop: '0.3rem' }}><strong>Ultra-Clean 2027 Value Hook:</strong> "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, <strong>would you like to know about the upcoming changes for 2027?</strong>"</div>
             <div style={{ marginTop: '0.3rem', color: '#6ee7b7', fontSize: '0.78rem' }}>
               <strong>VIP Concierge Automatic AI Whisper for All:</strong> Sarah AI automatically whispers the private briefing to King Amen Ra and any of the 42 directory members before bridging the call.
             </div>
