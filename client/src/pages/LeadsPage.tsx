@@ -86,6 +86,60 @@ export const LeadsPage: React.FC = () => {
   // Row selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
+  // Bland AI Live Outbound Start / Stop State
+  const [isBlandActive, setIsBlandActive] = useState<boolean>(false);
+  const [blandBusy, setBlandBusy] = useState<boolean>(false);
+  const [blandBannerMsg, setBlandBannerMsg] = useState<string>('');
+
+  const loadBlandStatus = async () => {
+    try {
+      const cfg = await api.get('/bland/config');
+      if (cfg) {
+        setIsBlandActive(Boolean(cfg.is_campaign_active));
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleStartBlandOutboundCalls = async (targetLeadIds?: string[]) => {
+    setBlandBusy(true);
+    setBlandBannerMsg('');
+    try {
+      const idsToCall = targetLeadIds && targetLeadIds.length > 0
+        ? targetLeadIds
+        : (selectedIds.length > 0 ? selectedIds : undefined);
+      const res = await api.post('/bland/activate', {
+        lead_ids: idsToCall,
+        max_calls_to_start: idsToCall ? Math.min(idsToCall.length, 5) : 1,
+        continue_queue: true,
+      });
+      setIsBlandActive(true);
+      setBlandBannerMsg(res.message || '🤖 Bland AI activated! Autonomous outbound calls have started.');
+      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      loadLeads();
+    } catch (err: any) {
+      alert(err.message || 'Failed to start Bland AI outbound calls');
+    } finally {
+      setBlandBusy(false);
+    }
+  };
+
+  const handleStopBlandOutboundCalls = async () => {
+    setBlandBusy(true);
+    try {
+      const res = await api.post('/bland/stop', { stop_all: true });
+      setIsBlandActive(false);
+      setBlandBannerMsg(res.message || '🛑 Bland AI outbound calls and queue dialing have been stopped.');
+      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      loadLeads();
+    } catch (err: any) {
+      alert(err.message || 'Failed to stop Bland AI outbound calls');
+    } finally {
+      setBlandBusy(false);
+    }
+  };
+
   // Load pool stats and outbound callers
   const loadPoolStats = async () => {
     try {
@@ -126,13 +180,19 @@ export const LeadsPage: React.FC = () => {
   useEffect(() => {
     loadLeads();
     loadPoolStats();
+    loadBlandStatus();
 
     const handleLeadUpdated = () => {
       loadLeads();
       loadPoolStats();
+      loadBlandStatus();
     };
     window.addEventListener('iwg-lead-updated', handleLeadUpdated);
-    return () => window.removeEventListener('iwg-lead-updated', handleLeadUpdated);
+    window.addEventListener('iwg-bland-status-changed', loadBlandStatus);
+    return () => {
+      window.removeEventListener('iwg-lead-updated', handleLeadUpdated);
+      window.removeEventListener('iwg-bland-status-changed', loadBlandStatus);
+    };
   }, [statusFilter, callerFilter, t65Filter, searchQuery]);
 
   // Clean and parse Excel / CSV file in browser
@@ -722,26 +782,82 @@ export const LeadsPage: React.FC = () => {
             </button>
           )}
 
-          {/* Activate Bland Agent AI Button */}
-          <button
-            type="button"
-            className="btn"
-            onClick={() => window.dispatchEvent(new CustomEvent('open-bland-ai-control'))}
+          {/* Bland AI Start / Stop Outbound Calls Control Group */}
+          <div
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.45rem',
-              fontWeight: 800,
-              background: 'linear-gradient(135deg, #7c3aed, #9333ea)',
-              borderColor: '#a855f7',
-              color: '#fff',
-              boxShadow: '0 4px 14px rgba(139, 92, 246, 0.4)',
-              cursor: 'pointer',
+              gap: '0.4rem',
+              padding: '0.25rem 0.4rem',
+              borderRadius: '10px',
+              background: isBlandActive ? 'rgba(16, 185, 129, 0.14)' : 'rgba(139, 92, 246, 0.12)',
+              border: `1.5px solid ${isBlandActive ? '#10b981' : '#8b5cf6'}`,
             }}
-            title="Activate Bland Agent AI to begin making calls & toggle Warm Transfer Appointment-Only mode (Telephone, In-Person, Video)"
           >
-            <span>🤖</span> Activate Bland Agent AI
-          </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={blandBusy}
+              onClick={() => handleStartBlandOutboundCalls()}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                padding: '0.42rem 0.8rem',
+                background: 'linear-gradient(135deg, #059669, #10b981)',
+                borderColor: '#10b981',
+                color: '#fff',
+                boxShadow: '0 3px 10px rgba(16, 185, 129, 0.35)',
+                cursor: blandBusy ? 'not-allowed' : 'pointer',
+              }}
+              title="Start Bland AI autonomous outbound calls right now"
+            >
+              <span>▶</span> {blandBusy ? 'Working...' : (selectedIds.length > 0 ? `Start Bland AI (${selectedIds.length})` : 'Start Bland AI Calls')}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={blandBusy}
+              onClick={handleStopBlandOutboundCalls}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                padding: '0.42rem 0.8rem',
+                background: 'rgba(239, 68, 68, 0.22)',
+                borderColor: '#ef4444',
+                color: '#fca5a5',
+                cursor: blandBusy ? 'not-allowed' : 'pointer',
+              }}
+              title="Stop all active Bland AI outbound calls and halt queue dialing"
+            >
+              <span>⏹</span> Stop Calls
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => window.dispatchEvent(new CustomEvent('open-bland-ai-control'))}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                padding: '0.42rem 0.75rem',
+                background: 'linear-gradient(135deg, #7c3aed, #9333ea)',
+                borderColor: '#a855f7',
+                color: '#fff',
+                cursor: 'pointer',
+              }}
+              title="Open Bland Agent AI Command Center"
+            >
+              <span>🤖</span> Bland AI Hub
+            </button>
+          </div>
 
           {/* 5 - 500 Master List Bank Assignment Button - ADMIN ONLY */}
           {isAdmin && (
@@ -786,6 +902,81 @@ export const LeadsPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Live Bland AI Status Banner */}
+      {(blandBannerMsg || isBlandActive) && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            padding: '0.75rem 1.1rem',
+            borderRadius: '10px',
+            background: isBlandActive ? 'rgba(16, 185, 129, 0.14)' : 'rgba(245, 158, 11, 0.14)',
+            border: `1.5px solid ${isBlandActive ? '#10b981' : '#f59e0b'}`,
+            color: isBlandActive ? '#6ee7b7' : '#fde68a',
+            fontSize: '0.86rem',
+            fontWeight: 700,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>{isBlandActive ? '🟢' : '🛑'}</span>
+            <span>
+              {blandBannerMsg || '🤖 Bland AI Outbound Calling is ACTIVE — dialing prospects with your unified 2027 Medicare script.'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {isBlandActive ? (
+              <button
+                type="button"
+                disabled={blandBusy}
+                onClick={handleStopBlandOutboundCalls}
+                style={{
+                  padding: '0.35rem 0.85rem',
+                  borderRadius: '6px',
+                  background: '#ef4444',
+                  border: 'none',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                }}
+              >
+                ⏹ Stop Outbound Calls Now
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={blandBusy}
+                onClick={() => handleStartBlandOutboundCalls()}
+                style={{
+                  padding: '0.35rem 0.85rem',
+                  borderRadius: '6px',
+                  background: '#10b981',
+                  border: 'none',
+                  color: '#fff',
+                  fontWeight: 800,
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                }}
+              >
+                ▶ Start Outbound Calls Again
+              </button>
+            )}
+            {blandBannerMsg && (
+              <button
+                type="button"
+                onClick={() => setBlandBannerMsg('')}
+                style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: '0.9rem' }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Filter Toolbar */}
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', background: 'var(--bg-card)', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-color)', alignItems: 'center' }}>
@@ -1108,6 +1299,48 @@ export const LeadsPage: React.FC = () => {
             {selectedIds.length} prospects selected
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={blandBusy}
+              onClick={() => handleStartBlandOutboundCalls(selectedIds)}
+              style={{
+                padding: '0.45rem 0.85rem',
+                fontSize: '0.85rem',
+                fontWeight: 800,
+                background: 'linear-gradient(135deg, #059669, #10b981)',
+                color: '#ffffff',
+                border: '1.5px solid #10b981',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                cursor: 'pointer',
+              }}
+              title="Activate Bland AI to start calling the selected prospects"
+            >
+              ▶ Start Bland AI ({selectedIds.length})
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={blandBusy}
+              onClick={handleStopBlandOutboundCalls}
+              style={{
+                padding: '0.45rem 0.85rem',
+                fontSize: '0.85rem',
+                fontWeight: 800,
+                background: 'rgba(239, 68, 68, 0.25)',
+                color: '#fca5a5',
+                border: '1.5px solid #ef4444',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                cursor: 'pointer',
+              }}
+              title="Stop all active Bland AI outbound calls"
+            >
+              ⏹ Stop Bland AI
+            </button>
             {isAdmin && (
               <button
                 type="button"

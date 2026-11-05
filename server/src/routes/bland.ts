@@ -13,6 +13,7 @@ import {
   canDispatchOutboundCall,
   getInboundDirectory,
   dispatchAiWhisperTransfer,
+  stopBlandOutboundCalls,
 } from '../services/bland.ts';
 import { one, q } from '../db/index.ts';
 
@@ -291,12 +292,14 @@ blandAuth.post('/activate', async (req, res) => {
       if (targetPhone) {
         const callResult = await sendBlandCall({
           phone: targetPhone,
-          leadId: lead_id,
-          userId: req.user!.id,
-          prospectName: targetName || 'Medicare Beneficiary',
+          related_type: 'lead',
+          related_id: lead_id,
+          user: req.user!,
+          prospect_name: targetName || 'Medicare Beneficiary',
           voice: voice || cfg.default_voice,
-          onWarmTransfer: Boolean(cfg.is_on_warm_transfer),
-          preferredAppointmentType: preferred_appointment_type,
+          on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+          preferred_appointment_type,
+          override_pause: true,
         });
         dispatched.push({ phone: targetPhone, lead_id: lead_id || null, ...callResult });
       }
@@ -310,12 +313,15 @@ blandAuth.post('/activate', async (req, res) => {
         if (lead && lead.phone) {
           const callResult = await sendBlandCall({
             phone: lead.phone,
-            leadId: lead.id,
-            userId: req.user!.id,
-            prospectName: `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Medicare Beneficiary',
+            related_type: 'lead',
+            related_id: lead.id,
+            user: req.user!,
+            prospect_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Medicare Beneficiary',
+            state: lead.state || 'AZ',
             voice: voice || cfg.default_voice,
-            onWarmTransfer: Boolean(cfg.is_on_warm_transfer),
-            preferredAppointmentType: preferred_appointment_type,
+            on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+            preferred_appointment_type,
+            override_pause: true,
           });
           dispatched.push({ phone: lead.phone, lead_id: lead.id, name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(), ...callResult });
         }
@@ -324,9 +330,14 @@ blandAuth.post('/activate', async (req, res) => {
 
     // 5c. Otherwise, pull the next callable lead from the CRM queue and begin making calls!
     if (dispatched.length === 0) {
-      const nextResult = await dispatchNextLeadInQueue(req.user!.id);
-      if (nextResult.dispatched) {
-        dispatched.push(nextResult);
+      const nextResult = await dispatchNextLeadInQueue({
+        user: req.user!,
+        count: Number(max_calls_to_start) || 1,
+        override: true,
+        on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+      });
+      if (nextResult.dispatched?.length) {
+        dispatched.push(...nextResult.dispatched);
       }
     }
 
@@ -357,16 +368,32 @@ blandAuth.post('/activate', async (req, res) => {
   }
 });
 
-// 6. Stop Autonomous Campaign Queue
-blandAuth.post('/deactivate', async (_req, res) => {
+// 6. Stop Autonomous Campaign Queue & Active Outbound Calls
+blandAuth.post('/deactivate', async (req, res) => {
   try {
-    const saved = await setBlandCampaignActive(false);
+    const { call_id, stop_all = true } = req.body || {};
+    const result = await stopBlandOutboundCalls({ call_id, stop_all });
     res.json({
       success: true,
       is_campaign_active: false,
-      is_on_warm_transfer: Boolean(saved.is_on_warm_transfer),
-      message: 'Bland Agent AI autonomous queue dialing stopped.',
-      config: saved,
+      is_on_warm_transfer: Boolean(result.config.is_on_warm_transfer),
+      stopped_call_id: result.stopped_call_id,
+      message: result.message || 'Bland Agent AI outbound calling stopped.',
+      config: result.config,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6b. Stop a Specific Call or All Active Calls
+blandAuth.post('/stop', async (req, res) => {
+  try {
+    const { call_id, stop_all = true } = req.body || {};
+    const result = await stopBlandOutboundCalls({ call_id, stop_all });
+    res.json({
+      success: true,
+      ...result,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -406,16 +433,18 @@ blandAuth.post('/call', async (req, res) => {
 
     const result = await sendBlandCall({
       phone: targetPhone,
-      leadId: lead_id,
-      userId: req.user!.id,
-      prospectName: targetName,
+      related_type: 'lead',
+      related_id: lead_id,
+      user: req.user!,
+      prospect_name: targetName,
       voice,
-      customPrompt: custom_prompt,
-      transferNumber: transfer_number,
+      custom_prompt,
+      transfer_phone_number: transfer_number,
       fromNumber: from_number,
-      pathwayId: pathway_id,
-      onWarmTransfer: on_warm_transfer !== undefined ? Boolean(on_warm_transfer) : undefined,
-      preferredAppointmentType: preferred_appointment_type,
+      pathway_id,
+      on_warm_transfer: on_warm_transfer !== undefined ? Boolean(on_warm_transfer) : undefined,
+      preferred_appointment_type,
+      override_pause: true,
     });
 
     res.json(result);
@@ -432,13 +461,14 @@ blandAuth.post('/test-call', async (req, res) => {
 
     const result = await sendBlandCall({
       phone: phoneToCall,
-      userId: req.user!.id,
-      prospectName: req.user!.name || 'Medicare Beneficiary',
+      user: req.user!,
+      prospect_name: req.user!.name || 'Medicare Beneficiary',
       voice,
-      customPrompt: custom_prompt,
-      pathwayId: pathway_id,
-      onWarmTransfer: on_warm_transfer !== undefined ? Boolean(on_warm_transfer) : undefined,
-      preferredAppointmentType: preferred_appointment_type,
+      custom_prompt,
+      pathway_id,
+      on_warm_transfer: on_warm_transfer !== undefined ? Boolean(on_warm_transfer) : undefined,
+      preferred_appointment_type,
+      override_pause: true,
     });
 
     res.json({

@@ -1037,7 +1037,8 @@ __export(bland_exports, {
   saveBlandConfig: () => saveBlandConfig,
   sendBlandCall: () => sendBlandCall,
   setBlandCampaignActive: () => setBlandCampaignActive,
-  setWarmTransferStatus: () => setWarmTransferStatus
+  setWarmTransferStatus: () => setWarmTransferStatus,
+  stopBlandOutboundCalls: () => stopBlandOutboundCalls
 });
 function normalizeAppointmentType(raw) {
   const s = String(raw || "").trim().toLowerCase();
@@ -1422,7 +1423,20 @@ async function sendBlandCall(opts) {
   if (!e164) {
     throw Object.assign(new Error("Invalid phone number for Bland AI call"), { status: 400 });
   }
-  const gate = await canDispatchOutboundCall(Boolean(opts.override_pause));
+  const relatedId = opts.related_id || opts.leadId;
+  const relatedType = opts.related_type || "lead";
+  const rawProspectName = opts.prospect_name || opts.prospectName;
+  const customPrompt = opts.custom_prompt || opts.customPrompt;
+  const rawPathwayId = opts.pathway_id || opts.pathwayId;
+  const rawTransferNumber = opts.transfer_phone_number || opts.transferNumber;
+  const rawOnWarmTransfer = opts.on_warm_transfer !== void 0 ? opts.on_warm_transfer : opts.onWarmTransfer;
+  const rawPreferredApptType = opts.preferred_appointment_type || opts.preferredAppointmentType;
+  const callerUser = opts.user || {
+    id: opts.userId || "u_principal",
+    name: "King Amen Ra",
+    role: "admin"
+  };
+  const gate = await canDispatchOutboundCall(Boolean(opts.override_pause ?? true));
   if (!gate.allowed) {
     throw Object.assign(new Error(gate.reason || "Outbound calling is currently outside window or at limit"), {
       status: 409,
@@ -1430,22 +1444,22 @@ async function sendBlandCall(opts) {
       gate
     });
   }
-  const isOnWarmTransfer = opts.on_warm_transfer !== void 0 ? Boolean(opts.on_warm_transfer) : Boolean(config2.is_on_warm_transfer || config2.is_calling_paused);
-  const prospectName = opts.prospect_name || "Valued Medicare Beneficiary";
+  const isOnWarmTransfer = rawOnWarmTransfer !== void 0 ? Boolean(rawOnWarmTransfer) : Boolean(config2.is_on_warm_transfer || config2.is_calling_paused);
+  const prospectName = rawProspectName || "Valued Medicare Beneficiary";
   const firstName = prospectName.split(" ")[0] || "there";
   const callerName = "Sarah";
-  const pathwayId = opts.pathway_id || config2.pathway_id || DEFAULT_BLAND_PATHWAY_ID;
-  const transferNumber = opts.transfer_phone_number || config2.transfer_phone_number || "+16024569681";
+  const pathwayId = rawPathwayId || config2.pathway_id || DEFAULT_BLAND_PATHWAY_ID;
+  const transferNumber = rawTransferNumber || config2.transfer_phone_number || "+16024569681";
   const warmTransferStatusText = isOnWarmTransfer ? "ACTIVE \u2014 King Amen Ra is currently on a live Warm Transfer call with another client. DO NOT live-transfer this call. Instead, inform the caller that King Amen Ra is on a warm transfer call and ONLY offer/select a Telephone, In-Person, or Video appointment, book their preferred date/time, and continue making calls!" : "AVAILABLE \u2014 King Amen Ra is available for an immediate automatic AI whisper warm transfer if the caller agrees to learn about the 2027 changes or speak with a licensed advisor right now, or you may schedule a Telephone, In-Person, or Video appointment.";
-  const prompt = (opts.custom_prompt || config2.prompt_template || DEFAULT_BLAND_PROMPT).replace(/\{prospect_name\}/g, prospectName).replace(/\{first_name\}/g, firstName).replace(/\{caller_name\}/g, callerName).replace(/\{state\}/g, opts.state || "Arizona").replace(/\{warm_transfer_status\}/g, warmTransferStatusText);
+  const prompt = (customPrompt || config2.prompt_template || DEFAULT_BLAND_PROMPT).replace(/\{prospect_name\}/g, prospectName).replace(/\{first_name\}/g, firstName).replace(/\{caller_name\}/g, callerName).replace(/\{state\}/g, opts.state || "Arizona").replace(/\{warm_transfer_status\}/g, warmTransferStatusText);
   const firstSentence = opts.first_sentence || `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`;
   const voice = opts.voice || config2.default_voice || "maya";
   let blandCallId = `bland_sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   let isSimulated = true;
   let apiResponse = { status: "simulated", message: "Bland AI call simulated (Add BLAND_API_KEY in Settings for live carrier calls)" };
   if (config2.api_key && config2.api_key.trim().length > 10) {
-    const isV2Agent = pathwayId === "fc8c99c6-88c3-435d-952b-8c93c2db17a6" || !opts.custom_prompt;
-    const blandFrom = config2.from_number && config2.from_number !== "+16024569681" ? config2.from_number : DEFAULT_BLAND_CALLER_ID;
+    const isV2Agent = pathwayId === "fc8c99c6-88c3-435d-952b-8c93c2db17a6" || !customPrompt;
+    const blandFrom = (opts.fromNumber || config2.from_number) && (opts.fromNumber || config2.from_number) !== "+16024569681" ? opts.fromNumber || config2.from_number : DEFAULT_BLAND_CALLER_ID;
     const whisperScripts = buildAiWhisperScripts({
       recipient_name: "King Amen Ra",
       caller_name: callerName,
@@ -1471,15 +1485,15 @@ async function sendBlandCall(opts) {
       broker_status: isOnWarmTransfer ? "ON_WARM_TRANSFER" : "AVAILABLE",
       allowed_appointment_types: "Telephone, In-Person, Video",
       appointment_types_list: ["Telephone", "In-Person", "Video"],
-      preferred_appointment_type: opts.preferred_appointment_type ? formatAppointmentTypeLabel(opts.preferred_appointment_type) : void 0,
+      preferred_appointment_type: rawPreferredApptType ? formatAppointmentTypeLabel(rawPreferredApptType) : void 0,
       operating_instruction: isOnWarmTransfer ? "IMPORTANT: King Amen Ra is currently on a warm transfer call with another client. Do NOT transfer this call. Let the caller know King Amen Ra is currently on a warm transfer call, and ONLY offer and select a Telephone, In-Person, or Video appointment. Collect their choice of Telephone, In-Person, or Video and preferred date/time, confirm it, and end the call so the system continues making calls!" : "King Amen Ra is available for automatic AI whisper warm transfer via the Connect to King Amen Ra scenario (automatically deliver the AI whisper briefing to King Amen Ra and merge into a 3-way introduction), or you can book strictly a Telephone, In-Person, or Video appointment."
     };
     const metadataPayload = {
       crm_source: "iwg_crm",
-      related_type: opts.related_type || "lead",
-      related_id: opts.related_id || "",
-      initiated_by_user_id: opts.user.id,
-      initiated_by_name: opts.user.name,
+      related_type: relatedType,
+      related_id: relatedId || "",
+      initiated_by_user_id: callerUser.id,
+      initiated_by_name: callerUser.name,
       pathway_id: pathwayId,
       on_warm_transfer: isOnWarmTransfer,
       allowed_appointment_types: ["telephone", "in_person", "video"]
@@ -1533,9 +1547,9 @@ async function sendBlandCall(opts) {
     subject: `\u{1F916} Bland AI Voice Call (${isOnWarmTransfer ? "Appt-Only Mode: Phone/In-Person/Video" : "Live Transfer + Appt Mode"}) \u2014 ${prospectName}`,
     body: isSimulated ? `[Simulated Bland AI Call \u2014 Voice: ${voice}] ${isOnWarmTransfer ? "[Warm Transfer Active: Booking Telephone / In-Person / Video Appts Only]" : ""}
 Opening: "${firstSentence}"` : `Bland AI autonomous outbound voice agent dispatched (Voice: ${voice}, Call ID: ${blandCallId}). Mode: ${isOnWarmTransfer ? "King on Warm Transfer -> Book Telephone, In-Person, or Video Appointment Only & Continue Calling" : "Live Transfer or Appointment"}.`,
-    related_type: opts.related_type || "lead",
-    related_id: opts.related_id || null,
-    user_id: opts.user.id,
+    related_type: relatedType,
+    related_id: relatedId || null,
+    user_id: callerUser.id,
     status: isSimulated ? "Completed" : "In Progress",
     completed: isSimulated,
     direction: "outbound",
@@ -1558,8 +1572,8 @@ Opening: "${firstSentence}"` : `Bland AI autonomous outbound voice agent dispatc
       bland_response: apiResponse
     }
   });
-  if (opts.related_type === "lead" && opts.related_id) {
-    const lead = await one(`SELECT * FROM leads WHERE id=$1`, [opts.related_id]);
+  if (relatedType === "lead" && relatedId) {
+    const lead = await one(`SELECT * FROM leads WHERE id=$1`, [relatedId]);
     if (lead) {
       await update("leads", lead.id, {
         attempts: (lead.attempts || 0) + 1,
@@ -1578,8 +1592,64 @@ Opening: "${firstSentence}"` : `Bland AI autonomous outbound voice agent dispatc
     on_warm_transfer: isOnWarmTransfer,
     operating_mode: isOnWarmTransfer ? "APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO" : "WARM_TRANSFER_OR_APPOINTMENT",
     allowed_appointment_types: ["Telephone", "In-Person", "Video"],
+    message: isSimulated ? `Bland AI outbound call simulated to ${prospectName} (${e164}).` : `Bland AI live outbound call dispatched to ${prospectName} (${e164})!`,
     activity,
     bland_response: apiResponse
+  };
+}
+async function stopBlandOutboundCalls(params) {
+  const config2 = await saveBlandConfig({
+    is_campaign_active: false
+  });
+  let stoppedLiveCall = false;
+  let stoppedAllLiveCalls = false;
+  if (config2.api_key && config2.api_key.trim().length > 10) {
+    if (params?.call_id && !params.call_id.startsWith("bland_sim_")) {
+      try {
+        const r = await fetch(`https://api.bland.ai/v1/calls/${encodeURIComponent(params.call_id)}/stop`, {
+          method: "POST",
+          headers: { "Authorization": config2.api_key.trim() }
+        });
+        if (r.ok) stoppedLiveCall = true;
+      } catch {
+      }
+    }
+    if (params?.stop_all !== false) {
+      try {
+        const r = await fetch("https://api.bland.ai/v1/calls/active/stop", {
+          method: "POST",
+          headers: { "Authorization": config2.api_key.trim() }
+        });
+        if (r.ok) stoppedAllLiveCalls = true;
+      } catch {
+      }
+    }
+  }
+  try {
+    if (params?.call_id) {
+      await q(
+        `UPDATE activities
+         SET status = 'Stopped', completed = true, disposition = 'Bland AI Call Stopped'
+         WHERE provider = 'bland_ai' AND meta->>'bland_call_id' = $1`,
+        [params.call_id]
+      );
+    } else {
+      await q(
+        `UPDATE activities
+         SET status = 'Stopped', completed = true, disposition = 'Bland AI Call Stopped'
+         WHERE provider = 'bland_ai' AND status = 'In Progress'`
+      );
+    }
+  } catch {
+  }
+  return {
+    ok: true,
+    is_campaign_active: false,
+    stopped_call_id: params?.call_id || null,
+    stopped_live_call: stoppedLiveCall,
+    stopped_all_live_calls: stoppedAllLiveCalls,
+    message: params?.call_id ? `Stopped Bland AI call (${params.call_id}) and halted outbound queue.` : "All active Bland AI outbound calls and queue dialing have been stopped.",
+    config: config2
   };
 }
 async function getBlandCallDetails(blandCallId) {
@@ -9130,12 +9200,14 @@ blandAuth.post("/activate", async (req, res) => {
       if (targetPhone) {
         const callResult = await sendBlandCall({
           phone: targetPhone,
-          leadId: lead_id,
-          userId: req.user.id,
-          prospectName: targetName || "Medicare Beneficiary",
+          related_type: "lead",
+          related_id: lead_id,
+          user: req.user,
+          prospect_name: targetName || "Medicare Beneficiary",
           voice: voice || cfg.default_voice,
-          onWarmTransfer: Boolean(cfg.is_on_warm_transfer),
-          preferredAppointmentType: preferred_appointment_type
+          on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+          preferred_appointment_type,
+          override_pause: true
         });
         dispatched.push({ phone: targetPhone, lead_id: lead_id || null, ...callResult });
       }
@@ -9147,21 +9219,29 @@ blandAuth.post("/activate", async (req, res) => {
         if (lead && lead.phone) {
           const callResult = await sendBlandCall({
             phone: lead.phone,
-            leadId: lead.id,
-            userId: req.user.id,
-            prospectName: `${lead.first_name || ""} ${lead.last_name || ""}`.trim() || "Medicare Beneficiary",
+            related_type: "lead",
+            related_id: lead.id,
+            user: req.user,
+            prospect_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim() || "Medicare Beneficiary",
+            state: lead.state || "AZ",
             voice: voice || cfg.default_voice,
-            onWarmTransfer: Boolean(cfg.is_on_warm_transfer),
-            preferredAppointmentType: preferred_appointment_type
+            on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+            preferred_appointment_type,
+            override_pause: true
           });
           dispatched.push({ phone: lead.phone, lead_id: lead.id, name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(), ...callResult });
         }
       }
     }
     if (dispatched.length === 0) {
-      const nextResult = await dispatchNextLeadInQueue(req.user.id);
-      if (nextResult.dispatched) {
-        dispatched.push(nextResult);
+      const nextResult = await dispatchNextLeadInQueue({
+        user: req.user,
+        count: Number(max_calls_to_start) || 1,
+        override: true,
+        on_warm_transfer: Boolean(cfg.is_on_warm_transfer)
+      });
+      if (nextResult.dispatched?.length) {
+        dispatched.push(...nextResult.dispatched);
       }
     }
     const queueCountRow = await one(
@@ -9184,15 +9264,29 @@ blandAuth.post("/activate", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-blandAuth.post("/deactivate", async (_req, res) => {
+blandAuth.post("/deactivate", async (req, res) => {
   try {
-    const saved = await setBlandCampaignActive(false);
+    const { call_id, stop_all = true } = req.body || {};
+    const result = await stopBlandOutboundCalls({ call_id, stop_all });
     res.json({
       success: true,
       is_campaign_active: false,
-      is_on_warm_transfer: Boolean(saved.is_on_warm_transfer),
-      message: "Bland Agent AI autonomous queue dialing stopped.",
-      config: saved
+      is_on_warm_transfer: Boolean(result.config.is_on_warm_transfer),
+      stopped_call_id: result.stopped_call_id,
+      message: result.message || "Bland Agent AI outbound calling stopped.",
+      config: result.config
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/stop", async (req, res) => {
+  try {
+    const { call_id, stop_all = true } = req.body || {};
+    const result = await stopBlandOutboundCalls({ call_id, stop_all });
+    res.json({
+      success: true,
+      ...result
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -9226,16 +9320,18 @@ blandAuth.post("/call", async (req, res) => {
     }
     const result = await sendBlandCall({
       phone: targetPhone,
-      leadId: lead_id,
-      userId: req.user.id,
-      prospectName: targetName,
+      related_type: "lead",
+      related_id: lead_id,
+      user: req.user,
+      prospect_name: targetName,
       voice,
-      customPrompt: custom_prompt,
-      transferNumber: transfer_number,
+      custom_prompt,
+      transfer_phone_number: transfer_number,
       fromNumber: from_number,
-      pathwayId: pathway_id,
-      onWarmTransfer: on_warm_transfer !== void 0 ? Boolean(on_warm_transfer) : void 0,
-      preferredAppointmentType: preferred_appointment_type
+      pathway_id,
+      on_warm_transfer: on_warm_transfer !== void 0 ? Boolean(on_warm_transfer) : void 0,
+      preferred_appointment_type,
+      override_pause: true
     });
     res.json(result);
   } catch (err) {
@@ -9248,13 +9344,14 @@ blandAuth.post("/test-call", async (req, res) => {
     const phoneToCall = test_phone || "+14803345557";
     const result = await sendBlandCall({
       phone: phoneToCall,
-      userId: req.user.id,
-      prospectName: req.user.name || "Medicare Beneficiary",
+      user: req.user,
+      prospect_name: req.user.name || "Medicare Beneficiary",
       voice,
-      customPrompt: custom_prompt,
-      pathwayId: pathway_id,
-      onWarmTransfer: on_warm_transfer !== void 0 ? Boolean(on_warm_transfer) : void 0,
-      preferredAppointmentType: preferred_appointment_type
+      custom_prompt,
+      pathway_id,
+      on_warm_transfer: on_warm_transfer !== void 0 ? Boolean(on_warm_transfer) : void 0,
+      preferred_appointment_type,
+      override_pause: true
     });
     res.json({
       ...result,

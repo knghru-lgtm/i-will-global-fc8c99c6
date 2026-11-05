@@ -110,15 +110,16 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
     setErrorMsg('');
     setStatusMsg('');
     try {
-      const res = await api.post('/bland/deactivate', {});
+      const res = await api.post('/bland/stop', { stop_all: true });
       setConfig((prev: any) => ({
         ...(prev || {}),
         is_campaign_active: false,
       }));
-      setStatusMsg(res.message || 'Bland Agent AI autonomous queue stopped.');
+      setStatusMsg(res.message || '🛑 All Bland AI outbound calls and queue dialing have been stopped.');
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      await loadState();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to stop campaign');
+      setErrorMsg(err.message || 'Failed to stop outbound calls');
     } finally {
       setActivating(false);
     }
@@ -418,25 +419,28 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
               <span>Activate AI Lead Queue Dialer</span>
             </button>
 
-            {isCampaignActive && (
-              <button
-                type="button"
-                disabled={activating}
-                onClick={handleStopCampaign}
-                style={{
-                  padding: '0.8rem 1rem',
-                  borderRadius: '10px',
-                  border: '1.5px solid #ef4444',
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  color: '#fca5a5',
-                  fontWeight: 800,
-                  fontSize: '0.86rem',
-                  cursor: 'pointer',
-                }}
-              >
-                ⏹ Stop Queue
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={activating}
+              onClick={handleStopCampaign}
+              style={{
+                padding: '0.8rem 1.1rem',
+                borderRadius: '10px',
+                border: '1.5px solid #ef4444',
+                background: 'rgba(239, 68, 68, 0.2)',
+                color: '#fca5a5',
+                fontWeight: 800,
+                fontSize: '0.88rem',
+                cursor: activating ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.4rem',
+              }}
+            >
+              <span>⏹</span>
+              <span>Stop Outbound Calls</span>
+            </button>
           </div>
         </div>
 

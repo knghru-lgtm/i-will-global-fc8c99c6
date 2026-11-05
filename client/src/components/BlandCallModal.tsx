@@ -32,15 +32,19 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
   const [pathwayId, setPathwayId] = useState<string>('fc8c99c6-88c3-435d-952b-8c93c2db17a6');
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [onWarmTransfer, setOnWarmTransfer] = useState<boolean>(false);
+  const [isCampaignActive, setIsCampaignActive] = useState<boolean>(false);
   const [preferredAppointmentType, setPreferredAppointmentType] = useState<'telephone' | 'in_person' | 'video'>('telephone');
   const [loading, setLoading] = useState<boolean>(false);
   const [calling, setCalling] = useState<boolean>(false);
+  const [stopping, setStopping] = useState<boolean>(false);
   const [callResult, setCallResult] = useState<any>(null);
+  const [stopMessage, setStopMessage] = useState<string>('');
   const [error, setError] = useState<string>('');
 
   useEffect(() => {
     if (!isOpen) {
       setCallResult(null);
+      setStopMessage('');
       setError('');
       return;
     }
@@ -57,6 +61,7 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
         if (configRes.pathway_id) setPathwayId(configRes.pathway_id);
         if (configRes.prompt_template) setCustomPrompt(configRes.prompt_template);
         if (configRes.is_on_warm_transfer !== undefined) setOnWarmTransfer(Boolean(configRes.is_on_warm_transfer));
+        if (configRes.is_campaign_active !== undefined) setIsCampaignActive(Boolean(configRes.is_campaign_active));
       }
     }).finally(() => setLoading(false));
   }, [isOpen]);
@@ -75,28 +80,66 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
     } catch { /* ignore */ }
   };
 
-  const handleDispatch = async () => {
+  const handleStartOutboundCalls = async (continueQueue: boolean) => {
     setError('');
+    setStopMessage('');
     setCalling(true);
     try {
-      const res = await api.post('/bland/call', {
-        lead_id: lead.id,
-        phone: lead.phone,
-        prospect_name: prospectName,
-        voice: selectedVoice,
-        pathway_id: pathwayId,
-        custom_prompt: customPrompt || undefined,
-        transfer_number: transferNumber,
-        on_warm_transfer: onWarmTransfer,
-        preferred_appointment_type: preferredAppointmentType,
-      });
+      const res = continueQueue
+        ? await api.post('/bland/activate', {
+            lead_id: lead.id,
+            phone: lead.phone,
+            prospect_name: prospectName,
+            voice: selectedVoice,
+            on_warm_transfer: onWarmTransfer,
+            preferred_appointment_type: preferredAppointmentType,
+            continue_queue: true,
+          })
+        : await api.post('/bland/call', {
+            lead_id: lead.id,
+            phone: lead.phone,
+            prospect_name: prospectName,
+            voice: selectedVoice,
+            pathway_id: pathwayId,
+            custom_prompt: customPrompt || undefined,
+            transfer_number: transferNumber,
+            on_warm_transfer: onWarmTransfer,
+            preferred_appointment_type: preferredAppointmentType,
+          });
 
-      setCallResult(res);
+      const activeCallId = res.call_id || res.dispatched?.[0]?.call_id || null;
+      setIsCampaignActive(Boolean(continueQueue || res.is_campaign_active));
+      setCallResult({
+        ...res,
+        call_id: activeCallId,
+      });
+      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
       if (onCallDispatched) onCallDispatched(res);
     } catch (err: any) {
-      setError(err.message || 'Failed to dispatch Bland AI call');
+      setError(err.message || 'Failed to start Bland AI outbound calls');
     } finally {
       setCalling(false);
+    }
+  };
+
+  const handleStopOutboundCalls = async () => {
+    setError('');
+    setStopping(true);
+    try {
+      const activeCallId = callResult?.call_id || undefined;
+      const res = await api.post('/bland/stop', {
+        call_id: activeCallId,
+        stop_all: true,
+      });
+      setIsCampaignActive(false);
+      setCallResult(null);
+      setStopMessage(res.message || '🛑 All Bland AI outbound calls and queue dialing have been stopped.');
+      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      if (onCallDispatched) onCallDispatched(res);
+    } catch (err: any) {
+      setError(err.message || 'Failed to stop Bland AI outbound calls');
+    } finally {
+      setStopping(false);
     }
   };
 
@@ -105,24 +148,104 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
       <div
         className="modal-content"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '660px', width: '92%', borderRadius: '16px', border: '1.5px solid #8b5cf6', background: 'var(--bg-card)', padding: '1.75rem', boxShadow: '0 10px 40px rgba(139, 92, 246, 0.25)' }}
+        style={{ maxWidth: '680px', width: '94%', borderRadius: '16px', border: '1.5px solid #8b5cf6', background: 'var(--bg-card)', padding: '1.75rem', boxShadow: '0 10px 40px rgba(139, 92, 246, 0.25)' }}
       >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.1rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
             <span style={{ fontSize: '1.8rem' }}>🤖</span>
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#c084fc' }}>
-                Bland AI Conversational Voice Agent
-              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#c084fc' }}>
+                  Bland AI Outbound Call Control
+                </h2>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    padding: '2px 9px',
+                    borderRadius: '999px',
+                    background: isCampaignActive || callResult ? 'rgba(16, 185, 129, 0.2)' : 'rgba(148, 163, 184, 0.15)',
+                    border: `1px solid ${isCampaignActive || callResult ? '#10b981' : '#64748b'}`,
+                    color: isCampaignActive || callResult ? '#34d399' : '#cbd5e1',
+                  }}
+                >
+                  {isCampaignActive || callResult ? '● ACTIVE & CALLING' : '● STANDBY'}
+                </span>
+              </div>
               <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                Dispatch autonomous AI phone agent to call, qualify, transfer or book appointment
+                Activate Bland AI to start or stop autonomous outbound calls from Prospects & Lead Workspace
               </div>
             </div>
           </div>
           <button onClick={onClose} className="btn-close" style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.3rem', cursor: 'pointer' }}>
             ✕
           </button>
+        </div>
+
+        {/* Instant Start / Stop Control Bar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+            background: 'rgba(139, 92, 246, 0.1)',
+            border: '1.5px solid rgba(139, 92, 246, 0.35)',
+            borderRadius: '12px',
+            padding: '0.85rem 1rem',
+            marginBottom: '1rem',
+          }}
+        >
+          <div style={{ fontSize: '0.83rem', color: '#e2e8f0', fontWeight: 700 }}>
+            ⚡ Quick Outbound Controls: Start or Stop Bland AI Calling Anytime
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              disabled={calling || stopping || loading}
+              onClick={() => handleStartOutboundCalls(true)}
+              style={{
+                padding: '0.5rem 0.95rem',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, #059669, #10b981)',
+                border: '1px solid #10b981',
+                color: '#fff',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                cursor: calling ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+              }}
+            >
+              <span>▶</span>
+              <span>{calling ? 'Starting...' : 'Activate & Start Outbound Calls'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={stopping}
+              onClick={handleStopOutboundCalls}
+              style={{
+                padding: '0.5rem 0.95rem',
+                borderRadius: '8px',
+                background: 'rgba(239, 68, 68, 0.2)',
+                border: '1.5px solid #ef4444',
+                color: '#fca5a5',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                cursor: stopping ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+              }}
+            >
+              <span>⏹</span>
+              <span>{stopping ? 'Stopping...' : 'Stop Outbound Calls'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Lead Summary Pill */}
@@ -170,7 +293,7 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
           <div style={{ fontSize: '0.76rem', color: '#cbd5e1', marginTop: '0.35rem' }}>
             {onWarmTransfer
               ? 'Agent knows you are on a warm transfer call — she will ONLY select Telephone, In-Person, or Video appointments and continue making calls.'
-              : 'Agent will warm-transfer qualified prospects to +16024569681 or book Telephone, In-Person, or Video appointments.'}
+              : 'Agent will warm-transfer qualified prospects to +16024569681 with Automatic AI Whisper or book Telephone, In-Person, or Video appointments.'}
           </div>
           <div style={{ display: 'flex', gap: '0.45rem', marginTop: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8' }}>Appointment Type:</span>
@@ -200,6 +323,12 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
           </div>
         </div>
 
+        {stopMessage && (
+          <div style={{ padding: '0.75rem 1rem', background: 'rgba(245, 158, 11, 0.15)', border: '1.5px solid #f59e0b', borderRadius: '8px', color: '#fde68a', fontSize: '0.85rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>🛑</span> <span>{stopMessage}</span>
+          </div>
+        )}
+
         {error && (
           <div style={{ padding: '0.75rem 1rem', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', borderRadius: '8px', color: '#fca5a5', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span>⚠️</span> <span>{error}</span>
@@ -210,22 +339,45 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
           <div style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1.5px solid #10b981', borderRadius: '12px', padding: '1.25rem', textAlign: 'center', margin: '1rem 0' }}>
             <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📞✨</div>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#34d399', margin: '0 0 0.35rem 0' }}>
-              Bland AI Call Dispatched Successfully!
+              Bland AI Outbound Call Active!
             </h3>
             <p style={{ fontSize: '0.85rem', color: '#e2e8f0', margin: '0 0 0.8rem 0' }}>
-              {callResult.message}
+              {callResult.message || `Dialing ${prospectName} (${lead.phone})...`}
             </p>
-            <div style={{ fontSize: '0.78rem', color: '#94a3b8', background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '6px', fontFamily: 'monospace' }}>
-              Call ID: <strong>{callResult.call_id}</strong>
-            </div>
-            <div style={{ marginTop: '1.2rem', display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
+            {callResult.call_id && (
+              <div style={{ fontSize: '0.78rem', color: '#94a3b8', background: 'rgba(0,0,0,0.3)', padding: '0.5rem', borderRadius: '6px', fontFamily: 'monospace' }}>
+                Call ID: <strong>{callResult.call_id}</strong>
+              </div>
+            )}
+            <div style={{ marginTop: '1.2rem', display: 'flex', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                disabled={stopping}
+                onClick={handleStopOutboundCalls}
+                style={{
+                  padding: '0.6rem 1.3rem',
+                  borderRadius: '8px',
+                  fontWeight: 800,
+                  background: '#ef4444',
+                  border: 'none',
+                  color: '#fff',
+                  cursor: stopping ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.35)',
+                }}
+              >
+                <span>⏹</span>
+                <span>{stopping ? 'Stopping Call...' : 'Stop Call & Halt Outbound Queue'}</span>
+              </button>
               <button
                 type="button"
                 onClick={onClose}
                 className="btn-primary"
-                style={{ padding: '0.55rem 1.4rem', borderRadius: '8px', fontWeight: 700, background: '#10b981', border: 'none', color: '#fff', cursor: 'pointer' }}
+                style={{ padding: '0.6rem 1.4rem', borderRadius: '8px', fontWeight: 700, background: '#10b981', border: 'none', color: '#fff', cursor: 'pointer' }}
               >
-                Done
+                Keep Calling & Close
               </button>
             </div>
           </div>
@@ -277,36 +429,73 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
             </div>
 
             {/* Action Buttons */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
-                onClick={onClose}
-                disabled={calling}
-                style={{ padding: '0.65rem 1.25rem', borderRadius: '8px', background: 'transparent', border: '1px solid var(--border-color)', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDispatch}
-                disabled={calling || loading}
+                onClick={handleStopOutboundCalls}
+                disabled={stopping || calling}
                 style={{
-                  padding: '0.65rem 1.4rem',
+                  padding: '0.65rem 1.15rem',
                   borderRadius: '8px',
-                  background: calling ? '#6d28d9' : 'linear-gradient(135deg, #7c3aed, #9333ea)',
-                  border: 'none',
-                  color: '#fff',
-                  cursor: calling ? 'not-allowed' : 'pointer',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                  boxShadow: '0 4px 14px rgba(139, 92, 246, 0.4)',
+                  background: 'rgba(239, 68, 68, 0.16)',
+                  border: '1.5px solid #ef4444',
+                  color: '#fca5a5',
+                  cursor: stopping ? 'not-allowed' : 'pointer',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
                 }}
               >
-                <span>🤖</span>
-                <span>{calling ? 'Dispatching AI Agent...' : 'Dispatch Bland AI Call Now'}</span>
+                ⏹ Stop All Outbound Calls
               </button>
+
+              <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={calling}
+                  style={{ padding: '0.65rem 1.1rem', borderRadius: '8px', background: 'transparent', border: '1px solid var(--border-color)', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStartOutboundCalls(false)}
+                  disabled={calling || loading}
+                  style={{
+                    padding: '0.65rem 1.15rem',
+                    borderRadius: '8px',
+                    background: 'rgba(139, 92, 246, 0.25)',
+                    border: '1.5px solid #a855f7',
+                    color: '#e9d5ff',
+                    cursor: calling ? 'not-allowed' : 'pointer',
+                    fontWeight: 700,
+                    fontSize: '0.86rem',
+                  }}
+                >
+                  📞 Call This Lead Only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStartOutboundCalls(true)}
+                  disabled={calling || loading}
+                  style={{
+                    padding: '0.65rem 1.35rem',
+                    borderRadius: '8px',
+                    background: calling ? '#6d28d9' : 'linear-gradient(135deg, #7c3aed, #9333ea)',
+                    border: 'none',
+                    color: '#fff',
+                    cursor: calling ? 'not-allowed' : 'pointer',
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    boxShadow: '0 4px 14px rgba(139, 92, 246, 0.4)',
+                  }}
+                >
+                  <span>🤖</span>
+                  <span>{calling ? 'Starting Outbound Calls...' : 'Start Outbound Calls (Lead + Queue)'}</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
