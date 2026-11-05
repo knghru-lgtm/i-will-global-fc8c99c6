@@ -66,4 +66,15 @@ if (isMain) {
     console.log(`  Google Workspace: ${isGoogleEnabled() ? 'configured' : 'not configured (Gmail actions are logged only)'}\n`);
   });
 }
+// Long-lived server (local / Cloud Run): run the Bland AI autonomous dialer every 60 seconds.
+// It only dials Bland-assigned prospects while the campaign is active and inside calling hours
+// (Mon–Fri 9 AM–7 PM, Sat–Sun 9 AM–6 PM Arizona time). Serverless deployments use the webhook chain,
+// CRM heartbeat and daily cron instead.
+if (isMain) {
+  const { runBlandAutoDialerTick } = await import('./services/bland.ts');
+  setInterval(() => {
+    runBlandAutoDialerTick({ reason: 'interval' }).catch((err) => console.error('Bland auto-dialer error:', err?.message));
+  }, 60_000);
+}
+
 export default createApp(); 

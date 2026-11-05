@@ -2,6 +2,9 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "client/dist",
+  "crons": [
+    { "path": "/api/bland/cron/tick", "schedule": "0 16 * * *" }
+  ],
   "headers": [
     {
       "source": "/videos/(.*)",

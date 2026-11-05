@@ -1,4 +1,5 @@
 import { q, one, insert, getDb } from './index.ts';
+import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../auth.ts';
 import { DEFAULT_DISPOSITIONS } from '../services/automation.ts';
 import { scoreLead } from '../services/scoring.ts';
@@ -96,6 +97,24 @@ export async function ensureSeeded(force = false) {
     { id: 'u_agent12', name: 'Nicole Foster', email: 'nfoster@iwillglobal.com', role: 'licensed_agent', title: 'Medicare Counselor', phone: '(480) 331-9431', npn: '21948302', states: ['AZ', 'FL'] },
     { id: 'u_agent13', name: 'Timothy Hays', email: 'thays@iwillglobal.com', role: 'licensed_agent', title: 'Insurance Specialist', phone: '(480) 331-9432', npn: '19503928', states: ['AZ'] },
   ];
+
+  // Bland AI autonomous outbound caller — every prospect assigned to this user is dialed automatically
+  // Mon–Fri 9 AM–7 PM and Sat–Sun 9 AM–6 PM (Arizona time). Login is disabled via an unguessable password.
+  const blandAiUser = await one('SELECT id FROM users WHERE id=$1 OR lower(email)=lower($2)', ['u_bland_ai', 'bland-ai@iwillglobal.com']);
+  if (!blandAiUser) {
+    await insert('users', {
+      id: 'u_bland_ai',
+      name: 'Sarah — Bland AI Voice Agent',
+      email: 'bland-ai@iwillglobal.com',
+      password_hash: hashPassword(randomUUID() + randomUUID()),
+      role: 'scheduler',
+      title: 'Autonomous AI Outbound Caller (Bland AI)',
+      phone: null,
+      states: ['AZ', 'CA', 'NV', 'TX', 'FL', 'NM', 'CO'],
+      active: true,
+      daily_call_goal: 1000,
+    });
+  }
 
   for (const u of usersList) {
     const userPwd = u.email === 'king@iwillglobal.com' ? hashPassword('Heru5464') : (u.email === 'kmartinez@iwillglobal.com' ? hashPassword('Today#01') : pwd);

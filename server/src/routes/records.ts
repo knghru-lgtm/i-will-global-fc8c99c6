@@ -379,7 +379,7 @@ records.get('/leads/pool-stats', async (req, res) => {
       LEFT JOIN leads l ON l.owner_id = u.id AND l.status != 'DNC'
       WHERE u.active = true AND u.role IN ('scheduler', 'licensed_agent', 'admin', 'manager')
       GROUP BY u.id, u.name, u.email, u.role, u.title
-      ORDER BY (CASE WHEN u.id = 'u_principal' OR lower(u.email) = 'king@iwillglobal.com' THEN 0 ELSE 1 END), u.role DESC, u.name ASC
+      ORDER BY (CASE WHEN u.id = 'u_principal' OR lower(u.email) = 'king@iwillglobal.com' THEN 0 WHEN u.id = 'u_bland_ai' THEN 1 ELSE 2 END), u.role DESC, u.name ASC
     `);
 
     res.json({

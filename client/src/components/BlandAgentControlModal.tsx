@@ -318,6 +318,13 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
             <span>Activate Bland Agent AI to Begin Making Calls</span>
           </div>
 
+          <div style={{ fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.5, background: 'rgba(5, 16, 57, 0.55)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '8px', padding: '0.6rem 0.8rem', marginBottom: '0.9rem' }}>
+            <div>🤖 <strong>Auto-Dialer:</strong> Once activated, Bland automatically calls <strong>every prospect assigned to Bland AI</strong> (one attempt per prospect per day, due callbacks first) and stays armed day after day until you press Stop.</div>
+            <div>🕘 <strong>Outbound hours:</strong> Mon–Fri 9:00 AM–7:00 PM · Sat–Sun 9:00 AM–6:00 PM (Arizona time){config?.calling_window ? (config.calling_window.open ? ` — calling now (${config.calling_window.today})` : ` — closed now. ${config.calling_window.next_open || ''}`) : ''}</div>
+            <div>📋 <strong>Assigned to Bland AI:</strong> {config?.bland_assigned?.assigned_total ?? 0} prospect(s) · {config?.bland_assigned?.remaining_today ?? 0} still to call today</div>
+            <div>📞 <strong>Inbound:</strong> Sarah answers every call to +1 (520) 841-5736 immediately, 24/7.</div>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
             <div>
               <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#cbd5e1', display: 'block', marginBottom: '0.3rem' }}>

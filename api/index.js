@@ -1016,6 +1016,8 @@ var bland_exports = {};
 __export(bland_exports, {
   ALLOWED_APPOINTMENT_TYPES: () => ALLOWED_APPOINTMENT_TYPES,
   ALLOWED_BLAND_APPOINTMENT_TYPES: () => ALLOWED_BLAND_APPOINTMENT_TYPES,
+  BLAND_AI_USER: () => BLAND_AI_USER,
+  BLAND_AI_USER_ID: () => BLAND_AI_USER_ID,
   BLAND_VOICES: () => BLAND_VOICES,
   DEFAULT_BLAND_CALLER_ID: () => DEFAULT_BLAND_CALLER_ID,
   DEFAULT_BLAND_PATHWAY_ID: () => DEFAULT_BLAND_PATHWAY_ID,
@@ -1023,17 +1025,21 @@ __export(bland_exports, {
   IWG_TEAM_DIRECTORY: () => IWG_TEAM_DIRECTORY,
   buildAiWhisperScripts: () => buildAiWhisperScripts,
   canDispatchOutboundCall: () => canDispatchOutboundCall,
+  countBlandAssignedRemaining: () => countBlandAssignedRemaining,
   dispatchAiWhisperTransfer: () => dispatchAiWhisperTransfer,
   dispatchNextLeadInQueue: () => dispatchNextLeadInQueue,
   formatAppointmentTypeLabel: () => formatAppointmentTypeLabel,
   getBlandCallDetails: () => getBlandCallDetails,
   getBlandConfig: () => getBlandConfig,
+  getCallingWindow: () => getCallingWindow,
   getCallsTodayCount: () => getCallsTodayCount,
   getInboundDirectory: () => getInboundDirectory,
   handleBlandWebhook: () => handleBlandWebhook,
+  isWithinRecipientCallingHours: () => isWithinRecipientCallingHours,
   normalizeAppointmentType: () => normalizeAppointmentType,
   pauseCallingForWarmTransfer: () => pauseCallingForWarmTransfer,
   resumeCallingAfterDisposition: () => resumeCallingAfterDisposition,
+  runBlandAutoDialerTick: () => runBlandAutoDialerTick,
   saveBlandConfig: () => saveBlandConfig,
   sendBlandCall: () => sendBlandCall,
   setBlandCampaignActive: () => setBlandCampaignActive,
@@ -1139,7 +1145,10 @@ async function getBlandConfig() {
     webhook_url: val.webhook_url || `${config.appUrl}/api/bland/webhook`,
     calling_hours_start: val.calling_hours_start !== void 0 ? Number(val.calling_hours_start) : 9,
     calling_hours_end: val.calling_hours_end !== void 0 ? Number(val.calling_hours_end) : 19,
-    calling_days: val.calling_days || "Mon-Fri",
+    weekend_calling_hours_start: val.weekend_calling_hours_start !== void 0 ? Number(val.weekend_calling_hours_start) : 9,
+    weekend_calling_hours_end: val.weekend_calling_hours_end !== void 0 ? Number(val.weekend_calling_hours_end) : 18,
+    calling_days: "Mon-Fri 9:00 AM-7:00 PM \xB7 Sat-Sun 9:00 AM-6:00 PM (Arizona time)",
+    max_concurrent_calls: Math.min(Math.max(Number(val.max_concurrent_calls) || 3, 1), 10),
     daily_call_limit: Number(val.daily_call_limit) || 1e3,
     pause_on_warm_transfer: val.pause_on_warm_transfer !== void 0 ? Boolean(val.pause_on_warm_transfer) : true,
     is_calling_paused: isOnWarmTransfer,
@@ -1170,6 +1179,201 @@ async function saveBlandConfig(partial) {
     [JSON.stringify(merged)]
   );
   return merged;
+}
+function formatHourLabel(hour) {
+  const h = Math.floor(hour);
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display}:00 ${h < 12 || h === 24 ? "AM" : "PM"}`;
+}
+function phoenixParts(now = /* @__PURE__ */ new Date()) {
+  const phx = new Date(now.getTime() - PHOENIX_OFFSET_MS);
+  return {
+    day: phx.getUTCDay(),
+    hour: phx.getUTCHours(),
+    minute: phx.getUTCMinutes(),
+    startOfDay: new Date(Date.UTC(phx.getUTCFullYear(), phx.getUTCMonth(), phx.getUTCDate()) + PHOENIX_OFFSET_MS)
+  };
+}
+function hoursForDay(cfg, day) {
+  const isWeekend = day === 0 || day === 6;
+  return {
+    isWeekend,
+    start: isWeekend ? cfg.weekend_calling_hours_start : cfg.calling_hours_start,
+    end: isWeekend ? cfg.weekend_calling_hours_end : cfg.calling_hours_end
+  };
+}
+function getCallingWindow(cfg, now = /* @__PURE__ */ new Date()) {
+  const p = phoenixParts(now);
+  const today = hoursForDay(cfg, p.day);
+  const nowMinutes = p.hour * 60 + p.minute;
+  const open = nowMinutes >= today.start * 60 && nowMinutes < today.end * 60;
+  let nextOpenLabel = "";
+  if (!open) {
+    if (nowMinutes < today.start * 60) {
+      nextOpenLabel = `Calling resumes today at ${formatHourLabel(today.start)} Arizona time.`;
+    } else {
+      const nextDay = (p.day + 1) % 7;
+      const next = hoursForDay(cfg, nextDay);
+      nextOpenLabel = `Calling resumes ${DAY_NAMES[nextDay]} at ${formatHourLabel(next.start)} Arizona time.`;
+    }
+  }
+  return {
+    open,
+    is_weekend: today.isWeekend,
+    today_start: today.start,
+    today_end: today.end,
+    today_label: `${DAY_NAMES[p.day]} ${formatHourLabel(today.start)} \u2013 ${formatHourLabel(today.end)}`,
+    schedule_label: `Mon\u2013Fri ${formatHourLabel(cfg.calling_hours_start)}\u2013${formatHourLabel(cfg.calling_hours_end)}, Sat\u2013Sun ${formatHourLabel(cfg.weekend_calling_hours_start)}\u2013${formatHourLabel(cfg.weekend_calling_hours_end)} Arizona time`,
+    next_open_label: nextOpenLabel,
+    start_of_day: p.startOfDay
+  };
+}
+function isWithinRecipientCallingHours(state, now = /* @__PURE__ */ new Date()) {
+  const st = String(state || "AZ").trim().toUpperCase();
+  const tz = STATE_TIMEZONES[st] || "America/Phoenix";
+  try {
+    const hourPart = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hourCycle: "h23" }).formatToParts(now).find((p) => p.type === "hour");
+    const localHour2 = Number(hourPart?.value ?? 12) % 24;
+    const latest = STATE_LATEST_LOCAL_HOUR[st] ?? 21;
+    return localHour2 >= 8 && localHour2 < latest;
+  } catch {
+    return true;
+  }
+}
+async function countActiveBlandCalls() {
+  try {
+    const row = await one(
+      `SELECT count(*)::int AS cnt FROM activities
+       WHERE provider = 'bland_ai' AND type = 'call' AND status = 'In Progress'
+         AND created_at >= now() - interval '20 minutes'`
+    );
+    return row?.cnt || 0;
+  } catch {
+    return 0;
+  }
+}
+async function countBlandAssignedRemaining(startOfDay) {
+  const sod = startOfDay || phoenixParts().startOfDay;
+  try {
+    const total = await one(
+      `SELECT count(*)::int AS cnt FROM leads WHERE owner_id = $1 OR assigned_agent_id = $1`,
+      [BLAND_AI_USER_ID]
+    );
+    const remaining = await one(`SELECT count(*)::int AS cnt ${BLAND_ASSIGNED_CALLABLE_SQL}`, [sod]);
+    return { assigned_total: total?.cnt || 0, remaining_today: remaining?.cnt || 0 };
+  } catch {
+    return { assigned_total: 0, remaining_today: 0 };
+  }
+}
+async function acquireDialerLease(seconds = 45) {
+  try {
+    const row = await one(
+      `INSERT INTO settings (key, value) VALUES ('bland_dialer_lease', jsonb_build_object('until', (now() + ($1 || ' seconds')::interval)::text))
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+       WHERE (settings.value->>'until')::timestamptz < now()
+       RETURNING key`,
+      [String(seconds)]
+    );
+    return Boolean(row);
+  } catch {
+    return true;
+  }
+}
+async function releaseDialerLease() {
+  try {
+    await q(`UPDATE settings SET value = jsonb_build_object('until', (now() - interval '1 second')::text) WHERE key = 'bland_dialer_lease'`);
+  } catch {
+  }
+}
+async function runBlandAutoDialerTick(opts = {}) {
+  const cfg = await getBlandConfig();
+  const callingWindow = getCallingWindow(cfg);
+  const base = {
+    ok: true,
+    reason: opts.reason || "tick",
+    is_campaign_active: Boolean(cfg.is_campaign_active),
+    window_open: callingWindow.open,
+    calling_hours: callingWindow.schedule_label,
+    next_open: callingWindow.next_open_label
+  };
+  if (!cfg.enabled || !cfg.is_campaign_active) {
+    return { ...base, dispatched: [], skipped: "campaign_inactive" };
+  }
+  if (!callingWindow.open) {
+    return { ...base, dispatched: [], skipped: "outside_calling_hours" };
+  }
+  const callsToday = await getCallsTodayCount();
+  const dailyLimit = cfg.daily_call_limit || 1e3;
+  if (callsToday >= dailyLimit) {
+    return { ...base, dispatched: [], skipped: "daily_limit_reached" };
+  }
+  if (!await acquireDialerLease()) {
+    return { ...base, dispatched: [], skipped: "tick_in_progress" };
+  }
+  const dispatched = [];
+  let lastError = null;
+  try {
+    const activeCalls = await countActiveBlandCalls();
+    const slots = Math.max(0, Math.min(cfg.max_concurrent_calls, dailyLimit - callsToday) - activeCalls);
+    if (slots === 0) {
+      return { ...base, dispatched, active_calls: activeCalls, skipped: "all_lines_busy" };
+    }
+    const candidates = await q(
+      `SELECT * ${BLAND_ASSIGNED_CALLABLE_SQL}
+       ORDER BY (next_callback_at IS NOT NULL AND next_callback_at <= now()) DESC,
+                score DESC NULLS LAST,
+                COALESCE(attempts, 0) ASC,
+                created_at ASC
+       LIMIT 100`,
+      [callingWindow.start_of_day]
+    );
+    for (const lead of candidates) {
+      if (dispatched.length >= slots) break;
+      if (!isWithinRecipientCallingHours(lead.state)) continue;
+      const claimed = await one(
+        `UPDATE leads SET last_contacted_at = now()
+         WHERE id = $1 AND (last_contacted_at IS NULL OR last_contacted_at < now() - interval '15 minutes')
+         RETURNING id`,
+        [lead.id]
+      );
+      if (!claimed) continue;
+      try {
+        const res = await sendBlandCall({
+          phone: lead.phone,
+          related_type: "lead",
+          related_id: lead.id,
+          prospect_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim() || "Valued Beneficiary",
+          state: lead.state || "AZ",
+          user: BLAND_AI_USER,
+          override_pause: false
+        });
+        dispatched.push({
+          lead_id: lead.id,
+          lead_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(),
+          phone: lead.phone,
+          call_id: res.call_id,
+          simulated: res.simulated
+        });
+      } catch (err) {
+        await q(`UPDATE leads SET last_contacted_at = $2 WHERE id = $1`, [lead.id, lead.last_contacted_at || null]).catch(() => {
+        });
+        lastError = err?.message || "Bland AI dispatch failed";
+        console.error(`Bland auto-dialer failed for lead ${lead.id}:`, lastError);
+        if (err?.status !== 400) break;
+      }
+    }
+    const remaining = await countBlandAssignedRemaining(callingWindow.start_of_day);
+    return {
+      ...base,
+      dispatched,
+      active_calls: activeCalls + dispatched.length,
+      assigned_total: remaining.assigned_total,
+      remaining_today: remaining.remaining_today,
+      last_error: lastError
+    };
+  } finally {
+    await releaseDialerLease();
+  }
 }
 async function getCallsTodayCount() {
   try {
@@ -1202,15 +1406,11 @@ async function canDispatchOutboundCall(override = false) {
       operating_mode: operatingMode
     };
   }
-  const nowPhoenix = new Date((/* @__PURE__ */ new Date()).toLocaleString("en-US", { timeZone: "America/Phoenix" }));
-  const day = nowPhoenix.getDay();
-  const hour = nowPhoenix.getHours();
-  const isWeekday = day >= 1 && day <= 5;
-  const isWithinHours = hour >= (cfg.calling_hours_start || 9) && hour < (cfg.calling_hours_end || 19);
-  if ((!isWeekday || !isWithinHours) && !override) {
+  const callingWindow = getCallingWindow(cfg);
+  if (!callingWindow.open && !override) {
     return {
       allowed: false,
-      reason: `\u{1F558} Outside Bland AI calling window (Monday\u2013Friday, 9:00 AM \u2013 7:00 PM MST). Pass override=true to test outside hours.`,
+      reason: `\u{1F558} Outside Bland AI outbound calling hours (${callingWindow.schedule_label}). ${callingWindow.next_open_label}`,
       calls_today: callsToday,
       daily_limit: limit,
       is_paused: false,
@@ -1436,7 +1636,7 @@ async function sendBlandCall(opts) {
     name: "King Amen Ra",
     role: "admin"
   };
-  const gate = await canDispatchOutboundCall(Boolean(opts.override_pause ?? true));
+  const gate = await canDispatchOutboundCall(Boolean(opts.override_pause ?? false));
   if (!gate.allowed) {
     throw Object.assign(new Error(gate.reason || "Outbound calling is currently outside window or at limit"), {
       status: 409,
@@ -1616,11 +1816,25 @@ async function stopBlandOutboundCalls(params) {
     }
     if (params?.stop_all !== false) {
       try {
-        const r = await fetch("https://api.bland.ai/v1/calls/active/stop", {
-          method: "POST",
-          headers: { "Authorization": config2.api_key.trim() }
-        });
-        if (r.ok) stoppedAllLiveCalls = true;
+        const activeRows = await q(
+          `SELECT meta->>'bland_call_id' AS bland_call_id FROM activities
+           WHERE provider = 'bland_ai' AND type = 'call' AND status = 'In Progress'
+             AND created_at >= now() - interval '2 hours'`
+        );
+        let stoppedCount = 0;
+        for (const row of activeRows) {
+          const cid = row.bland_call_id;
+          if (!cid || cid.startsWith("bland_sim_") || cid === params?.call_id) continue;
+          try {
+            const r = await fetch(`https://api.bland.ai/v1/calls/${encodeURIComponent(cid)}/stop`, {
+              method: "POST",
+              headers: { "Authorization": config2.api_key.trim() }
+            });
+            if (r.ok) stoppedCount++;
+          } catch {
+          }
+        }
+        stoppedAllLiveCalls = stoppedCount > 0 || activeRows.length === 0;
       } catch {
       }
     }
@@ -1851,20 +2065,12 @@ Summary: ${summary || "Qualified on outbound AI call"}`,
       });
     }
   }
-  const currentCfg = await getBlandConfig();
   let nextDispatched = null;
-  if (currentCfg.is_campaign_active) {
-    const userRow = await one(`SELECT id, name, email, role FROM users WHERE id=$1`, [userId]) || { id: "u_principal", name: "King Amen Ra", email: "king@iwillglobal.com", role: "admin" };
-    const nextBatch = await dispatchNextLeadInQueue({
-      user: userRow,
-      count: 1,
-      override: false
-    }).catch(() => ({ dispatched: [], remaining: 0 }));
-    if (nextBatch.dispatched.length > 0) {
-      nextDispatched = nextBatch.dispatched[0];
-    } else if (nextBatch.remaining === 0) {
-      await saveBlandConfig({ is_campaign_active: false });
-    }
+  try {
+    const tick = await runBlandAutoDialerTick({ reason: "call_completed" });
+    nextDispatched = tick.dispatched?.[0] || null;
+  } catch (err) {
+    console.error("Bland auto-dialer (webhook) error:", err?.message);
   }
   const { publish: publish2 } = await Promise.resolve().then(() => (init_realtime(), realtime_exports));
   publish2("inbox", "bland_call_completed", {
@@ -1885,7 +2091,7 @@ Summary: ${summary || "Qualified on outbound AI call"}`,
     next_call_dispatched: nextDispatched
   };
 }
-var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, IWG_TEAM_DIRECTORY, BLAND_VOICES;
+var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, IWG_TEAM_DIRECTORY, BLAND_VOICES, BLAND_AI_USER_ID, BLAND_AI_USER, PHOENIX_OFFSET_MS, DAY_NAMES, STATE_TIMEZONES, STATE_LATEST_LOCAL_HOUR, BLAND_ASSIGNED_CALLABLE_SQL;
 var init_bland = __esm({
   "server/src/services/bland.ts"() {
     "use strict";
@@ -1922,7 +2128,8 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
    - Point 2 (2027 Prescription Protection): Part D caps annual out-of-pocket prescription costs at $2,400 ($700 max deductible, $35/month insulin cap, $0 adult vaccines), though carrier drug formularies change every January.
    - Point 3 (The 104+ Carrier Solution & Assumptive Close): "That is why we run a complimentary 5-minute check across 104+ carriers\u2014comparing Medigap Plan G, Plan N, and Medicare Advantage plans\u2014to ensure your exact doctors and medications are covered at the lowest possible cost. To make this completely effortless for you, {first_name}, our Principal Broker King Amen Ra can verify your doctors and prescriptions in just a few minutes at zero cost. I have him available right now\u2014let me introduce you so you can get your questions answered first-hand, okay?"
 4. CALLING HOURS & CONTINUOUS DIALING:
-   - Operate Monday through Friday, 9:00 AM to 7:00 PM local time (up to 1,000 calls per day), and continuously dial through the lead queue without stopping.
+   - Answer every inbound call immediately, 24 hours a day, 7 days a week.
+   - Outbound: call every prospect assigned to Bland AI Monday through Friday 9:00 AM to 7:00 PM and Saturday through Sunday 9:00 AM to 6:00 PM (Arizona time), up to 1,000 calls per day, continuously dialing the assigned queue without stopping.
 5. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}):
    - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER), do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
    - Use the Executive Alternative-Choice Appointment Close with {prospect_name}: "Because King Amen Ra is currently on a live consultation helping another family with their 2027 benefits, I want to reserve a dedicated one-on-one time for you on his private calendar so you receive his undivided attention. Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation\u2014and would morning or afternoon work best for you?"
@@ -1989,6 +2196,76 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
       { id: "mason", name: "Mason (Clear & Articulate Male)", gender: "Male", accent: "American", is_recommended: false },
       { id: "tina", name: "Tina (Friendly & Patient Receptionist)", gender: "Female", accent: "American", is_recommended: false }
     ];
+    BLAND_AI_USER_ID = "u_bland_ai";
+    BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: "Sarah \u2014 Bland AI Voice Agent", email: "bland-ai@iwillglobal.com", role: "scheduler" };
+    PHOENIX_OFFSET_MS = 7 * 3600 * 1e3;
+    DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    STATE_TIMEZONES = {
+      AL: "America/Chicago",
+      AK: "America/Anchorage",
+      AZ: "America/Phoenix",
+      AR: "America/Chicago",
+      CA: "America/Los_Angeles",
+      CO: "America/Denver",
+      CT: "America/New_York",
+      DE: "America/New_York",
+      DC: "America/New_York",
+      FL: "America/New_York",
+      GA: "America/New_York",
+      HI: "Pacific/Honolulu",
+      ID: "America/Boise",
+      IL: "America/Chicago",
+      IN: "America/Indiana/Indianapolis",
+      IA: "America/Chicago",
+      KS: "America/Chicago",
+      KY: "America/New_York",
+      LA: "America/Chicago",
+      ME: "America/New_York",
+      MD: "America/New_York",
+      MA: "America/New_York",
+      MI: "America/Detroit",
+      MN: "America/Chicago",
+      MS: "America/Chicago",
+      MO: "America/Chicago",
+      MT: "America/Denver",
+      NE: "America/Chicago",
+      NV: "America/Los_Angeles",
+      NH: "America/New_York",
+      NJ: "America/New_York",
+      NM: "America/Denver",
+      NY: "America/New_York",
+      NC: "America/New_York",
+      ND: "America/Chicago",
+      OH: "America/New_York",
+      OK: "America/Chicago",
+      OR: "America/Los_Angeles",
+      PA: "America/New_York",
+      RI: "America/New_York",
+      SC: "America/New_York",
+      SD: "America/Chicago",
+      TN: "America/Chicago",
+      TX: "America/Chicago",
+      UT: "America/Denver",
+      VT: "America/New_York",
+      VA: "America/New_York",
+      WA: "America/Los_Angeles",
+      WV: "America/New_York",
+      WI: "America/Chicago",
+      WY: "America/Denver"
+    };
+    STATE_LATEST_LOCAL_HOUR = { FL: 20 };
+    BLAND_ASSIGNED_CALLABLE_SQL = `
+  FROM leads
+  WHERE (owner_id = '${BLAND_AI_USER_ID}' OR assigned_agent_id = '${BLAND_AI_USER_ID}')
+    AND COALESCE(dnc, false) = false
+    AND COALESCE(phone_invalid, false) = false
+    AND phone IS NOT NULL AND trim(phone) != ''
+    AND COALESCE(status, 'New') NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')
+    AND (
+      last_contacted_at IS NULL
+      OR last_contacted_at < $1
+      OR (next_callback_at IS NOT NULL AND next_callback_at <= now() AND last_contacted_at < next_callback_at)
+    )`;
   }
 });
 
@@ -2314,6 +2591,7 @@ var seed_exports = {};
 __export(seed_exports, {
   ensureSeeded: () => ensureSeeded
 });
+import { randomUUID } from "node:crypto";
 async function ensureSeeded(force = false) {
   await getDb();
   const count = await one("SELECT count(*)::int AS n FROM users");
@@ -2422,6 +2700,21 @@ async function ensureSeeded(force = false) {
     { id: "u_agent12", name: "Nicole Foster", email: "nfoster@iwillglobal.com", role: "licensed_agent", title: "Medicare Counselor", phone: "(480) 331-9431", npn: "21948302", states: ["AZ", "FL"] },
     { id: "u_agent13", name: "Timothy Hays", email: "thays@iwillglobal.com", role: "licensed_agent", title: "Insurance Specialist", phone: "(480) 331-9432", npn: "19503928", states: ["AZ"] }
   ];
+  const blandAiUser = await one("SELECT id FROM users WHERE id=$1 OR lower(email)=lower($2)", ["u_bland_ai", "bland-ai@iwillglobal.com"]);
+  if (!blandAiUser) {
+    await insert("users", {
+      id: "u_bland_ai",
+      name: "Sarah \u2014 Bland AI Voice Agent",
+      email: "bland-ai@iwillglobal.com",
+      password_hash: hashPassword(randomUUID() + randomUUID()),
+      role: "scheduler",
+      title: "Autonomous AI Outbound Caller (Bland AI)",
+      phone: null,
+      states: ["AZ", "CA", "NV", "TX", "FL", "NM", "CO"],
+      active: true,
+      daily_call_goal: 1e3
+    });
+  }
   for (const u of usersList) {
     const userPwd = u.email === "king@iwillglobal.com" ? hashPassword("Heru5464") : u.email === "kmartinez@iwillglobal.com" ? hashPassword("Today#01") : pwd;
     const existing = await one("SELECT id, phone, role FROM users WHERE id=$1 OR lower(email)=lower($2)", [u.id, u.email]);
@@ -2911,7 +3204,7 @@ var init_seed = __esm({
 
 // server/src/db/index.ts
 import { readFileSync, mkdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 async function createAdapter() {
   if (config.databaseUrl) {
     const pg = await import("pg");
@@ -3012,7 +3305,7 @@ var init_db = __esm({
     init_config();
     adapter = null;
     ready = null;
-    uid = () => randomUUID();
+    uid = () => randomUUID2();
     JSONB_COLUMNS = /* @__PURE__ */ new Set(["states", "lines", "products", "automation", "meta", "details", "mentions", "intake", "google_tokens"]);
   }
 });
@@ -4915,7 +5208,7 @@ records.get("/leads/pool-stats", async (req, res) => {
       LEFT JOIN leads l ON l.owner_id = u.id AND l.status != 'DNC'
       WHERE u.active = true AND u.role IN ('scheduler', 'licensed_agent', 'admin', 'manager')
       GROUP BY u.id, u.name, u.email, u.role, u.title
-      ORDER BY (CASE WHEN u.id = 'u_principal' OR lower(u.email) = 'king@iwillglobal.com' THEN 0 ELSE 1 END), u.role DESC, u.name ASC
+      ORDER BY (CASE WHEN u.id = 'u_principal' OR lower(u.email) = 'king@iwillglobal.com' THEN 0 WHEN u.id = 'u_bland_ai' THEN 1 ELSE 2 END), u.role DESC, u.name ASC
     `);
     res.json({
       master_list_bank_count: admin ? unassigned?.n ?? 0 : 0,
@@ -8975,6 +9268,18 @@ blandPublic.post("/webhook", async (req, res) => {
     res.status(500).json({ error: err.message || "Webhook processing failed" });
   }
 });
+blandPublic.get("/cron/tick", async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  try {
+    const result = await runBlandAutoDialerTick({ reason: "cron" });
+    res.json({ ok: true, dispatched: result.dispatched.length, skipped: result.skipped || null, window_open: result.window_open });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 blandPublic.get("/public-directory", async (_req, res) => {
   try {
     const dir = await getInboundDirectory();
@@ -9004,7 +9309,16 @@ blandAuth.get("/config", async (_req, res) => {
       webhook_url: cfg.webhook_url,
       calling_hours_start: cfg.calling_hours_start,
       calling_hours_end: cfg.calling_hours_end,
+      weekend_calling_hours_start: cfg.weekend_calling_hours_start,
+      weekend_calling_hours_end: cfg.weekend_calling_hours_end,
       calling_days: cfg.calling_days,
+      calling_window: (() => {
+        const w = getCallingWindow(cfg);
+        return { open: w.open, today: w.today_label, schedule: w.schedule_label, next_open: w.next_open_label };
+      })(),
+      bland_ai_user_id: BLAND_AI_USER_ID,
+      bland_assigned: await countBlandAssignedRemaining(),
+      max_concurrent_calls: cfg.max_concurrent_calls,
       daily_call_limit: cfg.daily_call_limit,
       pause_on_warm_transfer: cfg.pause_on_warm_transfer,
       is_calling_paused: cfg.is_calling_paused,
@@ -9186,70 +9500,69 @@ blandAuth.post("/activate", async (req, res) => {
       updates.paused_reason = on_warm_transfer ? "Broker on live Warm Transfer \u2014 AI booking Telephone, In-Person, or Video appointments only" : null;
     }
     const cfg = await saveBlandConfig(updates);
+    const callingWindow = getCallingWindow(cfg);
     const dispatched = [];
+    let assignedCount = 0;
+    let gateMessage = null;
+    if (Array.isArray(lead_ids) && lead_ids.length > 0) {
+      const updated = await q(
+        `UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2) RETURNING id`,
+        [BLAND_AI_USER_ID, lead_ids]
+      );
+      assignedCount = updated.length;
+    }
     if (phone || lead_id) {
       let targetPhone = phone;
       let targetName = prospect_name;
+      let targetState;
       if (lead_id) {
         const lead = await one(`SELECT * FROM leads WHERE id=$1`, [lead_id]);
         if (lead) {
           targetPhone = targetPhone || lead.phone;
           targetName = targetName || `${lead.first_name || ""} ${lead.last_name || ""}`.trim();
+          targetState = lead.state || void 0;
         }
       }
       if (targetPhone) {
-        const callResult = await sendBlandCall({
-          phone: targetPhone,
-          related_type: "lead",
-          related_id: lead_id,
-          user: req.user,
-          prospect_name: targetName || "Medicare Beneficiary",
-          voice: voice || cfg.default_voice,
-          on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
-          preferred_appointment_type,
-          override_pause: true
-        });
-        dispatched.push({ phone: targetPhone, lead_id: lead_id || null, ...callResult });
-      }
-    }
-    if (Array.isArray(lead_ids) && lead_ids.length > 0 && dispatched.length === 0) {
-      const limit = Math.min(Math.max(Number(max_calls_to_start) || 1, 1), 5);
-      for (const lid of lead_ids.slice(0, limit)) {
-        const lead = await one(`SELECT * FROM leads WHERE id=$1`, [lid]);
-        if (lead && lead.phone) {
+        try {
           const callResult = await sendBlandCall({
-            phone: lead.phone,
+            phone: targetPhone,
             related_type: "lead",
-            related_id: lead.id,
+            related_id: lead_id,
             user: req.user,
-            prospect_name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim() || "Medicare Beneficiary",
-            state: lead.state || "AZ",
+            prospect_name: targetName || "Medicare Beneficiary",
+            state: targetState,
             voice: voice || cfg.default_voice,
             on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
-            preferred_appointment_type,
-            override_pause: true
+            preferred_appointment_type
           });
-          dispatched.push({ phone: lead.phone, lead_id: lead.id, name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(), ...callResult });
+          dispatched.push({ phone: targetPhone, lead_id: lead_id || null, ...callResult });
+        } catch (err) {
+          if (err?.code === "CALLING_GATE_RESTRICTED") gateMessage = err.message;
+          else throw err;
         }
       }
     }
-    if (dispatched.length === 0) {
-      const nextResult = await dispatchNextLeadInQueue({
-        user: req.user,
-        count: Number(max_calls_to_start) || 1,
-        override: true,
-        on_warm_transfer: Boolean(cfg.is_on_warm_transfer)
-      });
-      if (nextResult.dispatched?.length) {
-        dispatched.push(...nextResult.dispatched);
-      }
+    let tick = null;
+    if (continue_queue) {
+      tick = await runBlandAutoDialerTick({ reason: "activate" });
+      if (tick?.dispatched?.length) dispatched.push(...tick.dispatched);
     }
-    const queueCountRow = await one(
-      `SELECT count(*)::int AS cnt FROM leads
-       WHERE dnc = false AND phone_invalid = false
-         AND phone IS NOT NULL AND trim(phone) != ''
-         AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')`
-    );
+    const assigned = await countBlandAssignedRemaining(callingWindow.start_of_day);
+    let message;
+    if (!callingWindow.open) {
+      message = `\u{1F916} Bland AI is ACTIVE and armed. Outside calling hours right now (${callingWindow.schedule_label}). ${callingWindow.next_open_label} ${assigned.remaining_today > 0 ? `${assigned.remaining_today} assigned prospect(s) are queued.` : ""}`.trim();
+    } else if (dispatched.length > 0) {
+      message = `\u{1F916} Bland AI activated! Dialing ${dispatched.length} prospect(s) now${cfg.is_on_warm_transfer ? " in Warm Transfer Mode (Telephone, In-Person, or Video appointments only)" : ""}. ${assigned.remaining_today} assigned prospect(s) remaining today \u2014 Bland keeps calling until ${callingWindow.today_label.split("\u2013 ")[1] || "close"}.`;
+    } else if (assigned.assigned_total === 0) {
+      message = '\u{1F916} Bland AI is ACTIVE, but no prospects are assigned to Bland AI yet. Select prospects and click "Assign to Bland AI" (or "Start Bland AI") to queue them.';
+    } else if (assigned.remaining_today === 0) {
+      message = `\u{1F916} Bland AI is ACTIVE. All ${assigned.assigned_total} assigned prospect(s) have been called today \u2014 new assignments and due callbacks will be dialed automatically.`;
+    } else {
+      message = `\u{1F916} Bland AI is ACTIVE with ${assigned.remaining_today} assigned prospect(s) queued \u2014 all lines are busy; the next prospect is dialed the moment a line frees up.`;
+    }
+    if (assignedCount > 0) message = `\u2705 ${assignedCount} prospect(s) assigned to Bland AI. ${message}`;
+    if (gateMessage) message = `${gateMessage} ${message}`;
     res.json({
       success: true,
       is_campaign_active: Boolean(cfg.is_campaign_active),
@@ -9257,8 +9570,46 @@ blandAuth.post("/activate", async (req, res) => {
       operating_mode: cfg.is_on_warm_transfer ? "APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO" : "WARM_TRANSFER_OR_APPOINTMENT",
       allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
       dispatched,
-      queue_remaining: queueCountRow?.cnt || 0,
-      message: dispatched.length > 0 ? `Bland Agent AI activated! Dispatched ${dispatched.length} call(s)${cfg.is_on_warm_transfer ? " in Warm Transfer Mode (booking Telephone, In-Person, or Video appointments only & continuing calls)" : ""}.` : `Bland Agent AI activated and standing by (${queueCountRow?.cnt || 0} callable leads in queue).`
+      call_id: dispatched[0]?.call_id || null,
+      assigned_to_bland: assignedCount,
+      bland_assigned_total: assigned.assigned_total,
+      queue_remaining: assigned.remaining_today,
+      calling_window: { open: callingWindow.open, today: callingWindow.today_label, schedule: callingWindow.schedule_label, next_open: callingWindow.next_open_label },
+      message
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/tick", async (_req, res) => {
+  try {
+    const result = await runBlandAutoDialerTick({ reason: "heartbeat" });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+blandAuth.post("/assign", async (req, res) => {
+  try {
+    const { lead_ids } = req.body || {};
+    if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
+      return res.status(400).json({ error: "Select at least one prospect to assign to Bland AI" });
+    }
+    const updated = await q(
+      `UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2) RETURNING id`,
+      [BLAND_AI_USER_ID, lead_ids]
+    );
+    const cfg = await getBlandConfig();
+    const tick = cfg.is_campaign_active ? await runBlandAutoDialerTick({ reason: "assign" }) : null;
+    const assigned = await countBlandAssignedRemaining();
+    res.json({
+      success: true,
+      assigned: updated.length,
+      bland_assigned_total: assigned.assigned_total,
+      queue_remaining: assigned.remaining_today,
+      dispatched: tick?.dispatched || [],
+      is_campaign_active: Boolean(cfg.is_campaign_active),
+      message: `\u{1F916} ${updated.length} prospect(s) assigned to Bland AI.${cfg.is_campaign_active ? " Bland is active and will call them during calling hours." : ' Click "Start Bland AI Calls" to begin dialing.'}`
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -9308,11 +9659,13 @@ blandAuth.post("/call", async (req, res) => {
     } = req.body;
     let targetPhone = phone;
     let targetName = prospect_name;
+    let targetState;
     if (lead_id) {
       const lead = await one(`SELECT * FROM leads WHERE id=$1`, [lead_id]);
       if (lead) {
         targetPhone = targetPhone || lead.phone;
         targetName = targetName || `${lead.first_name} ${lead.last_name}`;
+        targetState = lead.state || void 0;
       }
     }
     if (!targetPhone) {
@@ -9324,18 +9677,18 @@ blandAuth.post("/call", async (req, res) => {
       related_id: lead_id,
       user: req.user,
       prospect_name: targetName,
+      state: targetState,
       voice,
       custom_prompt,
       transfer_phone_number: transfer_number,
       fromNumber: from_number,
       pathway_id,
       on_warm_transfer: on_warm_transfer !== void 0 ? Boolean(on_warm_transfer) : void 0,
-      preferred_appointment_type,
-      override_pause: true
+      preferred_appointment_type
     });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err?.status === 409 ? 409 : 500).json({ error: err.message });
   }
 });
 blandAuth.post("/test-call", async (req, res) => {
@@ -9435,6 +9788,12 @@ if (isMain) {
     console.log(`  Google Workspace: ${isGoogleEnabled() ? "configured" : "not configured (Gmail actions are logged only)"}
 `);
   });
+}
+if (isMain) {
+  const { runBlandAutoDialerTick: runBlandAutoDialerTick2 } = await Promise.resolve().then(() => (init_bland(), bland_exports));
+  setInterval(() => {
+    runBlandAutoDialerTick2({ reason: "interval" }).catch((err) => console.error("Bland auto-dialer error:", err?.message));
+  }, 6e4);
 }
 var index_default = createApp();
 export {

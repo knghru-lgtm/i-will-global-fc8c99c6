@@ -50,6 +50,24 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     };
   }, []);
 
+  // Bland AI autonomous dialer heartbeat: while the CRM is open, nudge the server every 60s so every
+  // open line is refilled with the next Bland-assigned prospect (server enforces hours, limits and de-duplication).
+  React.useEffect(() => {
+    if (!blandStatus.is_campaign_active) return;
+    const beat = () => {
+      api.post('/bland/tick', {})
+        .then((res: any) => {
+          if (res?.dispatched?.length) {
+            window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
+          }
+        })
+        .catch(() => {});
+    };
+    beat();
+    const interval = setInterval(beat, 60_000);
+    return () => clearInterval(interval);
+  }, [blandStatus.is_campaign_active]);
+
   // Close mobile drawer and quoting menu on route navigation
   React.useEffect(() => {
     setIsMobileMenuOpen(false);

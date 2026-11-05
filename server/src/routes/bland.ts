@@ -14,6 +14,10 @@ import {
   getInboundDirectory,
   dispatchAiWhisperTransfer,
   stopBlandOutboundCalls,
+  runBlandAutoDialerTick,
+  getCallingWindow,
+  countBlandAssignedRemaining,
+  BLAND_AI_USER_ID,
 } from '../services/bland.ts';
 import { one, q } from '../db/index.ts';
 
@@ -28,6 +32,21 @@ blandPublic.post('/webhook', async (req, res) => {
   } catch (err: any) {
     console.error('Bland webhook error:', err);
     res.status(500).json({ error: err.message || 'Webhook processing failed' });
+  }
+});
+
+// Scheduled auto-dialer trigger (Vercel Cron / external scheduler).
+// Idempotent and bounded: only dials Bland-assigned prospects, inside calling hours, within the concurrent-line limit.
+blandPublic.get('/cron/tick', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const result = await runBlandAutoDialerTick({ reason: 'cron' });
+    res.json({ ok: true, dispatched: result.dispatched.length, skipped: (result as any).skipped || null, window_open: result.window_open });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -68,7 +87,16 @@ blandAuth.get('/config', async (_req, res) => {
       webhook_url: cfg.webhook_url,
       calling_hours_start: cfg.calling_hours_start,
       calling_hours_end: cfg.calling_hours_end,
+      weekend_calling_hours_start: cfg.weekend_calling_hours_start,
+      weekend_calling_hours_end: cfg.weekend_calling_hours_end,
       calling_days: cfg.calling_days,
+      calling_window: (() => {
+        const w = getCallingWindow(cfg);
+        return { open: w.open, today: w.today_label, schedule: w.schedule_label, next_open: w.next_open_label };
+      })(),
+      bland_ai_user_id: BLAND_AI_USER_ID,
+      bland_assigned: await countBlandAssignedRemaining(),
+      max_concurrent_calls: cfg.max_concurrent_calls,
       daily_call_limit: cfg.daily_call_limit,
       pause_on_warm_transfer: cfg.pause_on_warm_transfer,
       is_calling_paused: cfg.is_calling_paused,
@@ -275,79 +303,78 @@ blandAuth.post('/activate', async (req, res) => {
         : null;
     }
     const cfg = await saveBlandConfig(updates);
+    const callingWindow = getCallingWindow(cfg);
 
     const dispatched: any[] = [];
+    let assignedCount = 0;
+    let gateMessage: string | null = null;
 
-    // 5a. If a specific phone or lead_id was provided, dial it immediately
+    // 5a. Selected prospects are assigned to Bland AI so the autonomous dialer works them every day until reached.
+    if (Array.isArray(lead_ids) && lead_ids.length > 0) {
+      const updated = await q(
+        `UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2) RETURNING id`,
+        [BLAND_AI_USER_ID, lead_ids]
+      );
+      assignedCount = updated.length;
+    }
+
+    // 5b. If a specific phone or lead_id was provided, dial it immediately (inside calling hours)
     if (phone || lead_id) {
       let targetPhone = phone;
       let targetName = prospect_name;
+      let targetState: string | undefined;
       if (lead_id) {
         const lead = await one<any>(`SELECT * FROM leads WHERE id=$1`, [lead_id]);
         if (lead) {
           targetPhone = targetPhone || lead.phone;
           targetName = targetName || `${lead.first_name || ''} ${lead.last_name || ''}`.trim();
+          targetState = lead.state || undefined;
         }
       }
       if (targetPhone) {
-        const callResult = await sendBlandCall({
-          phone: targetPhone,
-          related_type: 'lead',
-          related_id: lead_id,
-          user: req.user!,
-          prospect_name: targetName || 'Medicare Beneficiary',
-          voice: voice || cfg.default_voice,
-          on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
-          preferred_appointment_type,
-          override_pause: true,
-        });
-        dispatched.push({ phone: targetPhone, lead_id: lead_id || null, ...callResult });
-      }
-    }
-
-    // 5b. If an array of lead_ids was provided, dispatch up to max_calls_to_start from that list
-    if (Array.isArray(lead_ids) && lead_ids.length > 0 && dispatched.length === 0) {
-      const limit = Math.min(Math.max(Number(max_calls_to_start) || 1, 1), 5);
-      for (const lid of lead_ids.slice(0, limit)) {
-        const lead = await one<any>(`SELECT * FROM leads WHERE id=$1`, [lid]);
-        if (lead && lead.phone) {
+        try {
           const callResult = await sendBlandCall({
-            phone: lead.phone,
+            phone: targetPhone,
             related_type: 'lead',
-            related_id: lead.id,
+            related_id: lead_id,
             user: req.user!,
-            prospect_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Medicare Beneficiary',
-            state: lead.state || 'AZ',
+            prospect_name: targetName || 'Medicare Beneficiary',
+            state: targetState,
             voice: voice || cfg.default_voice,
             on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
             preferred_appointment_type,
-            override_pause: true,
           });
-          dispatched.push({ phone: lead.phone, lead_id: lead.id, name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(), ...callResult });
+          dispatched.push({ phone: targetPhone, lead_id: lead_id || null, ...callResult });
+        } catch (err: any) {
+          if (err?.code === 'CALLING_GATE_RESTRICTED') gateMessage = err.message;
+          else throw err;
         }
       }
     }
 
-    // 5c. Otherwise, pull the next callable lead from the CRM queue and begin making calls!
-    if (dispatched.length === 0) {
-      const nextResult = await dispatchNextLeadInQueue({
-        user: req.user!,
-        count: Number(max_calls_to_start) || 1,
-        override: true,
-        on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
-      });
-      if (nextResult.dispatched?.length) {
-        dispatched.push(...nextResult.dispatched);
-      }
+    // 5c. Fill every open line with the next prospects assigned to Bland AI.
+    let tick: any = null;
+    if (continue_queue) {
+      tick = await runBlandAutoDialerTick({ reason: 'activate' });
+      if (tick?.dispatched?.length) dispatched.push(...tick.dispatched);
     }
 
-    // Count remaining callable leads in queue
-    const queueCountRow = await one<any>(
-      `SELECT count(*)::int AS cnt FROM leads
-       WHERE dnc = false AND phone_invalid = false
-         AND phone IS NOT NULL AND trim(phone) != ''
-         AND status NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')`
-    );
+    const assigned = await countBlandAssignedRemaining(callingWindow.start_of_day);
+
+    let message: string;
+    if (!callingWindow.open) {
+      message = `🤖 Bland AI is ACTIVE and armed. Outside calling hours right now (${callingWindow.schedule_label}). ${callingWindow.next_open_label} ${assigned.remaining_today > 0 ? `${assigned.remaining_today} assigned prospect(s) are queued.` : ''}`.trim();
+    } else if (dispatched.length > 0) {
+      message = `🤖 Bland AI activated! Dialing ${dispatched.length} prospect(s) now${cfg.is_on_warm_transfer ? ' in Warm Transfer Mode (Telephone, In-Person, or Video appointments only)' : ''}. ${assigned.remaining_today} assigned prospect(s) remaining today — Bland keeps calling until ${callingWindow.today_label.split('– ')[1] || 'close'}.`;
+    } else if (assigned.assigned_total === 0) {
+      message = '🤖 Bland AI is ACTIVE, but no prospects are assigned to Bland AI yet. Select prospects and click "Assign to Bland AI" (or "Start Bland AI") to queue them.';
+    } else if (assigned.remaining_today === 0) {
+      message = `🤖 Bland AI is ACTIVE. All ${assigned.assigned_total} assigned prospect(s) have been called today — new assignments and due callbacks will be dialed automatically.`;
+    } else {
+      message = `🤖 Bland AI is ACTIVE with ${assigned.remaining_today} assigned prospect(s) queued — all lines are busy; the next prospect is dialed the moment a line frees up.`;
+    }
+    if (assignedCount > 0) message = `✅ ${assignedCount} prospect(s) assigned to Bland AI. ${message}`;
+    if (gateMessage) message = `${gateMessage} ${message}`;
 
     res.json({
       success: true,
@@ -358,10 +385,50 @@ blandAuth.post('/activate', async (req, res) => {
         : 'WARM_TRANSFER_OR_APPOINTMENT',
       allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
       dispatched,
-      queue_remaining: queueCountRow?.cnt || 0,
-      message: dispatched.length > 0
-        ? `Bland Agent AI activated! Dispatched ${dispatched.length} call(s)${cfg.is_on_warm_transfer ? ' in Warm Transfer Mode (booking Telephone, In-Person, or Video appointments only & continuing calls)' : ''}.`
-        : `Bland Agent AI activated and standing by (${queueCountRow?.cnt || 0} callable leads in queue).`,
+      call_id: dispatched[0]?.call_id || null,
+      assigned_to_bland: assignedCount,
+      bland_assigned_total: assigned.assigned_total,
+      queue_remaining: assigned.remaining_today,
+      calling_window: { open: callingWindow.open, today: callingWindow.today_label, schedule: callingWindow.schedule_label, next_open: callingWindow.next_open_label },
+      message,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5d. CRM heartbeat: keeps the autonomous dialer filling open lines while anyone has the CRM open.
+blandAuth.post('/tick', async (_req, res) => {
+  try {
+    const result = await runBlandAutoDialerTick({ reason: 'heartbeat' });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5e. Assign selected prospects to Bland AI (they are dialed automatically during calling hours)
+blandAuth.post('/assign', async (req, res) => {
+  try {
+    const { lead_ids } = req.body || {};
+    if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
+      return res.status(400).json({ error: 'Select at least one prospect to assign to Bland AI' });
+    }
+    const updated = await q(
+      `UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2) RETURNING id`,
+      [BLAND_AI_USER_ID, lead_ids]
+    );
+    const cfg = await getBlandConfig();
+    const tick = cfg.is_campaign_active ? await runBlandAutoDialerTick({ reason: 'assign' }) : null;
+    const assigned = await countBlandAssignedRemaining();
+    res.json({
+      success: true,
+      assigned: updated.length,
+      bland_assigned_total: assigned.assigned_total,
+      queue_remaining: assigned.remaining_today,
+      dispatched: tick?.dispatched || [],
+      is_campaign_active: Boolean(cfg.is_campaign_active),
+      message: `🤖 ${updated.length} prospect(s) assigned to Bland AI.${cfg.is_campaign_active ? ' Bland is active and will call them during calling hours.' : ' Click "Start Bland AI Calls" to begin dialing.'}`,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -418,12 +485,14 @@ blandAuth.post('/call', async (req, res) => {
 
     let targetPhone = phone;
     let targetName = prospect_name;
+    let targetState: string | undefined;
 
     if (lead_id) {
       const lead = await one<any>(`SELECT * FROM leads WHERE id=$1`, [lead_id]);
       if (lead) {
         targetPhone = targetPhone || lead.phone;
         targetName = targetName || `${lead.first_name} ${lead.last_name}`;
+        targetState = lead.state || undefined;
       }
     }
 
@@ -437,6 +506,7 @@ blandAuth.post('/call', async (req, res) => {
       related_id: lead_id,
       user: req.user!,
       prospect_name: targetName,
+      state: targetState,
       voice,
       custom_prompt,
       transfer_phone_number: transfer_number,
@@ -444,12 +514,11 @@ blandAuth.post('/call', async (req, res) => {
       pathway_id,
       on_warm_transfer: on_warm_transfer !== undefined ? Boolean(on_warm_transfer) : undefined,
       preferred_appointment_type,
-      override_pause: true,
     });
 
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(err?.status === 409 ? 409 : 500).json({ error: err.message });
   }
 });
 

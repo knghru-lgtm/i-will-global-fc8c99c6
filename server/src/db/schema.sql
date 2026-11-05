@@ -363,6 +363,12 @@ CREATE TABLE IF NOT EXISTS bland_config (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Generic key/value settings store (Bland AI config, dialer lease, feature flags)
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
 CREATE INDEX IF NOT EXISTS idx_leads_owner ON leads(owner_id);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_clients_owner ON clients(owner_id);

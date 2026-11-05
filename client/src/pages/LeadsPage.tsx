@@ -90,15 +90,37 @@ export const LeadsPage: React.FC = () => {
   const [isBlandActive, setIsBlandActive] = useState<boolean>(false);
   const [blandBusy, setBlandBusy] = useState<boolean>(false);
   const [blandBannerMsg, setBlandBannerMsg] = useState<string>('');
+  const [blandWindow, setBlandWindow] = useState<{ open: boolean; today?: string; schedule?: string; next_open?: string } | null>(null);
+  const [blandAssigned, setBlandAssigned] = useState<{ assigned_total: number; remaining_today: number }>({ assigned_total: 0, remaining_today: 0 });
 
   const loadBlandStatus = async () => {
     try {
       const cfg = await api.get('/bland/config');
       if (cfg) {
         setIsBlandActive(Boolean(cfg.is_campaign_active));
+        if (cfg.calling_window) setBlandWindow(cfg.calling_window);
+        if (cfg.bland_assigned) setBlandAssigned(cfg.bland_assigned);
       }
     } catch {
       // ignore
+    }
+  };
+
+  const handleAssignToBland = async (targetLeadIds: string[]) => {
+    if (!targetLeadIds.length) return;
+    setBlandBusy(true);
+    try {
+      const res = await api.post('/bland/assign', { lead_ids: targetLeadIds });
+      setBlandBannerMsg(res.message || `🤖 ${targetLeadIds.length} prospect(s) assigned to Bland AI.`);
+      setSelectedIds([]);
+      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      loadLeads();
+      loadPoolStats();
+      loadBlandStatus();
+    } catch (err: any) {
+      alert(err.message || 'Failed to assign prospects to Bland AI');
+    } finally {
+      setBlandBusy(false);
     }
   };
 
@@ -111,13 +133,16 @@ export const LeadsPage: React.FC = () => {
         : (selectedIds.length > 0 ? selectedIds : undefined);
       const res = await api.post('/bland/activate', {
         lead_ids: idsToCall,
-        max_calls_to_start: idsToCall ? Math.min(idsToCall.length, 5) : 1,
         continue_queue: true,
       });
       setIsBlandActive(true);
       setBlandBannerMsg(res.message || '🤖 Bland AI activated! Autonomous outbound calls have started.');
+      if (res.calling_window) setBlandWindow(res.calling_window);
+      if (idsToCall) setSelectedIds([]);
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
       loadLeads();
+      loadPoolStats();
+      loadBlandStatus();
     } catch (err: any) {
       alert(err.message || 'Failed to start Bland AI outbound calls');
     } finally {
@@ -924,7 +949,12 @@ export const LeadsPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span>{isBlandActive ? '🟢' : '🛑'}</span>
             <span>
-              {blandBannerMsg || '🤖 Bland AI Outbound Calling is ACTIVE — dialing prospects with your unified 2027 Medicare script.'}
+              {blandBannerMsg || `🤖 Bland AI is ACTIVE — automatically calling every prospect assigned to Bland AI (${blandAssigned.remaining_today} of ${blandAssigned.assigned_total} still to call today).`}
+              <span style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: '#cbd5e1', marginTop: '0.2rem' }}>
+                🕘 Outbound hours: Mon–Fri 9:00 AM–7:00 PM · Sat–Sun 9:00 AM–6:00 PM (Arizona time)
+                {blandWindow ? (blandWindow.open ? ` · Calling now (${blandWindow.today})` : ` · Closed now — ${blandWindow.next_open || ''}`) : ''}
+                {' '}· 📞 Inbound calls answered immediately 24/7
+              </span>
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -1001,7 +1031,7 @@ export const LeadsPage: React.FC = () => {
               const isKing = c.id === 'u_principal' || c.email?.toLowerCase() === 'king@iwillglobal.com';
               return (
                 <option key={c.id} value={c.id}>
-                  {isKing ? `👑 King Amen Ra — Principal & Broker (${c.assigned_leads_count || 0} leads)` : `👤 ${c.name} (${c.assigned_leads_count || 0} leads)`}
+                  {isKing ? `👑 King Amen Ra — Principal & Broker (${c.assigned_leads_count || 0} leads)` : c.id === 'u_bland_ai' ? `🤖 Bland AI — Auto-Dialer Queue (${c.assigned_leads_count || 0} leads)` : `👤 ${c.name} (${c.assigned_leads_count || 0} leads)`}
                 </option>
               );
             })}
@@ -1316,9 +1346,30 @@ export const LeadsPage: React.FC = () => {
                 gap: '0.35rem',
                 cursor: 'pointer',
               }}
-              title="Activate Bland AI to start calling the selected prospects"
+              title="Assign the selected prospects to Bland AI and start calling them now (inside calling hours)"
             >
-              ▶ Start Bland AI ({selectedIds.length})
+              ▶ Assign & Start Bland AI ({selectedIds.length})
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={blandBusy}
+              onClick={() => handleAssignToBland(selectedIds)}
+              style={{
+                padding: '0.45rem 0.85rem',
+                fontSize: '0.85rem',
+                fontWeight: 800,
+                background: 'linear-gradient(135deg, #7c3aed, #9333ea)',
+                color: '#ffffff',
+                border: '1.5px solid #a855f7',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                cursor: 'pointer',
+              }}
+              title="Assign the selected prospects to Bland AI — they are called automatically Mon–Fri 9–7 and Sat–Sun 9–6 (Arizona time)"
+            >
+              🤖 Assign to Bland AI
             </button>
             <button
               type="button"

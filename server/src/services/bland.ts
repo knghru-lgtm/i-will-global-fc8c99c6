@@ -17,9 +17,12 @@ export interface BlandConfig {
   transfer_phone_number: string;
   prompt_template: string;
   webhook_url: string;
-  calling_hours_start: number; // 9 (9:00 AM)
-  calling_hours_end: number;   // 19 (7:00 PM)
-  calling_days: string;        // 'Mon-Fri'
+  calling_hours_start: number; // 9 (9:00 AM) Mon-Fri
+  calling_hours_end: number;   // 19 (7:00 PM) Mon-Fri
+  weekend_calling_hours_start: number; // 9 (9:00 AM) Sat-Sun
+  weekend_calling_hours_end: number;   // 18 (6:00 PM) Sat-Sun
+  calling_days: string;        // Human-readable schedule label
+  max_concurrent_calls: number; // Max simultaneous autonomous outbound calls
   daily_call_limit: number;    // 1000
   pause_on_warm_transfer: boolean;
   is_calling_paused: boolean;  // Legacy alias for is_on_warm_transfer
@@ -81,7 +84,8 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
    - Point 2 (2027 Prescription Protection): Part D caps annual out-of-pocket prescription costs at $2,400 ($700 max deductible, $35/month insulin cap, $0 adult vaccines), though carrier drug formularies change every January.
    - Point 3 (The 104+ Carrier Solution & Assumptive Close): "That is why we run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage plans—to ensure your exact doctors and medications are covered at the lowest possible cost. To make this completely effortless for you, {first_name}, our Principal Broker King Amen Ra can verify your doctors and prescriptions in just a few minutes at zero cost. I have him available right now—let me introduce you so you can get your questions answered first-hand, okay?"
 4. CALLING HOURS & CONTINUOUS DIALING:
-   - Operate Monday through Friday, 9:00 AM to 7:00 PM local time (up to 1,000 calls per day), and continuously dial through the lead queue without stopping.
+   - Answer every inbound call immediately, 24 hours a day, 7 days a week.
+   - Outbound: call every prospect assigned to Bland AI Monday through Friday 9:00 AM to 7:00 PM and Saturday through Sunday 9:00 AM to 6:00 PM (Arizona time), up to 1,000 calls per day, continuously dialing the assigned queue without stopping.
 5. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}):
    - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER), do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
    - Use the Executive Alternative-Choice Appointment Close with {prospect_name}: "Because King Amen Ra is currently on a live consultation helping another family with their 2027 benefits, I want to reserve a dedicated one-on-one time for you on his private calendar so you receive his undivided attention. Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and would morning or afternoon work best for you?"
@@ -268,7 +272,10 @@ export async function getBlandConfig(): Promise<BlandConfig> {
     webhook_url: val.webhook_url || `${appConfig.appUrl}/api/bland/webhook`,
     calling_hours_start: val.calling_hours_start !== undefined ? Number(val.calling_hours_start) : 9,
     calling_hours_end: val.calling_hours_end !== undefined ? Number(val.calling_hours_end) : 19,
-    calling_days: val.calling_days || 'Mon-Fri',
+    weekend_calling_hours_start: val.weekend_calling_hours_start !== undefined ? Number(val.weekend_calling_hours_start) : 9,
+    weekend_calling_hours_end: val.weekend_calling_hours_end !== undefined ? Number(val.weekend_calling_hours_end) : 18,
+    calling_days: 'Mon-Fri 9:00 AM-7:00 PM · Sat-Sun 9:00 AM-6:00 PM (Arizona time)',
+    max_concurrent_calls: Math.min(Math.max(Number(val.max_concurrent_calls) || 3, 1), 10),
     daily_call_limit: Number(val.daily_call_limit) || 1000,
     pause_on_warm_transfer: val.pause_on_warm_transfer !== undefined ? Boolean(val.pause_on_warm_transfer) : true,
     is_calling_paused: isOnWarmTransfer,
@@ -302,6 +309,283 @@ export async function saveBlandConfig(partial: Partial<BlandConfig>): Promise<Bl
   );
 
   return merged;
+}
+
+/** Virtual CRM caller that owns every prospect assigned to the Bland AI autonomous dialer. */
+export const BLAND_AI_USER_ID = 'u_bland_ai';
+export const BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: 'Sarah — Bland AI Voice Agent', email: 'bland-ai@iwillglobal.com', role: 'scheduler' };
+
+// America/Phoenix is UTC-7 year-round (Arizona does not observe daylight saving time).
+const PHOENIX_OFFSET_MS = 7 * 3600 * 1000;
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function formatHourLabel(hour: number): string {
+  const h = Math.floor(hour);
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display}:00 ${h < 12 || h === 24 ? 'AM' : 'PM'}`;
+}
+
+function phoenixParts(now: Date = new Date()) {
+  const phx = new Date(now.getTime() - PHOENIX_OFFSET_MS);
+  return {
+    day: phx.getUTCDay(),
+    hour: phx.getUTCHours(),
+    minute: phx.getUTCMinutes(),
+    startOfDay: new Date(Date.UTC(phx.getUTCFullYear(), phx.getUTCMonth(), phx.getUTCDate()) + PHOENIX_OFFSET_MS),
+  };
+}
+
+function hoursForDay(cfg: Pick<BlandConfig, 'calling_hours_start' | 'calling_hours_end' | 'weekend_calling_hours_start' | 'weekend_calling_hours_end'>, day: number) {
+  const isWeekend = day === 0 || day === 6;
+  return {
+    isWeekend,
+    start: isWeekend ? cfg.weekend_calling_hours_start : cfg.calling_hours_start,
+    end: isWeekend ? cfg.weekend_calling_hours_end : cfg.calling_hours_end,
+  };
+}
+
+/**
+ * Outbound calling window (America/Phoenix):
+ *   Monday–Friday   9:00 AM – 7:00 PM
+ *   Saturday–Sunday 9:00 AM – 6:00 PM
+ * Inbound calls are always answered immediately, 24/7.
+ */
+export function getCallingWindow(
+  cfg: Pick<BlandConfig, 'calling_hours_start' | 'calling_hours_end' | 'weekend_calling_hours_start' | 'weekend_calling_hours_end'>,
+  now: Date = new Date(),
+) {
+  const p = phoenixParts(now);
+  const today = hoursForDay(cfg, p.day);
+  const nowMinutes = p.hour * 60 + p.minute;
+  const open = nowMinutes >= today.start * 60 && nowMinutes < today.end * 60;
+
+  let nextOpenLabel = '';
+  if (!open) {
+    if (nowMinutes < today.start * 60) {
+      nextOpenLabel = `Calling resumes today at ${formatHourLabel(today.start)} Arizona time.`;
+    } else {
+      const nextDay = (p.day + 1) % 7;
+      const next = hoursForDay(cfg, nextDay);
+      nextOpenLabel = `Calling resumes ${DAY_NAMES[nextDay]} at ${formatHourLabel(next.start)} Arizona time.`;
+    }
+  }
+
+  return {
+    open,
+    is_weekend: today.isWeekend,
+    today_start: today.start,
+    today_end: today.end,
+    today_label: `${DAY_NAMES[p.day]} ${formatHourLabel(today.start)} – ${formatHourLabel(today.end)}`,
+    schedule_label: `Mon–Fri ${formatHourLabel(cfg.calling_hours_start)}–${formatHourLabel(cfg.calling_hours_end)}, Sat–Sun ${formatHourLabel(cfg.weekend_calling_hours_start)}–${formatHourLabel(cfg.weekend_calling_hours_end)} Arizona time`,
+    next_open_label: nextOpenLabel,
+    start_of_day: p.startOfDay,
+  };
+}
+
+// Primary time zone per state, used to protect prospects from calls outside legal hours in THEIR local time.
+const STATE_TIMEZONES: Record<string, string> = {
+  AL: 'America/Chicago', AK: 'America/Anchorage', AZ: 'America/Phoenix', AR: 'America/Chicago', CA: 'America/Los_Angeles',
+  CO: 'America/Denver', CT: 'America/New_York', DE: 'America/New_York', DC: 'America/New_York', FL: 'America/New_York',
+  GA: 'America/New_York', HI: 'Pacific/Honolulu', ID: 'America/Boise', IL: 'America/Chicago', IN: 'America/Indiana/Indianapolis',
+  IA: 'America/Chicago', KS: 'America/Chicago', KY: 'America/New_York', LA: 'America/Chicago', ME: 'America/New_York',
+  MD: 'America/New_York', MA: 'America/New_York', MI: 'America/Detroit', MN: 'America/Chicago', MS: 'America/Chicago',
+  MO: 'America/Chicago', MT: 'America/Denver', NE: 'America/Chicago', NV: 'America/Los_Angeles', NH: 'America/New_York',
+  NJ: 'America/New_York', NM: 'America/Denver', NY: 'America/New_York', NC: 'America/New_York', ND: 'America/Chicago',
+  OH: 'America/New_York', OK: 'America/Chicago', OR: 'America/Los_Angeles', PA: 'America/New_York', RI: 'America/New_York',
+  SC: 'America/New_York', SD: 'America/Chicago', TN: 'America/Chicago', TX: 'America/Chicago', UT: 'America/Denver',
+  VT: 'America/New_York', VA: 'America/New_York', WA: 'America/Los_Angeles', WV: 'America/New_York', WI: 'America/Chicago',
+  WY: 'America/Denver',
+};
+// Latest permitted local hour (exclusive). Federal TCPA: 8 AM – 9 PM; Florida (FTSA): 8 AM – 8 PM.
+const STATE_LATEST_LOCAL_HOUR: Record<string, number> = { FL: 20 };
+
+/** True when the prospect's local time is within the legally permitted calling window (8 AM – 9 PM, or 8 PM in Florida). */
+export function isWithinRecipientCallingHours(state?: string | null, now: Date = new Date()): boolean {
+  const st = String(state || 'AZ').trim().toUpperCase();
+  const tz = STATE_TIMEZONES[st] || 'America/Phoenix';
+  try {
+    const hourPart = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' })
+      .formatToParts(now)
+      .find((p) => p.type === 'hour');
+    const localHour = Number(hourPart?.value ?? 12) % 24;
+    const latest = STATE_LATEST_LOCAL_HOUR[st] ?? 21;
+    return localHour >= 8 && localHour < latest;
+  } catch {
+    return true;
+  }
+}
+
+/** Count Bland AI outbound calls currently ringing / in progress (ignores stale records older than 20 minutes). */
+async function countActiveBlandCalls(): Promise<number> {
+  try {
+    const row = await one(
+      `SELECT count(*)::int AS cnt FROM activities
+       WHERE provider = 'bland_ai' AND type = 'call' AND status = 'In Progress'
+         AND created_at >= now() - interval '20 minutes'`
+    );
+    return row?.cnt || 0;
+  } catch {
+    return 0;
+  }
+}
+
+const BLAND_ASSIGNED_CALLABLE_SQL = `
+  FROM leads
+  WHERE (owner_id = '${BLAND_AI_USER_ID}' OR assigned_agent_id = '${BLAND_AI_USER_ID}')
+    AND COALESCE(dnc, false) = false
+    AND COALESCE(phone_invalid, false) = false
+    AND phone IS NOT NULL AND trim(phone) != ''
+    AND COALESCE(status, 'New') NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')
+    AND (
+      last_contacted_at IS NULL
+      OR last_contacted_at < $1
+      OR (next_callback_at IS NOT NULL AND next_callback_at <= now() AND last_contacted_at < next_callback_at)
+    )`;
+
+/** Number of Bland-assigned prospects still waiting to be called today. */
+export async function countBlandAssignedRemaining(startOfDay?: Date): Promise<{ assigned_total: number; remaining_today: number }> {
+  const sod = startOfDay || phoenixParts().startOfDay;
+  try {
+    const total = await one(
+      `SELECT count(*)::int AS cnt FROM leads WHERE owner_id = $1 OR assigned_agent_id = $1`,
+      [BLAND_AI_USER_ID]
+    );
+    const remaining = await one(`SELECT count(*)::int AS cnt ${BLAND_ASSIGNED_CALLABLE_SQL}`, [sod]);
+    return { assigned_total: total?.cnt || 0, remaining_today: remaining?.cnt || 0 };
+  } catch {
+    return { assigned_total: 0, remaining_today: 0 };
+  }
+}
+
+/** Short-lived lease so overlapping triggers (webhook, cron, heartbeat) never double-dial. */
+async function acquireDialerLease(seconds = 45): Promise<boolean> {
+  try {
+    const row = await one(
+      `INSERT INTO settings (key, value) VALUES ('bland_dialer_lease', jsonb_build_object('until', (now() + ($1 || ' seconds')::interval)::text))
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+       WHERE (settings.value->>'until')::timestamptz < now()
+       RETURNING key`,
+      [String(seconds)]
+    );
+    return Boolean(row);
+  } catch {
+    return true;
+  }
+}
+
+async function releaseDialerLease(): Promise<void> {
+  try {
+    await q(`UPDATE settings SET value = jsonb_build_object('until', (now() - interval '1 second')::text) WHERE key = 'bland_dialer_lease'`);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Autonomous Bland AI dialer tick. Safe to call as often as desired (webhook, cron, CRM heartbeat).
+ * While the campaign is active and the calling window is open, it keeps every line busy by dialing the
+ * next prospects assigned to Bland AI (one attempt per prospect per day, due callbacks first).
+ */
+export async function runBlandAutoDialerTick(opts: { reason?: string } = {}) {
+  const cfg = await getBlandConfig();
+  const callingWindow = getCallingWindow(cfg);
+  const base = {
+    ok: true,
+    reason: opts.reason || 'tick',
+    is_campaign_active: Boolean(cfg.is_campaign_active),
+    window_open: callingWindow.open,
+    calling_hours: callingWindow.schedule_label,
+    next_open: callingWindow.next_open_label,
+  };
+
+  if (!cfg.enabled || !cfg.is_campaign_active) {
+    return { ...base, dispatched: [] as any[], skipped: 'campaign_inactive' };
+  }
+  if (!callingWindow.open) {
+    return { ...base, dispatched: [] as any[], skipped: 'outside_calling_hours' };
+  }
+
+  const callsToday = await getCallsTodayCount();
+  const dailyLimit = cfg.daily_call_limit || 1000;
+  if (callsToday >= dailyLimit) {
+    return { ...base, dispatched: [] as any[], skipped: 'daily_limit_reached' };
+  }
+
+  if (!(await acquireDialerLease())) {
+    return { ...base, dispatched: [] as any[], skipped: 'tick_in_progress' };
+  }
+
+  const dispatched: any[] = [];
+  let lastError: string | null = null;
+  try {
+    const activeCalls = await countActiveBlandCalls();
+    const slots = Math.max(0, Math.min(cfg.max_concurrent_calls, dailyLimit - callsToday) - activeCalls);
+    if (slots === 0) {
+      return { ...base, dispatched, active_calls: activeCalls, skipped: 'all_lines_busy' };
+    }
+
+    const candidates = await q(
+      `SELECT * ${BLAND_ASSIGNED_CALLABLE_SQL}
+       ORDER BY (next_callback_at IS NOT NULL AND next_callback_at <= now()) DESC,
+                score DESC NULLS LAST,
+                COALESCE(attempts, 0) ASC,
+                created_at ASC
+       LIMIT 100`,
+      [callingWindow.start_of_day]
+    );
+
+    for (const lead of candidates) {
+      if (dispatched.length >= slots) break;
+      if (!isWithinRecipientCallingHours(lead.state)) continue;
+
+      // Atomically claim the prospect so concurrent triggers can never dial the same person twice.
+      const claimed = await one(
+        `UPDATE leads SET last_contacted_at = now()
+         WHERE id = $1 AND (last_contacted_at IS NULL OR last_contacted_at < now() - interval '15 minutes')
+         RETURNING id`,
+        [lead.id]
+      );
+      if (!claimed) continue;
+
+      try {
+        const res = await sendBlandCall({
+          phone: lead.phone,
+          related_type: 'lead',
+          related_id: lead.id,
+          prospect_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Valued Beneficiary',
+          state: lead.state || 'AZ',
+          user: BLAND_AI_USER,
+          override_pause: false,
+        });
+        dispatched.push({
+          lead_id: lead.id,
+          lead_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),
+          phone: lead.phone,
+          call_id: res.call_id,
+          simulated: res.simulated,
+        });
+      } catch (err: any) {
+        // Release the claim so the prospect is retried later.
+        await q(`UPDATE leads SET last_contacted_at = $2 WHERE id = $1`, [lead.id, lead.last_contacted_at || null]).catch(() => {});
+        lastError = err?.message || 'Bland AI dispatch failed';
+        console.error(`Bland auto-dialer failed for lead ${lead.id}:`, lastError);
+        // Invalid phone numbers are skipped; account/API/hours errors stop this tick to avoid burning through the queue.
+        if (err?.status !== 400) break;
+      }
+    }
+
+    const remaining = await countBlandAssignedRemaining(callingWindow.start_of_day);
+    return {
+      ...base,
+      dispatched,
+      active_calls: activeCalls + dispatched.length,
+      assigned_total: remaining.assigned_total,
+      remaining_today: remaining.remaining_today,
+      last_error: lastError,
+    };
+  } finally {
+    await releaseDialerLease();
+  }
 }
 
 /**
@@ -358,18 +642,13 @@ export async function canDispatchOutboundCall(override = false): Promise<{
     };
   }
 
-  // Check Mon-Fri 9:00 AM - 7:00 PM America/Phoenix
-  const nowPhoenix = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' }));
-  const day = nowPhoenix.getDay(); // 0 = Sun, 6 = Sat
-  const hour = nowPhoenix.getHours();
+  // Check calling window: Mon-Fri 9:00 AM - 7:00 PM, Sat-Sun 9:00 AM - 6:00 PM (America/Phoenix)
+  const callingWindow = getCallingWindow(cfg);
 
-  const isWeekday = day >= 1 && day <= 5;
-  const isWithinHours = hour >= (cfg.calling_hours_start || 9) && hour < (cfg.calling_hours_end || 19);
-
-  if ((!isWeekday || !isWithinHours) && !override) {
+  if (!callingWindow.open && !override) {
     return {
       allowed: false,
-      reason: `🕘 Outside Bland AI calling window (Monday–Friday, 9:00 AM – 7:00 PM MST). Pass override=true to test outside hours.`,
+      reason: `🕘 Outside Bland AI outbound calling hours (${callingWindow.schedule_label}). ${callingWindow.next_open_label}`,
       calls_today: callsToday,
       daily_limit: limit,
       is_paused: false,
@@ -718,7 +997,7 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
   };
 
   // Verify calling window & daily limit (Note: warm transfer active does NOT block calling; it switches to Appointment-Only Mode!)
-  const gate = await canDispatchOutboundCall(Boolean(opts.override_pause ?? true));
+  const gate = await canDispatchOutboundCall(Boolean(opts.override_pause ?? false));
   if (!gate.allowed) {
     throw Object.assign(new Error(gate.reason || 'Outbound calling is currently outside window or at limit'), {
       status: 409,
@@ -948,14 +1227,31 @@ export async function stopBlandOutboundCalls(params?: {
       }
     }
     if (params?.stop_all !== false) {
+      // Stop ONLY the outbound calls the CRM dispatched — never the account-wide active-call stop,
+      // so inbound callers being answered by Sarah are never disconnected.
       try {
-        const r = await fetch('https://api.bland.ai/v1/calls/active/stop', {
-          method: 'POST',
-          headers: { 'Authorization': config.api_key.trim() },
-        });
-        if (r.ok) stoppedAllLiveCalls = true;
+        const activeRows = await q(
+          `SELECT meta->>'bland_call_id' AS bland_call_id FROM activities
+           WHERE provider = 'bland_ai' AND type = 'call' AND status = 'In Progress'
+             AND created_at >= now() - interval '2 hours'`
+        );
+        let stoppedCount = 0;
+        for (const row of activeRows) {
+          const cid = row.bland_call_id;
+          if (!cid || cid.startsWith('bland_sim_') || cid === params?.call_id) continue;
+          try {
+            const r = await fetch(`https://api.bland.ai/v1/calls/${encodeURIComponent(cid)}/stop`, {
+              method: 'POST',
+              headers: { 'Authorization': config.api_key.trim() },
+            });
+            if (r.ok) stoppedCount++;
+          } catch {
+            // ignore network error for this call
+          }
+        }
+        stoppedAllLiveCalls = stoppedCount > 0 || activeRows.length === 0;
       } catch {
-        // ignore network error
+        // ignore lookup error
       }
     }
   }
@@ -1221,22 +1517,14 @@ export async function handleBlandWebhook(payload: any) {
     }
   }
 
-  // CONTINUOUS DIALING: If autonomous campaign is active in the CRM, automatically dispatch the next call in the queue!
-  const currentCfg = await getBlandConfig();
+  // CONTINUOUS DIALING: the moment a call ends, immediately dial the next prospect assigned to Bland AI
+  // (respects Mon–Fri 9–7 / Sat–Sun 9–6 Arizona hours, daily limit and concurrent-line limit).
   let nextDispatched: any = null;
-  if (currentCfg.is_campaign_active) {
-    const userRow = await one(`SELECT id, name, email, role FROM users WHERE id=$1`, [userId]) ||
-      { id: 'u_principal', name: 'King Amen Ra', email: 'king@iwillglobal.com', role: 'admin' };
-    const nextBatch = await dispatchNextLeadInQueue({
-      user: userRow,
-      count: 1,
-      override: false,
-    }).catch(() => ({ dispatched: [], remaining: 0 }));
-    if (nextBatch.dispatched.length > 0) {
-      nextDispatched = nextBatch.dispatched[0];
-    } else if (nextBatch.remaining === 0) {
-      await saveBlandConfig({ is_campaign_active: false });
-    }
+  try {
+    const tick = await runBlandAutoDialerTick({ reason: 'call_completed' });
+    nextDispatched = tick.dispatched?.[0] || null;
+  } catch (err: any) {
+    console.error('Bland auto-dialer (webhook) error:', err?.message);
   }
 
   const { publish } = await import('../realtime.ts');
