@@ -459,7 +459,19 @@
                     "transferType": "phone",
                     "useAudioExtraction": false,
                     "useStaticText": true,
-                    "variables": []
+                    "variables": [],
+                    "warmTransfer": {
+                      "agentPrompt": "",
+                      "agentPromptStatic": false,
+                      "enabled": false,
+                      "fromNumber": "",
+                      "holdMusicUrl": "",
+                      "mergePrompt": "",
+                      "mergePromptStatic": false,
+                      "optimizeForIVR": true,
+                      "timeout": null,
+                      "voicemailMessage": ""
+                    }
                   },
                   "id": "09f17a30-4e2f-4b3a-8c1e-34b8a9910002",
                   "position": {
