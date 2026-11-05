@@ -12,7 +12,7 @@ export interface PublicDirectoryMember {
 const FALLBACK_TEAM_DIRECTORY: PublicDirectoryMember[] = [
   // Executive & Principal Leadership
   { name: 'King Amen Ra', role: 'Principal & Broker of Record (NPN: 16094432)', department: 'Executive & Governance', phone: '(602) 456-9681', e164: '+16024569681' },
-  { name: 'Aneesha Sullivan', role: 'Chief Operating Officer (COO) & Principal Governance', department: 'Executive & Governance', phone: '(602) 412-1945', e164: '+16024121945' },
+  { name: 'Aneesha Sullivan, PA', role: 'Chief Operating Officer (COO), Physician Assistant (PA) & Principal Governance', department: 'Executive & Governance', phone: '(602) 412-1945', e164: '+16024121945' },
   { name: 'Sarah Jenkins', role: 'Sales Director', department: 'Executive & Governance', phone: '(480) 331-9401', e164: '+14803319401' },
   { name: 'Marcus Vance', role: 'Inbound & Scheduling Manager', department: 'Executive & Governance', phone: '(480) 331-9402', e164: '+14803319402' },
   { name: 'Licensed Transfer Agent', role: 'Main Transfer Desk & Master Calendar', department: 'Executive & Governance', phone: '(480) 331-9455', e164: '+14803319455' },

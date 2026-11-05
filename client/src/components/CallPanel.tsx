@@ -524,28 +524,28 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                 <strong>🛡️ CMS / TPMO Disclaimer:</strong> "{tpmo}"
               </div>
 
-              {/* Step 1: Sarah Unified Opening Greeting & 2027 Changes Question */}
+              {/* Step 1: World-Class Opening Greeting & 2027 Value Hook */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid var(--accent)' }}>
                 <div style={{ fontWeight: 800, color: 'var(--accent)', marginBottom: '0.4rem', fontSize: '0.92rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
-                  <span>Step 1: Unified Opening Greeting & 2027 Changes Script</span>
+                  <span>Step 1: World-Class Opening Greeting & 2027 Value Hook</span>
                   <span className="badge badge-gold" style={{ fontSize: '0.68rem' }}>AUTO AI WHISPER FOR ALL</span>
                 </div>
                 <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5, fontWeight: 700, color: '#fff' }}>
-                  "Hello <strong>{contact.name || 'Beneficiary'}</strong>, this is <strong>{user?.name || 'Sarah'}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+                  "Hello <strong>{contact.name || 'Beneficiary'}</strong>, this is <strong>{user?.name || 'Sarah'}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?"
                 </p>
                 <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5, fontWeight: 700, color: '#f8fafc' }}>
-                  "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Medicare plans."
+                  "I’m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees—and our clinical and benefits governance is led by our Principal Broker, <strong>King Amen Ra</strong>, and our Chief Operating Officer, <strong>Aneesha Sullivan, PA</strong>."
                 </p>
-                <p style={{ margin: '0 0 0.5rem', fontWeight: 800, color: '#6ee7b7', fontSize: '0.96rem', lineHeight: 1.5 }}>
-                  "Would you like to know about the changes for 2027?"
+                <p style={{ margin: '0 0 0.5rem', fontWeight: 800, color: '#6ee7b7', fontSize: '0.95rem', lineHeight: 1.5 }}>
+                  "To make sure you have the most accurate information for your healthcare and budget, would you like to hear how the <strong>2027 Medicare changes</strong> can lower your out-of-pocket costs and protect your doctor and prescription coverage?"
                 </p>
                 <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: '#e0ac53', lineHeight: 1.5 }}>
-                  "For 2027, Part A has a $0 premium ($1,788 hospital deductible), Part B is $209.50/month ($292 deductible, uncapped 20% coinsurance), and Part D caps out-of-pocket drug costs at $2,400/year ($35 insulin, $0 adult vaccines). We compare Medigap Plan G, Plan N, and Medicare Advantage side-by-side. Would you like a personalized plan comparison or quote with our Principal Broker, <strong>King Amen Ra</strong>?"
+                  "Original Medicare leaves a $1,788 hospital deductible and uncapped 20% coinsurance, while 2027 Part D caps drug costs at $2,400/year ($35 insulin, $0 adult vaccines). We run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage side-by-side. Our Principal Broker <strong>King Amen Ra</strong> is available right now—let me introduce you so you can get your questions answered first-hand, okay?"
                 </p>
 
                 <div style={{ background: 'rgba(59,130,246,0.12)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #3b82f6', marginTop: '0.5rem' }}>
                   <p style={{ margin: '0 0 0.4rem', fontWeight: 700, color: '#60a5fa' }}>
-                    👉 Path A — Automatic AI Whisper Warm Transfer (Enabled for All Callers & All Directory Members):
+                    👉 Path A — VIP Concierge Automatic AI Whisper Transfer (Enabled for All Callers & All Directory Members):
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.85rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -561,20 +561,20 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                       </button>
                     </div>
                     <div style={{ paddingLeft: '0.65rem', color: '#cbd5e1', lineHeight: 1.45, fontStyle: 'italic' }}>
-                      <strong>Say to Prospect:</strong> "I am connecting you right now directly with King Amen Ra, our Principal Broker and Licensed Senior Advisor. Please stay on the line for just a moment while our AI whispers a quick briefing to him and bridges your call."<br />
-                      <strong>🤖 Automatic AI Whisper (Spoken by Sarah AI):</strong> "Hi King Amen Ra, this is Sarah AI whispering automatically on behalf of {user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have {contact.name || 'our prospect'} on hold asking about the 2027 Medicare changes and plan review. Merging the call automatically now so you can take over!"
+                      <strong>Say to Prospect:</strong> "Wonderful, {contact.name || 'my friend'}. I am bringing our Principal Broker and Licensed Senior Advisor, King Amen Ra, onto the line for you right now. I’m going to share your notes with him first so you don't have to repeat yourself—please stay with me for just 15 seconds."<br />
+                      <strong>🤖 Automatic AI Whisper (Spoken by Sarah AI):</strong> "Hi King Amen Ra, this is Sarah AI whispering automatically on behalf of {user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. We have {contact.name || 'our prospect'} on the line—they are interested in reviewing the 2027 Medicare changes and verifying their doctors and prescriptions. Bridging you in now!"
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Step 2: Path B — When King is on a Warm Transfer Call (Or Prospect Prefers to Schedule) */}
+              {/* Step 2: Path B — Executive Alternative-Choice Appointment Close */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid #10b981' }}>
                 <div style={{ fontWeight: 700, color: '#34d399', marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                  Step 2: When King Amen Ra is on a Warm Transfer Call (Book Telephone, In-Person, or Video Only)
+                  Step 2: Executive Alternative-Choice Appointment Close (When King is on a Warm Transfer)
                 </div>
                 <p style={{ margin: '0 0 0.5rem', lineHeight: 1.5 }}>
-                  👉 "King Amen Ra, our Principal Broker and Licensed Senior Advisor, is currently on a live warm transfer call helping another client right now, so I will get you scheduled right on his calendar. Would you prefer a <strong>Telephone appointment (30 minutes)</strong>, an <strong>In-Person appointment (60 minutes)</strong>, or a <strong>Video appointment (30 minutes)</strong> with King Amen Ra?"
+                  👉 "Because <strong>King Amen Ra</strong> is currently on a live consultation helping another family with their 2027 benefits, I want to reserve a dedicated one-on-one time for you on his private calendar so you receive his undivided attention. Do you prefer a <strong>30-minute Telephone consultation</strong>, a <strong>60-minute In-Person visit</strong>, or a <strong>30-minute Video consultation</strong>—and would <strong>morning or afternoon</strong> work best for you?"
                 </p>
                 <button
                   type="button"
@@ -592,17 +592,18 @@ export const CallPanel: React.FC<CallPanelProps> = ({ contact, onClose, onCallCo
                   Step 3: Confirm Appointment & Continue Calling
                 </div>
                 <p style={{ margin: 0, lineHeight: 1.5 }}>
-                  "Wonderful! I have your <strong>[Telephone / In-Person / Video]</strong> appointment confirmed with Principal Broker <strong>King Amen Ra</strong> on our calendar. I am sending you a quick confirmation text right now—please reply <strong>YES</strong> to hold that time, and have your doctors and prescription list handy!"
+                  "Wonderful! I have reserved your <strong>[Telephone / In-Person / Video]</strong> consultation with Principal Broker <strong>King Amen Ra</strong> on our calendar. I am sending you a quick confirmation text right now—please reply <strong>YES</strong> to hold that time, and have your doctors and prescription list handy so we can prepare your custom 2027 comparison in advance!"
                 </p>
               </div>
 
-              {/* Step 4: Sarah Rebuttals */}
+              {/* Step 4: Empathy-First Fiduciary Rebuttals */}
               <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '10px', borderLeft: '4px solid #f59e0b' }}>
                 <div style={{ fontWeight: 700, color: '#f59e0b', marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                  Step 4: Sarah's Fiduciary Rebuttals
+                  Step 4: Empathy-First Fiduciary Rebuttals (99% Conversion Architecture)
                 </div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  <strong>"I'm happy with my plan":</strong> "Staying right where you are may be the best choice! Because we are a 100% free fiduciary advisory representing 104+ carriers with zero broker fees, our review simply verifies your doctors and prescriptions are covered at the lowest cost for 2027."
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <div><strong>• "I'm happy with my plan":</strong> "I love hearing that, and our goal is never to move you if your current plan is still the #1 option for you. Our free 5-minute fiduciary audit simply confirms in writing that your doctors and prescriptions are covered at the lowest cost for 2027—and if it does, we tell you to stay right where you are."</div>
+                  <div><strong>• "How much does this cost?":</strong> "There is never a fee, markup, or obligation—ever. You pay the exact same federally regulated rate whether you shop alone or have Principal Broker King Amen Ra and COO Aneesha Sullivan, PA advocate for you year-round for free."</div>
                 </div>
               </div>
 

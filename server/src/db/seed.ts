@@ -51,7 +51,7 @@ export async function ensureSeeded(force = false) {
     { id: 'u_admin', name: 'Licensed Transfer Agent', email: 'admin@iwillglobal.com', role: 'admin', title: 'Licensed Transfer Agent & Principal', phone: '(480) 331-9455', npn: '19842011', states: ['AZ', 'CA', 'NV', 'TX', 'FL', 'NM', 'CO'] },
     { id: 'u_transfer_agent', name: 'Licensed Transfer Agent', email: 'transfer@iwillglobal.com', role: 'licensed_agent', title: 'State-Licensed Medicare Transfer Specialist', phone: '(480) 331-9455', npn: '19842011', states: ['AZ', 'CA', 'NV', 'TX', 'FL', 'NM', 'CO'] },
     { id: 'u_info_cal', name: 'I Will Global Master Calendar', email: 'info@iwillglobal.com', role: 'admin', title: 'Agency Master Calendar & Operations', phone: '(480) 331-9455', states: ['AZ', 'CA', 'NV', 'TX', 'FL', 'NM', 'CO'] },
-    { id: 'u_coo_aneesha', name: 'Aneesha Sullivan', email: 'aneesha@iwillglobal.com', role: 'admin', title: 'Chief Operating Officer (COO) & Principal Governance', phone: '(602) 412-1945', npn: '19842012', states: ['AZ', 'CA', 'NV', 'TX', 'FL', 'NM', 'CO'] },
+    { id: 'u_coo_aneesha', name: 'Aneesha Sullivan, PA', email: 'aneesha@iwillglobal.com', role: 'admin', title: 'Chief Operating Officer (COO), Physician Assistant (PA) & Principal Governance', phone: '(602) 412-1945', npn: '19842012', states: ['AZ', 'CA', 'NV', 'TX', 'FL', 'NM', 'CO'] },
     { id: 'u_mgr1', name: 'Sarah Jenkins', email: 'sjenkins@iwillglobal.com', role: 'manager', title: 'Sales Director', phone: '(480) 331-9401', npn: '18923012', states: ['AZ', 'CA', 'NV'] },
     { id: 'u_mgr2', name: 'Marcus Vance', email: 'mvance@iwillglobal.com', role: 'manager', title: 'Inbound & Scheduling Manager', phone: '(480) 331-9402', npn: '17849203', states: ['AZ', 'TX', 'NM'] },
 
@@ -145,8 +145,8 @@ export async function ensureSeeded(force = false) {
             });
           }
         }
-      } else if (u.id === 'u_sch1') {
-        await q("UPDATE users SET role='admin', title='Chief Operating Officer (COO) & Admin', npn='19842012', states=$1::jsonb WHERE id='u_sch1'", [JSON.stringify(u.states)]);
+      } else if (u.id === 'u_sch1' || u.id === 'u_coo_aneesha' || u.email === 'aneesha@iwillglobal.com') {
+        await q("UPDATE users SET name='Aneesha Sullivan, PA', role='admin', title='Chief Operating Officer (COO), Physician Assistant (PA) & Principal Governance', npn='19842012', states=$1::jsonb WHERE id IN ('u_sch1', 'u_coo_aneesha') OR lower(email)='aneesha@iwillglobal.com'", [JSON.stringify(u.states)]);
       }
     }
   }

@@ -177,9 +177,9 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
 
-  const whisperBriefingText = `Hi ${selectedAgent?.name || 'King Amen Ra'}, this is Sarah AI whispering automatically on behalf of ${user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${contactName} from ${contactState} on hold on Line 1 asking about the 2027 Medicare changes and plan review${briefingNotes ? ` (${briefingNotes})` : ''}. Merging the call automatically now so you can take over!`;
+  const whisperBriefingText = `Hi ${selectedAgent?.name || 'King Amen Ra'}, this is Sarah AI whispering automatically on behalf of ${user?.name || 'Sarah'} with the Medicare Helpline powered by IWG Insurance and Financial Services. We have ${contactName} in ${contactState} on the line—they are interested in reviewing the 2027 Medicare changes and verifying their doctors and prescriptions${briefingNotes ? ` (${briefingNotes})` : ''}. Bridging you in now!`;
 
-  const mergeIntroText = `Thank you so much for holding, ${contactFirstName}! I now have ${selectedAgent?.name || 'King Amen Ra'} with IWG Insurance and Financial Services right here on the line with both of us. ${selectedAgent?.name || 'King'}, Sarah AI has automatically whispered a briefing on ${contactName}'s 2027 coverage review in ${contactState}, so I will step back and let you two take it from here!`;
+  const mergeIntroText = `Thank you so much for your patience, ${contactFirstName}! It is my pleasure to introduce ${selectedAgent?.name || 'King Amen Ra'} with IWG Insurance and Financial Services. ${selectedAgent?.name?.split(' ')[0] || 'King'}, I have shared ${contactName}'s information with you so they are in the very best hands. ${contactFirstName}, it has been a privilege speaking with you today—${selectedAgent?.name?.split(' ')[0] || 'King'} will take wonderful care of you from here!`;
 
   const handleInitiateTransfer = async () => {
     if (!activeContact || !activeContact.id) {

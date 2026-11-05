@@ -65,8 +65,8 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
   const displayName = clientName && clientName !== '[Client Name]' ? clientName : 'Beneficiary';
   const agentName = user?.name || 'Sarah';
 
-  const whisperScriptText = `Hi King Amen Ra, this is Sarah AI whispering automatically on behalf of ${agentName} with the Medicare Helpline powered by IWG Insurance and Financial Services. I have ${displayName} on the line asking about the 2027 Medicare changes and plan review. Merging the call automatically now so you can take over!`;
-  const mergeScriptText = `Thank you so much for holding, ${displayName}! I now have King Amen Ra, our Principal Broker and Licensed Senior Advisor at IWG Insurance and Financial Services, right here on the line with both of us. King, Sarah AI has automatically whispered the briefing on ${displayName}'s 2027 Medicare coverage goals, so I will step back and let you two take it from here!`;
+  const whisperScriptText = `Hi King Amen Ra, this is Sarah AI whispering automatically on behalf of ${agentName} with the Medicare Helpline powered by IWG Insurance and Financial Services. We have ${displayName} on the line—they are interested in reviewing the 2027 Medicare changes and verifying their doctors and prescriptions. Bridging you in now!`;
+  const mergeScriptText = `Thank you so much for your patience, ${displayName}! It is my pleasure to introduce King Amen Ra, our Principal Broker at IWG Insurance and Financial Services. King, I have shared ${displayName}'s information with you so they are in the very best hands. ${displayName}, it has been a privilege speaking with you today—King will take wonderful care of you from here!`;
 
   const speakAiWhisperAutomatically = (textToSpeak: string) => {
     try {
@@ -330,37 +330,37 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Step 1: Required Opening Greeting & 2027 Changes Script (Unified for All Callers & Sarah AI)
+                  Step 1: World-Class Opening Greeting & 2027 Value Hook (Unified for All Callers & Sarah AI)
                 </h4>
 
                 <div style={{ fontSize: '0.92rem', lineHeight: 1.6, color: '#e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ background: 'rgba(200,150,62,0.12)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #c8963e' }}>
                     <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#ffd88a', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                      1. Mandatory Opening Sentence (Word-for-Word):
+                      1. Warm Opening Greeting (Line 1):
                     </div>
                     <p style={{ margin: '0 0 0.35rem', fontWeight: 700, color: '#fff', fontSize: '0.96rem' }}>
-                      "Hello <strong>{displayName}</strong>, this is <strong>{agentName}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+                      "Hello <strong>{displayName}</strong>, this is <strong>{agentName}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you doing today?"
                     </p>
                     <div style={{ fontSize: '0.76rem', color: '#cbd5e1', fontStyle: 'italic' }}>
-                      Template: "Hello [Prospect Name], this is [Caller Name / Sarah] calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+                      Inbound Receptionist Greeting: "Thank you for calling IWG Insurance and Financial Services. This is Sarah—it is a pleasure to assist you today. How may I direct your call?"
                     </div>
                   </div>
 
                   <div style={{ background: 'rgba(255,255,255,0.03)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #38bdf8' }}>
                     <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                      2. Fiduciary Value Statement:
+                      2. Empathy Bridge + Clinical & Fiduciary Authority:
                     </div>
                     <p style={{ margin: 0, fontWeight: 700, color: '#fff', fontSize: '0.95rem' }}>
-                      "We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate information about Medicare plans."
+                      "I’m so glad we connected. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees—and our clinical and benefits governance is led by our Principal Broker, <strong>King Amen Ra</strong>, and our Chief Operating Officer, <strong>Aneesha Sullivan, PA</strong>."
                     </p>
                   </div>
 
                   <div style={{ background: 'rgba(16,185,129,0.12)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
                     <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#34d399', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                      3. 2027 Changes Question & Automatic AI Whisper Transfer:
+                      3. High-Conversion 2027 Value Question & Automatic AI Whisper Transfer:
                     </div>
                     <p style={{ margin: '0 0 0.6rem', fontWeight: 800, color: '#6ee7b7', fontSize: '1.02rem' }}>
-                      "Would you like to know about the changes for 2027?"
+                      "To make sure you have the most accurate information for your healthcare and budget, would you like to hear how the <strong>2027 Medicare changes</strong> can lower your out-of-pocket costs and protect your doctor and prescription coverage?"
                     </p>
                     <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
                       <button
@@ -402,42 +402,40 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                   onClick={() => setActiveStep(4)}
                   style={{ padding: '0.85rem', fontWeight: 700, fontSize: '0.9rem', borderColor: '#ef4444', color: '#f87171' }}
                 >
-                  💡 All 6 Divisions & Objection Rebuttals
+                  💡 All 6 Divisions & Empathy-First Rebuttals
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 2: SARAH'S 2027 MEDICARE COST STANDARDS & PLAN COMPARISON */}
+          {/* STEP 2: 3-POINT HIGH-IMPACT 2027 MEDICARE SUMMARY & ASSUMPTIVE CLOSE */}
           {activeStep === 2 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Step 2: Sarah's 2027 Medicare Cost Standards & Plan Comparison Script
+                  Step 2: 3-Point High-Impact 2027 Medicare Summary & Assumptive Close
                 </h4>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.88rem', color: '#e2e8f0', lineHeight: 1.55 }}>
                   <div style={{ background: '#16244d', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #c8963e' }}>
-                    <strong style={{ color: '#ffd88a' }}>🏥 2027 Original Medicare (Parts A & B) Cost Standards:</strong>
-                    <ul style={{ margin: '0.4rem 0 0 1.2rem', padding: 0 }}>
-                      <li><strong>Part A (Hospital):</strong> <strong>$0/month premium</strong> for 99%+ of beneficiaries; <strong>$1,788</strong> inpatient hospital deductible per benefit period.</li>
-                      <li><strong>Part B (Medical):</strong> <strong>$209.50/month</strong> projected standard premium; <strong>$292</strong> annual deductible; <strong>20% coinsurance with NO annual out-of-pocket maximum cap</strong> on Original Medicare alone.</li>
-                      <li><strong>Part D (Prescription Drugs):</strong> <strong>$2,400</strong> annual out-of-pocket maximum cap; <strong>$700</strong> maximum deductible; <strong>$35/month</strong> insulin cap; <strong>$0</strong> adult ACIP-recommended vaccines.</li>
-                    </ul>
+                    <strong style={{ color: '#ffd88a' }}>1. The Exposure (Why We Review Every Year):</strong>
+                    <p style={{ margin: '0.35rem 0 0' }}>
+                      "Original Medicare Part A (<strong>$0/month premium</strong> for 99%+ of beneficiaries) has a <strong>$1,788</strong> hospital deductible, and Part B (<strong>$209.50/month</strong> projected premium, <strong>$292</strong> annual deductible) leaves an <strong>uncapped 20% medical coinsurance with no annual out-of-pocket limit</strong>."
+                    </p>
                   </div>
 
                   <div style={{ background: '#16244d', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #38bdf8' }}>
-                    <strong style={{ color: '#38bdf8' }}>🛡️ Medigap Supplement (Plan G vs. Plan N) vs. Medicare Advantage (Part C):</strong>
-                    <p style={{ margin: '0.4rem 0 0' }}>
-                      "Because Original Medicare leaves an uncapped 20% exposure, we compare your two main protection paths side-by-side:<br />
-                      • <strong>Medigap Plan G:</strong> Covers 100% of Medicare-approved gaps after the $292 Part B deductible with nationwide freedom to visit any doctor or hospital that accepts Medicare—no networks and no referrals.<br />
-                      • <strong>Medigap Plan N:</strong> Lower monthly premium in exchange for modest copays (up to $20 doctor / $50 ER).<br />
-                      • <strong>Medicare Advantage (Part C) & Special Needs Plans (D-SNP, C-SNP, I-SNP):</strong> All-in-one plans that bundle Part A, Part B, and Part D with a built-in Maximum Out-of-Pocket cap and extra dental, vision, hearing, and OTC benefits."
+                    <strong style={{ color: '#38bdf8' }}>2. The 2027 Prescription Protection & 104+ Carrier Solution:</strong>
+                    <p style={{ margin: '0.35rem 0 0' }}>
+                      "For 2027, Part D caps your annual out-of-pocket prescription costs at <strong>$2,400</strong> with a <strong>$35/month insulin cap</strong> and <strong>$0 adult vaccines</strong>—but carrier drug formularies change every January. That is why we run a complimentary 5-minute check across <strong>104+ premier carriers</strong>—comparing <strong>Medigap Plan G</strong>, <strong>Plan N</strong>, and <strong>Medicare Advantage (Part C & D-SNP/C-SNP)</strong> side-by-side—to ensure your exact doctors and medications are covered at the lowest possible cost."
                     </p>
                   </div>
 
                   <div style={{ background: 'rgba(16,185,129,0.14)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981', color: '#6ee7b7', fontWeight: 700 }}>
-                    👉 Closing Question (Say This): "Would you like a personalized plan comparison or quote with our Principal Broker, King Amen Ra, right now?"
+                    👉 3. Assumptive Micro-Commitment Close (Say This):
+                    <div style={{ marginTop: '0.25rem', color: '#ffffff', fontStyle: 'italic' }}>
+                      "To make this completely effortless for you, <strong>{displayName}</strong>, our Principal Broker <strong>King Amen Ra</strong> can verify your doctors and prescriptions in just a few minutes at zero cost. I have him available right now—let me introduce you so you can get your questions answered first-hand, okay?"
+                    </div>
                   </div>
                 </div>
               </div>
@@ -447,11 +445,12 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                   className="btn btn-accent"
                   onClick={() => {
                     setActiveStep(3);
+                    speakAiWhisperAutomatically(whisperScriptText);
                     setIsWarmTransferOpen(true);
                   }}
                   style={{ flex: 1, padding: '0.85rem', fontWeight: 800, fontSize: '0.92rem' }}
                 >
-                  ⚡ Launch Whisper Warm Transfer to King Amen Ra →
+                  ⚡ Launch Automatic AI Whisper Transfer to King Amen Ra →
                 </button>
                 <button
                   className="btn btn-primary"
@@ -471,12 +470,15 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
               <div style={{ backgroundColor: '#111c3a', border: '2px solid #c8963e', borderRadius: '12px', padding: '1.25rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
                   <h4 style={{ color: '#ffd88a', margin: 0, fontSize: '1rem', fontWeight: 800 }}>
-                    Path A — When King Amen Ra is Available: Live Whisper Warm Transfer ((602) 456-9681)
+                    Path A — VIP Concierge Automatic AI Whisper Transfer ((602) 456-9681)
                   </h4>
                   <button
                     type="button"
                     className="btn btn-accent"
-                    onClick={() => setIsWarmTransferOpen(true)}
+                    onClick={() => {
+                      speakAiWhisperAutomatically(whisperScriptText);
+                      setIsWarmTransferOpen(true);
+                    }}
                     style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem', fontWeight: 800 }}
                   >
                     ⚡ Open 3-Way Whisper Transfer Modal
@@ -486,30 +488,40 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.88rem', color: '#e2e8f0' }}>
                   <div style={{ background: '#16244d', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #38bdf8' }}>
                     <div style={{ fontWeight: 800, color: '#38bdf8', fontSize: '0.78rem', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
-                      1. Say to {displayName} Before Placing on Hold:
+                      1. Say to {displayName} Before Placing on Hold (VIP Concierge Framing):
                     </div>
                     <em>
-                      "I am connecting you right now directly with <strong>King Amen Ra</strong>, our Principal Broker and Licensed Senior Advisor. Please stay on the line for just a moment while I whisper a quick briefing to him and bridge your call."
+                      "Wonderful, <strong>{displayName}</strong>. I am bringing our Principal Broker and Licensed Senior Advisor, <strong>King Amen Ra</strong>, onto the line for you right now. I’m going to share your notes with him first so you don't have to repeat yourself—please stay with me for just 15 seconds."
                     </em>
                   </div>
 
                   <div style={{ background: 'rgba(200,150,62,0.14)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #c8963e' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem', flexWrap: 'wrap', gap: '0.35rem' }}>
                       <div style={{ fontWeight: 800, color: '#ffd88a', fontSize: '0.8rem', textTransform: 'uppercase' }}>
-                        2. 🤫 Whisper Transfer Briefing to King Amen Ra on Line 2 ((602) 456-9681):
+                        2. 🤖 Automatic AI Whisper Briefing to King Amen Ra on Line 2 ((602) 456-9681):
                       </div>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={() => {
-                          navigator.clipboard.writeText(whisperScriptText);
-                          setCopiedWhisper(true);
-                          setTimeout(() => setCopiedWhisper(false), 2000);
-                        }}
-                        style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', fontWeight: 700 }}
-                      >
-                        {copiedWhisper ? '✅ Copied Whisper!' : '📋 Copy Whisper Script'}
-                      </button>
+                      <div style={{ display: 'flex', gap: '0.35rem' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => speakAiWhisperAutomatically(whisperScriptText)}
+                          style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', fontWeight: 800, background: '#10b981', borderColor: '#059669' }}
+                        >
+                          🔊 AI Speak Whisper
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => {
+                            navigator.clipboard.writeText(whisperScriptText);
+                            setCopiedWhisper(true);
+                            setTimeout(() => setCopiedWhisper(false), 2000);
+                          }}
+                          style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', fontWeight: 700 }}
+                        >
+                          {copiedWhisper ? '✅ Copied Whisper!' : '📋 Copy Whisper Script'}
+                        </button>
+                      </div>
                     </div>
                     <div style={{ fontStyle: 'italic', color: '#fff', lineHeight: 1.5 }}>
                       "{whisperScriptText}"
@@ -517,7 +529,7 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                   </div>
 
                   <div style={{ background: 'rgba(16,185,129,0.14)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem', flexWrap: 'wrap', gap: '0.35rem' }}>
                       <div style={{ fontWeight: 800, color: '#34d399', fontSize: '0.8rem', textTransform: 'uppercase' }}>
                         3. 🤝 3-Way Merge Introduction (Say Once Lines Are Merged):
                       </div>
@@ -541,17 +553,17 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                 </div>
               </div>
 
-              {/* Path B: When King Amen Ra is on a Warm Transfer Call (Appointment-Only Mode) */}
+              {/* Path B: When King Amen Ra is on a Warm Transfer Call (Executive Alternative-Choice Appointment Close) */}
               <div style={{ backgroundColor: '#111c3a', border: '1.5px solid #3b82f6', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#60a5fa', margin: '0 0 0.65rem', fontSize: '1rem', fontWeight: 800 }}>
-                  Path B — When King Amen Ra is on a Warm Transfer Call (Or Prospect Prefers to Schedule):
+                  Path B — Executive Alternative-Choice Appointment Close (When King is on a Warm Transfer):
                 </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.88rem', color: '#e2e8f0' }}>
                   <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #f59e0b' }}>
-                    👉 <strong>Say to {displayName}:</strong> "King Amen Ra, our Principal Broker and Licensed Senior Advisor, is currently on a live warm transfer call helping another client right now, so I will get you scheduled right on his calendar. Would you prefer a <strong>Telephone appointment (30 minutes)</strong>, an <strong>In-Person appointment (60 minutes)</strong>, or a <strong>Video appointment (30 minutes)</strong> with King Amen Ra?"
+                    👉 <strong>Say to {displayName}:</strong> "Because <strong>King Amen Ra</strong> is currently on a live consultation helping another family with their 2027 benefits, I want to reserve a dedicated one-on-one time for you on his private calendar so you receive his undivided attention. Do you prefer a <strong>30-minute Telephone consultation</strong>, a <strong>60-minute In-Person visit</strong>, or a <strong>30-minute Video consultation</strong>—and would <strong>morning or afternoon</strong> work best for you?"
                   </p>
                   <p style={{ margin: 0, background: '#16244d', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
-                    👉 <strong>Confirm & Continue Calling:</strong> "Wonderful! I have you confirmed for your <strong>[Telephone / In-Person / Video]</strong> appointment with King Amen Ra on <strong>[Day & Time]</strong>. Please have your current prescription list and doctors' names handy. Thank you, <strong>{displayName}</strong>, and have a wonderful day!"
+                    👉 <strong>Confirm & Continue Calling:</strong> "Wonderful, <strong>{displayName}</strong>! I have reserved your <strong>[Telephone / In-Person / Video]</strong> consultation with Principal Broker <strong>King Amen Ra</strong> for <strong>[Day & Time]</strong>. Please have your current prescription list and doctors' names handy so we can prepare your custom 2027 comparison in advance. It has been a pleasure helping you today!"
                   </p>
                 </div>
 
@@ -571,44 +583,66 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
             </div>
           )}
 
-          {/* STEP 4: SARAH'S 6 DIVISIONS & OBJECTION REBUTTALS */}
+          {/* STEP 4: 6-PRODUCT-LINE FUNNEL & EMPATHY-FIRST FIDUCIARY REBUTTALS */}
           {activeStep === 4 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ backgroundColor: '#111c3a', border: '1px solid #243566', borderRadius: '12px', padding: '1.25rem' }}>
                 <h4 style={{ color: '#c8963e', margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-                  Sarah's 6 Insurance Divisions & Common Objection Rebuttals
+                  6-Product-Line Inbound/Outbound Funnel & Empathy-First Fiduciary Rebuttals
                 </h4>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '0.9rem', border: '1px solid #243566', fontSize: '0.85rem', color: '#e2e8f0' }}>
-                    <div style={{ fontWeight: 800, color: '#ffd88a', marginBottom: '0.35rem' }}>
-                      🏢 Non-Medicare Divisions (When Caller Asks About Other Coverage):
+                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '0.9rem', border: '1px solid #243566', fontSize: '0.84rem', color: '#e2e8f0' }}>
+                    <div style={{ fontWeight: 800, color: '#ffd88a', marginBottom: '0.45rem' }}>
+                      🏢 All 6 Product Line Funnel Scripts (After Greeting: "Thank you for calling IWG Insurance and Financial Services... How may I direct your call?"):
                     </div>
-                    <ul style={{ margin: 0, paddingLeft: '1.2rem', lineHeight: 1.5 }}>
-                      <li><strong>Individual & Family Health (Under 65):</strong> ACA Marketplace plans with tax credits vs. Private PPO medically underwritten plans with nationwide networks.</li>
-                      <li><strong>Group Health (2–250+ Employees):</strong> Level-Funded plans with refund of unused claim surplus, Traditional Group Major Medical, or tax-free ICHRA.</li>
-                      <li><strong>Life Insurance & IUL:</strong> Term Life, Final Expense Whole Life, and Tax-Free Retirement Indexed Universal Life (IUL) structured under IRC Section 7702 with 0% market floor.</li>
-                      <li><strong>Asset-Based Hybrid Long-Term Care:</strong> Linked Life + LTC policies that pay tax-free monthly care benefits or return a tax-free death benefit to heirs if care is never needed.</li>
+                    <ul style={{ margin: 0, paddingLeft: '1.2rem', lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      <li><strong>1. Medicare Plans (2027 Changes):</strong> "You’ve reached the right place. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate guidance on your Medicare options, would you like to review the new 2027 Medicare changes—including the $2,400 prescription cap and side-by-side Medigap vs. Advantage comparisons—with our Principal Broker, King Amen Ra, right now?"</li>
+                      <li><strong>2. Individual & Family Health (ACA & Private PPO):</strong> "We would be honored to help you and your family. As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we compare both ACA tax-credit plans and nationwide private PPO networks to protect your doctors and lower your monthly premium. May I connect you with a licensed specialist now to check if you qualify for a $0 or reduced-cost plan?"</li>
+                      <li><strong>3. Group Health (1–50+ Employees / Level-Funded / ICHRA):</strong> "We would love to support your business. As an independent fiduciary advisory representing over 104 premier carriers, we design Level-Funded and ICHRA corporate benefit plans that typically save employers 15% to 30% while refunding unused claims reserves back to your business. May I connect you with King Amen Ra for a complimentary corporate benefits audit?"</li>
+                      <li><strong>4. Investment Grade Life Insurance (IUL / Section 7702):</strong> "We specialize in institutional-grade wealth protection. Representing over 104 premier carriers, we structure high cash-value Indexed Universal Life policies under IRS Section 7702 that deliver tax-free retirement income with a contractual 0% downside market floor. Would you like me to connect you with King Amen Ra to design your custom tax-free retirement illustration?"</li>
+                      <li><strong>5. Asset-Based Long Term Care (Hybrid Life + LTC):</strong> "Protecting your life savings and dignity is at the heart of what we do. We represent over 104 premier carriers offering modern 'use-it-or-leave-it' Asset-Based Long Term Care—paying tax-free benefits for home health or assisted living if you need care, or returning 100% of the benefit tax-free to your family if you never use it. Would you like to review a custom asset-protection strategy with King Amen Ra now?"</li>
+                      <li><strong>6. Modern Term Life (with Built-In Living Benefits):</strong> "We make protecting your family effortless. Representing over 104 premier carriers, our Modern Term Life policies lock in guaranteed level rates with 15-minute no-exam digital approvals—and include built-in Living Benefits that pay cash while you are alive in the event of a critical or chronic illness. May I connect you now to compare your lowest wholesale rates?"</li>
                     </ul>
                   </div>
 
                   {/* Objection 1 */}
-                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '1rem', border: '1px solid #243566' }}>
-                    <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.4rem', fontSize: '0.88rem' }}>
-                      ❌ "I’m happy with my current plan and don’t want to change."
+                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '0.9rem', border: '1px solid #243566' }}>
+                    <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.35rem', fontSize: '0.86rem' }}>
+                      ❌ 1. "I’m happy with my current plan / I don’t want to change."
                     </div>
-                    <div style={{ fontSize: '0.88rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
-                      "That’s great to hear, <strong>{displayName}</strong>, and staying right where you are may very well be the best choice. Because we are a 100% free fiduciary advisory representing over 104 carriers, our review simply checks that your doctors and prescriptions are still covered at the lowest cost for 2027 so there are no surprise bills in January."
+                    <div style={{ fontSize: '0.85rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.7rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
+                      "I love hearing that, <strong>{displayName}</strong>, and our goal is never to move you if your current plan is still the #1 option for you. Because insurance carriers adjust their doctor networks, drug tiers, and copays for 2027, our free 5-minute fiduciary audit simply confirms in writing that your current plan still gives you the highest benefits at the lowest cost—and if it does, we tell you to stay right where you are. Let’s have <strong>King Amen Ra</strong> verify that for your peace of mind, fair enough?"
                     </div>
                   </div>
 
                   {/* Objection 2 */}
-                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '1rem', border: '1px solid #243566' }}>
-                    <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.4rem', fontSize: '0.88rem' }}>
-                      ❌ "How much does your service cost?"
+                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '0.9rem', border: '1px solid #243566' }}>
+                    <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.35rem', fontSize: '0.86rem' }}>
+                      ❌ 2. "How much does this cost? / What is the catch?"
                     </div>
-                    <div style={{ fontSize: '0.88rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
-                      "Our advisory service is <strong>100% free</strong> with zero broker fees and zero markup. Medicare and insurance carriers regulate plan rates by law, so you pay the exact same premium whether you enroll alone or have our Principal Broker, King Amen Ra, advocate for you year-round."
+                    <div style={{ fontSize: '0.85rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.7rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
+                      "There is never a fee, markup, or obligation—ever. By federal law, Medicare and insurance premiums are fixed, meaning you pay the exact same rate whether you navigate 104 carriers alone or have our Principal Broker <strong>King Amen Ra</strong> and clinical leadership under <strong>Aneesha Sullivan, PA</strong> advocate for you year-round for free."
+                    </div>
+                  </div>
+
+                  {/* Objection 3 */}
+                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '0.9rem', border: '1px solid #243566' }}>
+                    <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.35rem', fontSize: '0.86rem' }}>
+                      ❌ 3. "I already have a broker / agent."
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.7rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
+                      "That is wonderful—having an advocate is so important. Many of our clients keep their current plan until they ask us for a complimentary second opinion across all 104+ national carriers, since many agents only represent a handful of companies. It takes 3 minutes to verify you aren't overpaying for 2027—would you be open to a quick, no-obligation second look?"
+                    </div>
+                  </div>
+
+                  {/* Objection 4 */}
+                  <div style={{ background: '#16244d', borderRadius: '10px', padding: '0.9rem', border: '1px solid #243566' }}>
+                    <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '0.35rem', fontSize: '0.86rem' }}>
+                      ❌ 4. "Just mail me something / I’m busy right now."
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#e2e8f0', background: 'rgba(255,255,255,0.03)', padding: '0.7rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
+                      "I completely respect your time, <strong>{displayName}</strong>. Because there are over 104 carriers, mailing a stack of generic brochures wouldn't show which plan covers your specific doctors and prescriptions. Instead, let’s lock in a quick <strong>Telephone</strong>, <strong>In-Person</strong>, or <strong>Video</strong> appointment at a time that is convenient for you, and we’ll prepare your custom 1-page summary in advance. Does tomorrow morning or afternoon work better?"
                     </div>
                   </div>
                 </div>
