@@ -425,7 +425,7 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                   <div style={{ background: 'rgba(16,185,129,0.14)', padding: '0.85rem', borderRadius: '8px', borderLeft: '4px solid #10b981', color: '#6ee7b7', fontWeight: 700 }}>
                     👉 3. Assumptive Micro-Commitment Close (Say This):
                     <div style={{ marginTop: '0.25rem', color: '#ffffff', fontStyle: 'italic' }}>
-                      "To make this completely effortless for you, <strong>{displayName}</strong>, our Principal Broker <strong>King Amen Ra</strong> can verify your doctors and prescriptions in just a few minutes at zero cost. I have him available right now—let me introduce you so you can get your questions answered first-hand, okay?"
+                      "To make this completely effortless for you, <strong>{displayName}</strong>, our Principal Broker <strong>King Amen Ra</strong> can verify your doctors and prescriptions in just a few minutes at zero cost. Would you like me to reach out and get him on the line for you right now?"
                     </div>
                   </div>
                 </div>
