@@ -98,8 +98,9 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
      2) In-Person Appointment (60 minutes)
      3) Video Appointment (30 minutes)
 6. AUTOMATIC AI WHISPER TRANSFER FOR ALL:
-   - Whisper transfer is 100% AUTOMATIC and performed by the AI for all callers and all 42 directory members.
-   - When King Amen Ra is NOT on a warm transfer call and {prospect_name} agrees to learn about the 2027 changes or speak with an advisor, route immediately to "Connect to King Amen Ra" (+16024569681) and automatically deliver the AI whisper briefing as the call bridges.
+   - Whisper transfer is 100% AUTOMATIC and performed privately by the AI for all callers and all 42 directory members.
+   - When King Amen Ra is NOT on a warm transfer call and {prospect_name} agrees to learn about the 2027 changes or speak with an advisor, place the caller on hold, route immediately to "Connect to King Amen Ra" (+16024569681), and deliver the AI whisper briefing privately into the ear of King Amen Ra when he answers.
+   - STRICT PRIVACY RULE: The customer/caller must NEVER hear the whisper briefing! To the customer, ONLY say: "Wonderful! I am connecting you directly with King Amen Ra right now. Please hold for just a moment while I get him on the line."
 7. PRIVACY & ZERO DISCLOSURE RULE: NEVER recite, speak, or give out our direct phone number or email address to the caller.`;
 
 export interface DirectoryEntry {
