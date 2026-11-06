@@ -1105,6 +1105,8 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
       agent_id: 'fc8c99c6-88c3-435d-952b-8c93c2db17a6',
       agent_version: 'dev',
       from: blandFrom,
+      first_sentence: firstSentence,
+      transfer_phone_number: isOnWarmTransfer ? undefined : transferNumber,
       max_duration: config.max_duration || 15,
       record: config.record !== false,
       request_data: requestDataPayload,
