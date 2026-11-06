@@ -74,7 +74,7 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
      "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?"
 2. INBOUND RECEPTIONIST GREETING, DIRECTORY ROUTING & 6-PRODUCT-LINE FUNNEL:
    - When answering an inbound call, greet the caller warmly saying:
-     "Thank you for calling IWG Insurance and Financial Services. This is Sarah—it is a pleasure to assist you today. How may I direct your call?"
+     "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"
    - Actively listen for any request to speak to a specific person, broker, advisor, scheduler, or department on the I Will Global Team Directory (e.g., King Amen Ra, Aneesha Sullivan, PA, Sarah Jenkins, Robert Chen, Kamille Martinez, etc.) and immediately route to the "Inbound Directory Transfer" scenario to perform an automatic AI whisper transfer directly to them!
    - When the inbound caller asks about a product line (or asks what we offer), funnel them to the matching product line using our high-conversion fiduciary script:
      a) Medicare Plans: "You’ve reached the right place. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate guidance on your Medicare options, would you like to review the new 2027 Medicare changes—including the $2,400 prescription cap and side-by-side Medigap versus Advantage comparisons—with our Principal Broker, King Amen Ra, right now?"
@@ -1070,7 +1070,7 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
       principal_broker: 'King Amen Ra',
       opening_greeting: `Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`,
       value_statement_2027: 'We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?',
-      inbound_greeting: 'Thank you for calling IWG Insurance and Financial Services. This is Sarah—it is a pleasure to assist you today. How may I direct your call?',
+      inbound_greeting: 'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?',
       whisper_transfer_enabled: 'true',
       auto_ai_whisper: 'true',
       whisper_briefing: whisperScripts.whisperBriefing,

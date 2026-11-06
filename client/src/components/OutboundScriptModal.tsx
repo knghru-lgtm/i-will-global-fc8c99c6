@@ -342,7 +342,7 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                       "Hello <strong>{displayName}</strong>, this is <strong>{agentName}</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
                     </p>
                     <div style={{ fontSize: '0.76rem', color: '#cbd5e1', fontStyle: 'italic' }}>
-                      Inbound Receptionist Greeting: "Thank you for calling IWG Insurance and Financial Services. This is Sarah—it is a pleasure to assist you today. How may I direct your call?"
+                      Inbound Receptionist Greeting: "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"
                     </div>
                   </div>
 
@@ -585,7 +585,7 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ background: '#16244d', borderRadius: '10px', padding: '0.9rem', border: '1px solid #243566', fontSize: '0.84rem', color: '#e2e8f0' }}>
                     <div style={{ fontWeight: 800, color: '#ffd88a', marginBottom: '0.45rem' }}>
-                      🏢 All 6 Product Line Funnel Scripts (After Greeting: "Thank you for calling IWG Insurance and Financial Services... How may I direct your call?"):
+                      🏢 All 6 Product Line Funnel Scripts (After Greeting: "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"):
                     </div>
                     <ul style={{ margin: 0, paddingLeft: '1.2rem', lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                       <li><strong>1. Medicare Plans (2027 Changes):</strong> "You’ve reached the right place. We are a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. To give you the most accurate guidance on your Medicare options, would you like to review the new 2027 Medicare changes—including the $2,400 prescription cap and side-by-side Medigap vs. Advantage comparisons—with our Principal Broker, King Amen Ra, right now?"</li>

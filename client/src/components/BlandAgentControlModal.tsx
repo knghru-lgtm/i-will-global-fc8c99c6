@@ -499,7 +499,7 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
                 </span>
               </div>
               <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: '0.3rem', lineHeight: 1.45 }}>
-                <strong>Inbound Greeting:</strong> <em>"Thank you for calling IWG Insurance and Financial Services, how may I direct your call?"</em>
+                <strong>Inbound Receptionist Greeting:</strong> <em>"Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"</em>
                 <br />
                 Sarah funnels callers to our <strong>6 Product Lines</strong> (<strong>Medicare 2027 Changes</strong>, <strong>Individual & Family Health</strong>, <strong>Group Health 1–50+</strong>, <strong>Investment Grade Life / IUL</strong>, <strong>Asset-Based Long Term Care</strong>, and <strong>Term Life with Living Benefits</strong>) or immediately executes an <strong>Automatic AI Whisper Transfer</strong> to anyone on the <strong>I Will Global Team Directory</strong>.
               </div>
