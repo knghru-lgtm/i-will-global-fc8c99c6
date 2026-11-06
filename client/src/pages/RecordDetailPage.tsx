@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { api, formatPhone } from '../lib/api';
+import { api, formatPhone, openGoogleVoiceWindow } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { CallPanel } from '../components/CallPanel';
 import { BookAppointmentModal } from '../components/BookAppointmentModal';
@@ -226,16 +226,30 @@ export const RecordDetailPage: React.FC<{ type: 'lead' | 'client' | 'opportunity
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => setShowBlandModal(true)}
+                onClick={() => {
+                  openGoogleVoiceWindow(record.phone);
+                  window.dispatchEvent(
+                    new CustomEvent('iwg-open-sarah-voice', {
+                      detail: {
+                        mode: 'outbound',
+                        lead_id: record.id,
+                        prospect_name: name || 'Medicare Beneficiary',
+                        phone: record.phone,
+                        state: record.state || 'AZ',
+                        address: record.address || '',
+                      },
+                    })
+                  );
+                }}
                 style={{
                   borderColor: '#8b5cf6',
                   color: '#c084fc',
                   background: 'rgba(139, 92, 246, 0.15)',
                   fontWeight: 700,
                 }}
-                title="Dispatch autonomous Bland AI Voice Agent to call and qualify this prospect"
+                title="Launch Sarah Voice AI + Google Voice (480) 331-9455 to call, qualify, book, or warm-transfer this prospect"
               >
-                🤖 Bland AI Voice Call
+                🎙️ Sarah AI Voice Call
               </button>
             )}
 

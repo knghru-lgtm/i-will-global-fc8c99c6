@@ -1044,6 +1044,7 @@ __export(bland_exports, {
   runBlandAutoDialerTick: () => runBlandAutoDialerTick,
   saveBlandConfig: () => saveBlandConfig,
   sendBlandCall: () => sendBlandCall,
+  setBlandCallingPause: () => setBlandCallingPause,
   setBlandCampaignActive: () => setBlandCampaignActive,
   setWarmTransferStatus: () => setWarmTransferStatus,
   stopBlandOutboundCalls: () => stopBlandOutboundCalls
@@ -1591,6 +1592,12 @@ async function pauseCallingForWarmTransfer(params) {
     reason: params.reason || "King Amen Ra is on a live warm transfer call \u2014 Booking Telephone, In-Person, or Video appointments only & continuing calls"
   });
 }
+async function setBlandCallingPause(paused, reason) {
+  return setWarmTransferStatus({
+    on_warm_transfer: paused,
+    reason: reason || void 0
+  });
+}
 async function resumeCallingAfterDisposition(params) {
   return setWarmTransferStatus({
     on_warm_transfer: false,
@@ -1695,7 +1702,9 @@ function buildAiWhisperScripts(params) {
   const mergeIntroduction = `Thank you so much for your patience, ${prospectFirst}! It is my pleasure to introduce ${recipientName} with IWG Insurance and Financial Services. ${recipientName.split(" ")[0]}, I have shared ${prospectName}'s information with you so they are in the very best hands. ${prospectFirst}, it has been a privilege speaking with you today\u2014${recipientName.split(" ")[0]} will take wonderful care of you from here!`;
   return {
     whisperBriefing,
-    mergeIntroduction
+    mergeIntroduction,
+    whisper_briefing: whisperBriefing,
+    merge_introduction: mergeIntroduction
   };
 }
 async function dispatchAiWhisperTransfer(params) {
@@ -2105,9 +2114,9 @@ Summary: ${summary || "Qualified on outbound AI call"}`,
       }
     });
   }
-  if (relatedId) {
+  if (relatedId && activity) {
     const dispRow = await one(`SELECT * FROM dispositions WHERE id=$1`, [dispositionId]);
-    const userRow = await one(`SELECT id, name, email, role FROM users WHERE id=$1`, [userId]) || { id: "u_principal", name: "King Amen Ra", email: "king@iwillglobal.com", role: "admin" };
+    const userRow = await one(`SELECT id, name, email, role, states FROM users WHERE id=$1`, [userId]) || { id: "u_principal", name: "King Amen Ra", email: "king@iwillglobal.com", role: "admin", states: ["AZ"] };
     if (dispRow) {
       await applyDisposition({
         user: userRow,
@@ -2129,7 +2138,7 @@ Summary: ${summary || "Qualified on outbound AI call"}`,
   const { publish: publish2 } = await Promise.resolve().then(() => (init_realtime(), realtime_exports));
   publish2("inbox", "bland_call_completed", {
     call_id: callId,
-    activity_id: activity.id,
+    activity_id: activity?.id || null,
     related_id: relatedId,
     disposition: dispositionLabel,
     appointment_type: selectedApptType,
@@ -2140,7 +2149,7 @@ Summary: ${summary || "Qualified on outbound AI call"}`,
   return {
     ok: true,
     success: true,
-    activity_id: activity.id,
+    activity_id: activity?.id || null,
     disposition: dispositionLabel,
     appointment_type: selectedApptType,
     next_call_dispatched: nextDispatched
@@ -2613,10 +2622,10 @@ async function applyDisposition(ctx) {
   try {
     const isKing = ctx.user.id === "3afbca01-76cd-4fa9-91cc-f3a1a4821276" || ctx.user.id === "u_principal" || ctx.user.email?.toLowerCase() === "king@iwillglobal.com" || ctx.user.name?.toLowerCase().includes("king");
     if (isKing || ctx.user.role === "licensed_agent" || ctx.user.role === "admin" || ctx.user.role === "manager") {
-      const { getBlandConfig: getBlandConfig2, setBlandCallingPause } = await Promise.resolve().then(() => (init_bland(), bland_exports));
+      const { getBlandConfig: getBlandConfig2, setBlandCallingPause: setBlandCallingPause2 } = await Promise.resolve().then(() => (init_bland(), bland_exports));
       const bCfg = await getBlandConfig2();
       if (bCfg.is_calling_paused) {
-        await setBlandCallingPause(false, null);
+        await setBlandCallingPause2(false, null);
         actions.push("Resumed Bland AI outbound dialer following lead disposition");
       }
     }
@@ -9766,6 +9775,7 @@ async function executeSarahTool(name, args, ctx) {
   }
   if (name === "get_cms_benefit_data") {
     return {
+      success: true,
       medicare_2027: {
         part_a_hospital_deductible: "$1,788 per benefit period ($0/month premium for 99%+ of beneficiaries)",
         part_b_standard_premium: "$209.50/month (projected)",

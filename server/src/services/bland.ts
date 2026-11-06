@@ -10,6 +10,7 @@ export interface BlandConfig {
   github_repo: string;
   default_voice: string;
   model: 'base' | 'enhanced' | 'turbo';
+  language?: string;
   max_duration: number;
   record: boolean;
   wait_for_greeting: boolean;
@@ -31,6 +32,9 @@ export interface BlandConfig {
   paused_reason?: string | null;
   active_transfer_lead_id?: string | null;
   active_transfer_call_id?: string | null;
+  warm_transfer_lead_id?: string | null;
+  warm_transfer_call_id?: string | null;
+  warm_transfer_started_at?: string | null;
   paused_at?: string | null;
   campaign_started_at?: string | null;
 }
@@ -170,6 +174,9 @@ export const IWG_TEAM_DIRECTORY: DirectoryEntry[] = [
 
 export async function getInboundDirectory(): Promise<{
   inbound_number: string;
+  inbound_display: string;
+  outbound_number: string;
+  ai_line: string;
   default_transfer_number: string;
   directory: DirectoryEntry[];
   transfer_list: Record<string, string>;
@@ -873,6 +880,13 @@ export async function pauseCallingForWarmTransfer(params: {
   });
 }
 
+export async function setBlandCallingPause(paused: boolean, reason?: string | null): Promise<BlandConfig> {
+  return setWarmTransferStatus({
+    on_warm_transfer: paused,
+    reason: reason || undefined,
+  });
+}
+
 /**
  * Called when King Amen Ra finishes a warm transfer consultation and dispositions the lead.
  * Returns the Bland Agent AI to live warm-transfer capability while continuing outbound calls.
@@ -1052,6 +1066,8 @@ export function buildAiWhisperScripts(params: {
   return {
     whisperBriefing,
     mergeIntroduction,
+    whisper_briefing: whisperBriefing,
+    merge_introduction: mergeIntroduction,
   };
 }
 
@@ -1063,7 +1079,8 @@ export async function dispatchAiWhisperTransfer(params: {
   prospect_phone?: string;
   state?: string;
   notes?: string;
-  user: { id: string; name: string; email?: string; role: string };
+  place_live_whisper_call?: boolean;
+  user?: { id: string; name: string; email?: string; role: string };
 }) {
   const dir = await getInboundDirectory();
   const reqName = (params.recipient_name || 'King Amen Ra').trim();
@@ -1551,10 +1568,10 @@ export async function handleBlandWebhook(payload: any) {
   }
 
   // Trigger CRM automations if linked to a lead or client
-  if (relatedId) {
-    const dispRow = await one(`SELECT * FROM dispositions WHERE id=$1`, [dispositionId]);
-    const userRow = await one(`SELECT id, name, email, role FROM users WHERE id=$1`, [userId]) ||
-      { id: 'u_principal', name: 'King Amen Ra', email: 'king@iwillglobal.com', role: 'admin' };
+  if (relatedId && activity) {
+    const dispRow = await one<any>(`SELECT * FROM dispositions WHERE id=$1`, [dispositionId]);
+    const userRow: any = await one(`SELECT id, name, email, role, states FROM users WHERE id=$1`, [userId]) ||
+      { id: 'u_principal', name: 'King Amen Ra', email: 'king@iwillglobal.com', role: 'admin', states: ['AZ'] };
 
     if (dispRow) {
       await applyDisposition({
@@ -1580,7 +1597,7 @@ export async function handleBlandWebhook(payload: any) {
   const { publish } = await import('../realtime.ts');
   publish('inbox', 'bland_call_completed', {
     call_id: callId,
-    activity_id: activity.id,
+    activity_id: activity?.id || null,
     related_id: relatedId,
     disposition: dispositionLabel,
     appointment_type: selectedApptType,
@@ -1592,7 +1609,7 @@ export async function handleBlandWebhook(payload: any) {
   return {
     ok: true,
     success: true,
-    activity_id: activity.id,
+    activity_id: activity?.id || null,
     disposition: dispositionLabel,
     appointment_type: selectedApptType,
     next_call_dispatched: nextDispatched,

@@ -488,6 +488,7 @@ export async function executeSarahTool(
 
   if (name === 'get_cms_benefit_data') {
     return {
+      success: true,
       medicare_2027: {
         part_a_hospital_deductible: '$1,788 per benefit period ($0/month premium for 99%+ of beneficiaries)',
         part_b_standard_premium: '$209.50/month (projected)',

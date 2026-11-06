@@ -311,4 +311,61 @@ describe('Sarah Voice AI (Dual-Mode (480) 331-9455 Virtual Receptionist & Outbou
     assert.equal(readyEvent.line, '(480) 331-9455');
     ws.close();
   });
+
+  test('Serverless HTTP endpoints /api/sarah/turn and /api/sarah/tool support iwillglobal.com voice & warm transfers', async () => {
+    // 1. Initial outbound greeting turn
+    const initRes = await fetch(`${baseUrl}/api/sarah/turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        is_initial: true,
+        context: {
+          mode: 'outbound',
+          prospect_name: 'Arthur Pendelton',
+          prospect_phone: '6232230165',
+          state: 'AZ',
+        },
+      }),
+    }).then((r) => r.json());
+
+    assert.equal(initRes.ok, true);
+    assert.equal(initRes.line, '(480) 331-9455');
+    assert.match(initRes.reply, /Hello Arthur, this is Sarah calling from the Medicare Helpline/i);
+
+    // 2. Request a live warm transfer to King Amen Ra via /api/sarah/turn
+    const transferRes = await fetch(`${baseUrl}/api/sarah/turn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Yes, please transfer me to King Amen Ra right now!',
+        context: {
+          mode: 'outbound',
+          prospect_name: 'Arthur Pendelton',
+          prospect_phone: '6232230165',
+          state: 'AZ',
+        },
+      }),
+    }).then((r) => r.json());
+
+    assert.equal(transferRes.ok, true);
+    assert.ok(transferRes.transfer);
+    assert.equal(transferRes.transfer.success, true);
+    assert.equal(transferRes.transfer.recipient_name, 'King Amen Ra');
+    assert.equal(transferRes.transfer.recipient_phone, '+16024569681');
+    assert.equal(transferRes.transfer.google_voice_transfer_url, 'https://voice.google.com/u/0/calls?a=nc,%2B16024569681');
+
+    // 3. Direct tool endpoint /api/sarah/tool
+    const toolRes = await fetch(`${baseUrl}/api/sarah/tool`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'get_cms_benefit_data',
+        args: { query_type: 'part_b_giveback', state: 'AZ' },
+      }),
+    }).then((r) => r.json());
+
+    assert.equal(toolRes.ok, true);
+    assert.equal(toolRes.result.success, true);
+    assert.match(toolRes.result.medicare_2027.part_a_hospital_deductible, /1,788/i);
+  });
 });
