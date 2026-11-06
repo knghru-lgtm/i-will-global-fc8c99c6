@@ -79,6 +79,32 @@ export const PublicChatWidget: React.FC = () => {
               <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem' }}>Global Assistant</div>
               <div style={{ color: '#c8963e', fontSize: '0.75rem' }}>I Will Global Medicare AI</div>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'));
+              }}
+              title="Switch to live voice call with Sarah"
+              style={{
+                marginLeft: 'auto',
+                background: 'linear-gradient(135deg, #c8963e, #0284c7)',
+                border: '1px solid #f3cf7a',
+                borderRadius: '999px',
+                color: '#ffffff',
+                padding: '0.35rem 0.75rem',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                boxShadow: '0 0 10px rgba(200, 150, 62, 0.4)',
+              }}
+            >
+              <span>🎙️</span>
+              <span>Speak to Sarah</span>
+            </button>
           </div>
 
           {/* Messages Stream */}

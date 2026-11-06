@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { api, formatPhone, googleVoiceWebUrl, googleVoiceAppUrl, telDialUrl, getStoredGvSlot, setStoredGvSlot, isSafariBrowser, isAppleDevice, copyToClipboard, type GvAccountSlot } from '../lib/api';
+import { api, formatPhone, googleVoiceWebUrl, googleVoiceAppUrl, openGoogleVoiceWindow, telDialUrl, getStoredGvSlot, setStoredGvSlot, isSafariBrowser, isAppleDevice, copyToClipboard, type GvAccountSlot } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { CallPanel } from './CallPanel';
 import { OutboundScriptModal } from './OutboundScriptModal';
@@ -673,6 +673,45 @@ export const PowerDialer: React.FC<{ isOpen: boolean; onClose: () => void }> = (
                 >
                   <span>📞</span> <span>Google Voice</span>
                 </a>
+                {currentLead?.phone && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      const fullName = [currentLead.first_name, currentLead.last_name].filter(Boolean).join(' ') || 'Valued Client';
+                      const addr = [currentLead.address, currentLead.city, currentLead.state, currentLead.zip].filter(Boolean).join(', ');
+                      openGoogleVoiceWindow(currentLead.phone, gvSlot === 'email' ? user?.email : gvSlot);
+                      triggerCall(currentLead);
+                      window.dispatchEvent(
+                        new CustomEvent('iwg-open-sarah-voice', {
+                          detail: {
+                            mode: 'outbound',
+                            lead_id: currentLead.id,
+                            prospect_name: fullName,
+                            phone: currentLead.phone,
+                            state: currentLead.state || 'AZ',
+                            address: addr || undefined,
+                          },
+                        })
+                      );
+                    }}
+                    style={{
+                      padding: '0.65rem 0.85rem',
+                      fontWeight: 800,
+                      background: 'linear-gradient(135deg, rgba(200, 150, 62, 0.25), rgba(2, 132, 199, 0.25))',
+                      borderColor: '#c8963e',
+                      color: '#ffd88a',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.35rem',
+                      cursor: 'pointer',
+                    }}
+                    title="Launch Sarah Voice AI Outbound Caller on (480) 331-9455 using the 4-Step Outbound Script & Decision Tree (100% Free)"
+                  >
+                    <span>🎙️</span> <span>Sarah AI (480) 331-9455</span>
+                  </button>
+                )}
                 {currentLead?.phone && (
                   <button
                     type="button"

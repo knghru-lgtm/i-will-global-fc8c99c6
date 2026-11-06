@@ -8,7 +8,7 @@
     "client"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace server & npm run dev --workspace client",
+    "dev": "node -e \"const {spawn}=require('child_process');['dev:server','dev:client'].forEach(s=>spawn('npm',['run',s],{stdio:'inherit',shell:true}))\"",
     "dev:server": "npm run dev --workspace server",
     "dev:client": "npm run dev --workspace client",
     "seed": "npm run seed --workspace server",

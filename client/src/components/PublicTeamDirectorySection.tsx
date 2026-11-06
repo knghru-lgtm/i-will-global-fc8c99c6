@@ -135,15 +135,11 @@ export const PublicTeamDirectorySection: React.FC = () => {
             Meet the Team — IWG Insurance & Financial Services Directory
           </h2>
           <p style={{ fontSize: '1.05rem', color: '#cbd5e1', maxWidth: '820px', margin: '0 auto 1.25rem', lineHeight: 1.65 }}>
-            Connect directly with our Executive Leadership, Licensed Senior Advisors, or Scheduling Specialists. Call our AI Receptionist Sarah at{' '}
-            <a href="tel:+15208415736" style={{ color: '#ffd88a', fontWeight: 800, textDecoration: 'underline' }}>
-              (520) 841-5736
-            </a>{' '}
-            or main line{' '}
+            Connect directly with our Executive Leadership, Licensed Senior Advisors, or Scheduling Specialists. Call our 24/7 AI Receptionist Sarah on our main line at{' '}
             <a href="tel:+14803319455" style={{ color: '#ffd88a', fontWeight: 800, textDecoration: 'underline' }}>
               (480) 331-9455
             </a>{' '}
-            and ask for any team member by name for an instant AI whisper transfer, or dial their direct number below.
+            and ask for any team member by name for an instant AI whisper transfer, or tap <strong>Talk to Sarah (Voice AI)</strong> to speak with her live in your browser for free.
           </p>
 
           {/* AI Receptionist Live Routing Callout */}
@@ -262,8 +258,8 @@ export const PublicTeamDirectorySection: React.FC = () => {
                   border: isKing
                     ? '2px solid #ffd88a'
                     : isExec
-                    ? '1.5px solid rgba(200, 150, 62, 0.55)'
-                    : '1px solid rgba(255, 255, 255, 0.12)',
+                      ? '1.5px solid rgba(200, 150, 62, 0.55)'
+                      : '1px solid rgba(255, 255, 255, 0.12)',
                   borderRadius: '14px',
                   padding: '1.2rem',
                   display: 'flex',
@@ -315,8 +311,8 @@ export const PublicTeamDirectorySection: React.FC = () => {
                         background: isExec
                           ? 'rgba(200, 150, 62, 0.22)'
                           : isBroker
-                          ? 'rgba(59, 130, 246, 0.2)'
-                          : 'rgba(16, 185, 129, 0.18)',
+                            ? 'rgba(59, 130, 246, 0.2)'
+                            : 'rgba(16, 185, 129, 0.18)',
                         color: isExec ? '#ffd88a' : isBroker ? '#93c5fd' : '#6ee7b7',
                         border: '1px solid rgba(255,255,255,0.12)',
                       }}

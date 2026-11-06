@@ -92,11 +92,11 @@ export async function getTelephonyConfig() {
   try {
     const row = await one(`SELECT * FROM telephony_config WHERE id='main'`);
     return row || {
-      provider: 'twilio',
+      provider: 'google_voice',
       enabled: true,
-      account_sid: process.env.TWILIO_ACCOUNT_SID || null,
-      auth_token: process.env.TWILIO_AUTH_TOKEN || null,
-      caller_id: process.env.TWILIO_CALLER_ID || '+16024569681',
+      account_sid: null,
+      auth_token: null,
+      caller_id: '+14803319455',
       caller_name: 'Medicare Helpline by IWG',
       cnam: 'MEDICARE BY IWG',
       stir_shaken_level: 'A',
@@ -104,9 +104,9 @@ export async function getTelephonyConfig() {
     };
   } catch {
     return {
-      provider: 'twilio',
+      provider: 'google_voice',
       enabled: true,
-      caller_id: '+16024569681',
+      caller_id: '+14803319455',
       caller_name: 'Medicare Helpline by IWG',
       cnam: 'MEDICARE BY IWG',
       stir_shaken_level: 'A',

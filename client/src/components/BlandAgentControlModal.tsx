@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../lib/api';
+import { api, openGoogleVoiceWindow } from '../lib/api';
 
 interface BlandAgentControlModalProps {
   isOpen: boolean;
@@ -15,7 +15,7 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
   const [loading, setLoading] = useState<boolean>(false);
   const [activating, setActivating] = useState<boolean>(false);
   const [togglingWarmTransfer, setTogglingWarmTransfer] = useState<boolean>(false);
-  const [quickPhone, setQuickPhone] = useState<string>('4803345557');
+  const [quickPhone, setQuickPhone] = useState<string>('6232230165');
   const [prospectName, setProspectName] = useState<string>('Medicare Beneficiary');
   const [preferredApptType, setPreferredApptType] = useState<'telephone' | 'in_person' | 'video'>('telephone');
   const [statusMsg, setStatusMsg] = useState<string>('');
@@ -95,8 +95,25 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
         is_on_warm_transfer: Boolean(res.is_on_warm_transfer),
         operating_mode: res.operating_mode,
       }));
-      setStatusMsg(res.message || 'Bland Agent AI activated and making calls!');
+      setStatusMsg(res.message || 'Google Voice + Sarah AI activated and making calls!');
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      const firstDispatched = res.dispatched?.[0];
+      const dialNumber = dialSpecificPhone && quickPhone.trim() ? quickPhone.trim() : firstDispatched?.phone;
+      const dialName = dialSpecificPhone && prospectName.trim() ? prospectName.trim() : (firstDispatched?.lead_name || firstDispatched?.prospect_name || 'Medicare Beneficiary');
+      if (dialNumber) {
+        openGoogleVoiceWindow(dialNumber);
+        window.dispatchEvent(
+          new CustomEvent('iwg-open-sarah-voice', {
+            detail: {
+              mode: 'outbound',
+              lead_id: firstDispatched?.lead_id,
+              prospect_name: dialName,
+              phone: dialNumber,
+              on_warm_transfer: isOnWarmTransfer,
+            },
+          })
+        );
+      }
       await loadState();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to activate Bland Agent AI');
@@ -180,7 +197,7 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
                 </span>
               </div>
               <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginTop: '0.2rem' }}>
-                Agent ID: <code style={{ color: '#c084fc' }}>fc8c99c6-88c3-435d-952b-8c93c2db17a6</code> · Outbound Line: <strong style={{ color: '#e2e8f0' }}>+1 (520) 841-5736</strong> · Broker Line: <strong style={{ color: '#ffd88a' }}>+1 (602) 456-9681</strong>
+                100% Free Voice AI Engine · Main Receptionist & Outbound Line: <strong style={{ color: '#6ee7b7' }}>+1 (480) 331-9455</strong> · Broker Line: <strong style={{ color: '#ffd88a' }}>+1 (602) 456-9681</strong>
               </div>
             </div>
           </div>
@@ -319,10 +336,10 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
           </div>
 
           <div style={{ fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.5, background: 'rgba(5, 16, 57, 0.55)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '8px', padding: '0.6rem 0.8rem', marginBottom: '0.9rem' }}>
-            <div>🤖 <strong>Auto-Dialer:</strong> Once activated, Bland automatically calls <strong>every prospect assigned to Bland AI</strong> (one attempt per prospect per day, due callbacks first) and stays armed day after day until you press Stop.</div>
-            <div>🕘 <strong>Outbound hours:</strong> Mon–Fri 9:00 AM–7:00 PM · Sat–Sun 9:00 AM–6:00 PM (Arizona time){config?.calling_window ? (config.calling_window.open ? ` — calling now (${config.calling_window.today})` : ` — closed now. ${config.calling_window.next_open || ''}`) : ''}</div>
-            <div>📋 <strong>Assigned to Bland AI:</strong> {config?.bland_assigned?.assigned_total ?? 0} prospect(s) · {config?.bland_assigned?.remaining_today ?? 0} still to call today</div>
-            <div>📞 <strong>Inbound:</strong> Sarah answers every call to +1 (520) 841-5736 immediately, 24/7.</div>
+            <div>🤖 <strong>Auto-Dialer (100% Free Engine):</strong> Once activated, Sarah automatically calls <strong>every assigned lead</strong> from <strong>(480) 331-9455</strong> using the 4-Step Outbound Script & Decision Tree, scheduling <strong>Telephone, In-Person, or Video appointments</strong> and executing <strong>Automatic AI Whisper Warm Transfers</strong> to King Amen Ra (+1 602-456-9681).</div>
+            <div>🕘 <strong>Outbound hours:</strong> Mon–Fri 9:00 AM–7:00 PM · Sat–Sun 9:00 AM–6:00 PM (Arizona time){config?.calling_window ? (config.calling_window.open ? ` — calling now (${config.calling_window.today})` : ` — manual activation overrides window immediately`) : ''}</div>
+            <div>📋 <strong>Assigned to Sarah AI Queue:</strong> {config?.bland_assigned?.assigned_total ?? 0} prospect(s) · {config?.bland_assigned?.remaining_today ?? 0} ready to call today</div>
+            <div>📞 <strong>24/7 Virtual Receptionist:</strong> Sarah answers every inbound call to <strong>+1 (480) 331-9455</strong> immediately, 24/7 ($0.00/min).</div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
@@ -428,6 +445,31 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
 
             <button
               type="button"
+              onClick={() => {
+                onClose();
+                window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }));
+              }}
+              style={{
+                padding: '0.8rem 1.1rem',
+                borderRadius: '10px',
+                border: '1.5px solid #c8963e',
+                background: 'linear-gradient(135deg, rgba(200, 150, 62, 0.28), rgba(2, 132, 199, 0.28))',
+                color: '#ffd88a',
+                fontWeight: 800,
+                fontSize: '0.88rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.4rem',
+              }}
+            >
+              <span>🎙️</span>
+              <span>Live Voice Console (480) 331-9455</span>
+            </button>
+
+            <button
+              type="button"
               disabled={activating}
               onClick={handleStopCampaign}
               style={{
@@ -493,7 +535,7 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
             <div>
               <div style={{ fontWeight: 800, fontSize: '0.98rem', color: '#6ee7b7', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span>🎧</span>
-                <span>Inbound AI Receptionist, 6-Product Funnel & Directory Transfer (+1 520-841-5736)</span>
+                <span>Inbound AI Receptionist, 6-Product Funnel & Directory Transfer (+1 480-331-9455)</span>
                 <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '999px', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', color: '#a7f3d0' }}>
                   {directory.length || 42} Directory Members Active
                 </span>

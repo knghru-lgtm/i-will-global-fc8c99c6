@@ -410,6 +410,27 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               </button>
             )}
 
+            {/* Talk to Sarah Voice AI Receptionist & Outbound Caller (480) 331-9455 */}
+            <button
+              type="button"
+              className="btn header-tool-btn"
+              onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }))}
+              title="Sarah Voice AI — (480) 331-9455 Virtual Receptionist & Outbound Caller (100% Free Spoken Audio, $0.00 Carrier Bills)"
+              style={{
+                background: 'linear-gradient(135deg, #c8963e 0%, #0284c7 100%)',
+                borderColor: '#f3cf7a',
+                color: '#ffffff',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                boxShadow: '0 0 15px rgba(200, 150, 62, 0.45)',
+              }}
+            >
+              <span style={{ fontSize: '1.05rem' }}>🎙️</span>
+              <span className="btn-text">Sarah (480) 331-9455</span>
+            </button>
+
             {/* Activate Bland Agent AI button */}
             <button
               type="button"

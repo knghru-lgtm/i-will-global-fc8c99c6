@@ -62,7 +62,8 @@ describe('Bland AI Conversational Voice Agent Integration', () => {
     assert.equal(res.status, 200);
     assert.equal(res.json.default_voice, 'maya');
     assert.equal(res.json.model, 'enhanced');
-    assert.equal(res.json.pathway_id, '3b13b658-e85d-4d14-a24a-868b61040c42');
+    assert.equal(res.json.pathway_id, 'fc8c99c6-88c3-435d-952b-8c93c2db17a6');
+    assert.equal(res.json.from_number, '+14803319455');
     assert.ok(res.json.prompt_template.includes('TPMO Disclaimer'));
     assert.ok(res.json.prompt_template.includes('King Amen Ra'));
   });

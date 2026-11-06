@@ -51,6 +51,28 @@ const Header = () => {
           </nav>
 
           <div className="nav-actions">
+            <button 
+              type="button"
+              className="btn btn-small"
+              onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'))}
+              title="Talk with Sarah — 100% Free Live Voice AI Receptionist (Spoken Audio)"
+              style={{
+                background: 'linear-gradient(135deg, #c8963e 0%, #0284c7 100%)',
+                color: '#ffffff',
+                border: '1px solid #f3cf7a',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                cursor: 'pointer',
+                boxShadow: '0 0 12px rgba(200, 150, 62, 0.4)',
+                padding: '0.4rem 0.85rem',
+                borderRadius: '0.4rem',
+              }}
+            >
+              <span>🎙️</span>
+              <span>Talk to Sarah (Voice AI)</span>
+            </button>
             <a 
               href="https://my.destinationrx.com/hub/s/SMPJW7R2A" 
               target="_blank" 
@@ -84,6 +106,29 @@ const Header = () => {
               <a href="/login" className="mobile-nav-link" style={{fontWeight: '700', color: 'var(--accent, #c8963e)'}} onClick={closeMenu}>Agent Login</a>
             </nav>
             <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <button 
+                type="button" 
+                className="btn" 
+                onClick={() => {
+                  closeMenu();
+                  window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'));
+                }}
+                style={{ 
+                  textAlign: 'center', 
+                  width: '100%', 
+                  fontWeight: 700,
+                  background: 'linear-gradient(135deg, #c8963e 0%, #0284c7 100%)',
+                  color: '#ffffff',
+                  border: '1px solid #f3cf7a',
+                  padding: '0.65rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.45rem',
+                }}
+              >
+                <span>🎙️</span> <span>Talk to Sarah (Voice AI)</span>
+              </button>
               <a href="https://my.destinationrx.com/hub/s/SMPJW7R2A" target="_blank" rel="noreferrer" className="btn btn-accent" style={{ textAlign: 'center', width: '100%', fontWeight: 700 }}>
                 Find a Plan (Medicare) ↗
               </a>

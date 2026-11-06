@@ -20,6 +20,7 @@ import { PublicSOAPage } from './pages/PublicSOAPage';
 import { IWillGlobalPortalPage } from './pages/IWillGlobalPortalPage';
 import { PublicChatWidget } from './components/PublicChatWidget';
 import { PublicTeamDirectorySection } from './components/PublicTeamDirectorySection';
+import { SarahVoiceModal, type SarahLaunchPayload } from './components/SarahVoiceModal';
 
 // Public Website Components
 // @ts-ignore
@@ -270,6 +271,39 @@ const ProtectedRoutes: React.FC = () => {
 };
 
 export const App: React.FC = () => {
+  const [isSarahVoiceOpen, setIsSarahVoiceOpen] = React.useState(false);
+  const [sarahPayload, setSarahPayload] = React.useState<SarahLaunchPayload | null>(null);
+
+  React.useEffect(() => {
+    const handleOpenSarah = (e: Event) => {
+      const detail = (e as CustomEvent<SarahLaunchPayload>).detail;
+      if (detail) {
+        setSarahPayload(detail);
+      } else {
+        setSarahPayload({ mode: 'inbound' });
+      }
+      setIsSarahVoiceOpen(true);
+    };
+    window.addEventListener('iwg-open-sarah-voice', handleOpenSarah);
+
+    // Support direct URL launch for outbound test calls (e.g. ?sarah_call=6232230165&mode=outbound)
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const sarahCallPhone = params.get('sarah_call') || params.get('call_phone');
+      const sarahMode = params.get('mode') === 'inbound' ? 'inbound' : 'outbound';
+      if (sarahCallPhone || params.get('sarah') === 'outbound') {
+        setSarahPayload({
+          mode: sarahMode,
+          phone: sarahCallPhone || '(623) 223-0165',
+          prospect_name: params.get('prospect_name') || 'Medicare Beneficiary',
+          state: params.get('state') || 'AZ',
+        });
+        setIsSarahVoiceOpen(true);
+      }
+    } catch {}
+
+    return () => window.removeEventListener('iwg-open-sarah-voice', handleOpenSarah);
+  }, []);
   return (
     <AuthProvider>
       <Router>
@@ -291,6 +325,53 @@ export const App: React.FC = () => {
         </Routes>
         {/* Embed public AI chat widget button for testing */}
         <PublicChatWidget />
+        {/* Global Floating Pill for Sarah Voice AI Receptionist */}
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'))}
+          title="Talk to Sarah — Voice AI Receptionist (100% Free Spoken Audio, $0.00 / min)"
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '84px',
+            zIndex: 9998,
+            backgroundColor: '#0a163d',
+            border: '2px solid #c8963e',
+            color: '#ffffff',
+            borderRadius: '999px',
+            padding: '0.65rem 1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            boxShadow: '0 8px 25px rgba(0, 0, 0, 0.5), 0 0 20px rgba(200, 150, 62, 0.4)',
+            cursor: 'pointer',
+            fontWeight: 800,
+            fontSize: '0.88rem',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          <span style={{ fontSize: '1.2rem' }}>🎙️</span>
+          <span>Talk to Sarah</span>
+          <span
+            style={{
+              backgroundColor: '#22c55e',
+              color: '#051039',
+              fontSize: '0.68rem',
+              padding: '0.1rem 0.45rem',
+              borderRadius: '999px',
+              fontWeight: 800,
+              textTransform: 'uppercase',
+            }}
+          >
+            Voice AI
+          </span>
+        </button>
+        {/* Global Sarah Voice AI Receptionist & Outbound Caller Modal */}
+        <SarahVoiceModal
+          isOpen={isSarahVoiceOpen}
+          onClose={() => setIsSarahVoiceOpen(false)}
+          initialPayload={sarahPayload}
+        />
       </Router>
     </AuthProvider>
   );

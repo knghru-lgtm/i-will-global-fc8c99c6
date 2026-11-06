@@ -152,6 +152,35 @@ export const OutboundScriptModal: React.FC<OutboundScriptModalProps> = ({
             <button
               type="button"
               className="btn btn-secondary"
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent('iwg-open-sarah-voice', {
+                    detail: {
+                      mode: 'outbound',
+                      prospect_name: displayName,
+                      address: clientAddress || undefined,
+                    },
+                  })
+                );
+              }}
+              style={{
+                padding: '0.4rem 0.75rem',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                background: 'linear-gradient(135deg, rgba(200, 150, 62, 0.28), rgba(2, 132, 199, 0.28))',
+                borderColor: '#c8963e',
+                color: '#ffffff',
+              }}
+              title="Launch Sarah Voice AI Outbound Caller on (480) 331-9455 speaking this exact 4-Step Outbound Script & Decision Tree"
+            >
+              <span>🎙️</span> <span>Sarah Outbound (480) 331-9455</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
               onClick={() => setIsWarmTransferOpen(true)}
               style={{
                 padding: '0.4rem 0.75rem',

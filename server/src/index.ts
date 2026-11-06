@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import http from 'node:http';
+import { WebSocketServer } from 'ws';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { config, isAIEnabled, isGoogleEnabled } from './config.ts';
@@ -12,6 +14,7 @@ import { auth, api, googleCallback } from './routes/api.ts';
 import { ai, inbox, publicApi } from './routes/ai.ts';
 import { blandPublic, blandAuth } from './routes/bland.ts';
 import { subscribe } from './realtime.ts';
+import { handleSarahVoiceSession } from './services/sarahVoiceService.ts';
 
 export function createApp() {
   const app = express();
@@ -55,13 +58,60 @@ export function createApp() {
   return app;
 }
 
+export function attachSarahWebSocket(server: http.Server) {
+  const wss = new WebSocketServer({ noServer: true });
+
+  wss.on('connection', (ws, req) => {
+    const clientIp = req.socket.remoteAddress;
+    let initialCtx: any = { mode: 'inbound' };
+    try {
+      const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+      const sp = url.searchParams;
+      initialCtx = {
+        mode: sp.get('mode') === 'outbound' ? 'outbound' : 'inbound',
+        lead_id: sp.get('lead_id') || undefined,
+        prospect_name: sp.get('prospect_name') || undefined,
+        prospect_phone: sp.get('phone') || undefined,
+        state: sp.get('state') || undefined,
+        address: sp.get('address') || undefined,
+        caller_name: sp.get('caller_name') || undefined,
+        on_warm_transfer: sp.has('on_warm_transfer') ? sp.get('on_warm_transfer') === 'true' : undefined,
+      };
+    } catch {
+      // default to inbound
+    }
+    console.log(`[Sarah Voice AI] Incoming (${initialCtx.mode}) connection on (480) 331-9455 from ${clientIp}`);
+    handleSarahVoiceSession(ws, initialCtx);
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    try {
+      const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+      if (url.pathname === '/api/sarah/live') {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit('connection', ws, req);
+        });
+      }
+    } catch (err) {
+      console.error('[Sarah Voice AI] WebSocket upgrade error:', err);
+      socket.destroy();
+    }
+  });
+
+  return wss;
+}
+
 const isMain = process.argv[1] && fileURLToPath(import.meta.url).toLowerCase() === process.argv[1].toLowerCase();
 if (isMain) {
   await getDb();
   const { ensureSeeded } = await import('./db/seed.ts');
   await ensureSeeded();
-  createApp().listen(config.port, () => {
+  const app = createApp();
+  const server = http.createServer(app);
+  attachSarahWebSocket(server);
+  server.listen(config.port, () => {
     console.log(`\n  IWG CRM API  →  http://localhost:${config.port}`);
+    console.log(`  Sarah Voice AI  →  ws://localhost:${config.port}/api/sarah/live (Gemini Live 3.8 Aoede)`);
     console.log(`  AI: ${isAIEnabled() ? 'Gemini (' + config.gemini.model + ')' : 'demo mode (set GEMINI_API_KEY)'}`);
     console.log(`  Google Workspace: ${isGoogleEnabled() ? 'configured' : 'not configured (Gmail actions are logged only)'}\n`);
   });

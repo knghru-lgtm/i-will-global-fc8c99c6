@@ -19,7 +19,8 @@ import {
   countBlandAssignedRemaining,
   BLAND_AI_USER_ID,
 } from '../services/bland.ts';
-import { one, q } from '../db/index.ts';
+import { one, q, insert } from '../db/index.ts';
+import { executeSarahTool } from '../services/sarahVoiceService.ts';
 
 export const blandPublic = Router();
 export const blandAuth = Router();
@@ -62,6 +63,106 @@ blandPublic.get('/public-directory', async (_req, res) => {
         : d
     );
     res.json({ ...dir, directory });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Inbound Virtual Receptionist handler when people call (480) 331-9455 (+14803319455)
+blandPublic.all('/inbound', async (req, res) => {
+  try {
+    const dir = await getInboundDirectory();
+    const cfg = await getBlandConfig();
+    const callerPhone = String(req.body?.from || req.query?.from || req.body?.caller_phone || '+14805550100');
+    const callerName = String(req.body?.caller_name || req.query?.caller_name || 'Valued Caller');
+    const requestedPerson = req.body?.requested_person || req.body?.transfer_to || req.query?.transfer_to;
+    const appointmentType = req.body?.appointment_type || req.query?.appointment_type;
+    const preferredDatetime = req.body?.preferred_datetime || req.query?.preferred_datetime;
+
+    let transferResult: any = null;
+    let appointmentResult: any = null;
+    let activityId: string | null = null;
+
+    if (req.method === 'POST') {
+      if (requestedPerson && !cfg.is_on_warm_transfer) {
+        transferResult = await executeSarahTool('whisper_warm_transfer', {
+          recipient_name: String(requestedPerson),
+          customer_name: callerName,
+          customer_phone: callerPhone,
+          customer_state: req.body?.state || 'AZ',
+          reason_for_call: req.body?.reason || 'Inbound call on (480) 331-9455 requesting advisor',
+        });
+      }
+
+      if (appointmentType || (requestedPerson && cfg.is_on_warm_transfer)) {
+        appointmentResult = await executeSarahTool('book_appointment', {
+          customer_name: callerName,
+          phone: callerPhone,
+          appointment_type: String(appointmentType || 'Telephone'),
+          preferred_datetime: String(preferredDatetime || 'Tomorrow at 10:00 AM'),
+          state: req.body?.state || 'AZ',
+          notes: req.body?.notes || 'Booked by Sarah Virtual Receptionist on inbound call to (480) 331-9455',
+        });
+      }
+
+      const inboundAct = await insert('activities', {
+        type: 'call',
+        subject: `🎧 Sarah Virtual Receptionist Inbound Call on (480) 331-9455 — ${callerName}`,
+        body: `Inbound call answered 24/7 by Sarah on (480) 331-9455 (+14803319455).\nCaller: ${callerName} (${callerPhone})${transferResult ? `\nWhisper Transfer to ${transferResult.recipient_name} (${transferResult.recipient_phone}): "${transferResult.private_whisper_delivered}"` : ''}${appointmentResult ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
+        related_type: 'lead',
+        related_id: appointmentResult?.lead_id || null,
+        user_id: BLAND_AI_USER_ID,
+        status: 'Completed',
+        completed: true,
+        direction: 'inbound',
+        phone: callerPhone,
+        provider: 'bland_ai',
+        disposition_id: appointmentResult ? 'appointment_set' : transferResult ? 'warm_transfer_success' : 'contacted_interested',
+        disposition: appointmentResult
+          ? `Sarah Inbound — ${appointmentResult.appointment_type} Appointment Booked`
+          : transferResult
+          ? `Sarah Inbound — Whisper Warm Transfer to ${transferResult.recipient_name}`
+          : 'Sarah Inbound — Answered on (480) 331-9455',
+        duration_sec: 45,
+        meta: {
+          mode: 'inbound_receptionist',
+          line: '(480) 331-9455',
+          line_e164: '+14803319455',
+          caller_phone: callerPhone,
+          caller_name: callerName,
+          transfer_result: transferResult,
+          appointment_result: appointmentResult,
+        },
+      });
+      activityId = inboundAct?.id || null;
+    }
+
+    res.json({
+      ok: true,
+      success: true,
+      status: 'answered',
+      receptionist: 'Sarah',
+      receptionist_name: 'Sarah',
+      line: '(480) 331-9455',
+      line_e164: '+14803319455',
+      line_number: '+14803319455',
+      display_number: '(480) 331-9455',
+      caller_phone: callerPhone,
+      caller_name: callerName,
+      first_sentence:
+        'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?',
+      transfer_phone_number: '+16024569681',
+      directory_count: dir.directory.length,
+      transfer_list: dir.transfer_list,
+      directory: dir.directory,
+      on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+      telephony_provider: 'google_voice',
+      google_voice_inbox_url: 'https://voice.google.com/u/0/calls',
+      sarah_live_ws: '/api/sarah/live?mode=inbound',
+      activity_id: activityId,
+      transfer_result: transferResult,
+      appointment_result: appointmentResult,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -316,13 +417,31 @@ blandAuth.post('/activate', async (req, res) => {
     let assignedCount = 0;
     let gateMessage: string | null = null;
 
-    // 5a. Selected prospects are assigned to Bland AI so the autonomous dialer works them every day until reached.
+    // 5a. Selected prospects are assigned to Sarah / Bland AI so the autonomous dialer works them every day until reached.
     if (Array.isArray(lead_ids) && lead_ids.length > 0) {
       const updated = await q(
         `UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2) RETURNING id`,
         [BLAND_AI_USER_ID, lead_ids]
       );
       assignedCount = updated.length;
+    } else if (continue_queue) {
+      // Ensure all callable leads in the CRM are assigned if none have been explicitly assigned yet
+      const existingAssigned = await one(
+        `SELECT count(*)::int AS cnt FROM leads WHERE owner_id = $1 OR assigned_agent_id = $1`,
+        [BLAND_AI_USER_ID]
+      );
+      if (!existingAssigned?.cnt) {
+        const autoAssigned = await q(
+          `UPDATE leads SET assigned_agent_id = $1, updated_at = now()
+           WHERE COALESCE(dnc, false) = false
+             AND COALESCE(phone_invalid, false) = false
+             AND phone IS NOT NULL AND trim(phone) != ''
+             AND COALESCE(status, 'New') NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')
+           RETURNING id`,
+          [BLAND_AI_USER_ID]
+        );
+        assignedCount = autoAssigned.length;
+      }
     }
 
     // 5b. If a specific phone or lead_id was provided, dial it immediately (inside calling hours)
@@ -350,6 +469,7 @@ blandAuth.post('/activate', async (req, res) => {
             voice: voice || cfg.default_voice,
             on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
             preferred_appointment_type,
+            override_pause: true,
           });
           dispatched.push({ phone: targetPhone, lead_id: lead_id || null, ...callResult });
         } catch (err: any) {
@@ -488,6 +608,9 @@ blandAuth.post('/call', async (req, res) => {
       pathway_id,
       on_warm_transfer,
       preferred_appointment_type,
+      transfer_on_request,
+      requested_person,
+      transfer_to,
     } = req.body;
 
     let targetPhone = phone;
@@ -507,6 +630,7 @@ blandAuth.post('/call', async (req, res) => {
       return res.status(400).json({ error: 'Phone number is required to dispatch call' });
     }
 
+    const requestedAdvisor = requested_person || transfer_to;
     const result = await sendBlandCall({
       phone: targetPhone,
       related_type: 'lead',
@@ -521,9 +645,35 @@ blandAuth.post('/call', async (req, res) => {
       pathway_id,
       on_warm_transfer: on_warm_transfer !== undefined ? Boolean(on_warm_transfer) : undefined,
       preferred_appointment_type,
+      transfer_on_request: Boolean(transfer_on_request || requestedAdvisor),
+      requested_person: requestedAdvisor,
+      override_pause: true,
     });
 
-    res.json(result);
+    let transferResult: any = null;
+    if ((transfer_on_request || requestedAdvisor) && !result.on_warm_transfer) {
+      transferResult = await executeSarahTool(
+        'whisper_warm_transfer',
+        {
+          recipient_name: requestedAdvisor || 'King Amen Ra',
+          prospect_name: targetName || 'Medicare Beneficiary',
+          prospect_phone: targetPhone,
+          state: targetState || 'AZ',
+        },
+        {
+          mode: 'outbound',
+          lead_id,
+          prospect_name: targetName || 'Medicare Beneficiary',
+          prospect_phone: targetPhone,
+          state: targetState || 'AZ',
+        }
+      );
+    }
+
+    res.json({
+      ...result,
+      transfer_result: transferResult || result.whisper_transfer,
+    });
   } catch (err: any) {
     res.status(err?.status === 409 ? 409 : 500).json({ error: err.message });
   }
@@ -532,8 +682,19 @@ blandAuth.post('/call', async (req, res) => {
 // 8. Test Call (from Settings Page or Activate Modal)
 blandAuth.post('/test-call', async (req, res) => {
   try {
-    const { test_phone, voice, custom_prompt, pathway_id, on_warm_transfer, preferred_appointment_type } = req.body;
-    const phoneToCall = test_phone || '+14803345557';
+    const {
+      test_phone,
+      voice,
+      custom_prompt,
+      pathway_id,
+      on_warm_transfer,
+      preferred_appointment_type,
+      transfer_on_request,
+      requested_person,
+      transfer_to,
+    } = req.body;
+    const phoneToCall = test_phone || '+16232230165';
+    const requestedAdvisor = requested_person || transfer_to;
 
     const result = await sendBlandCall({
       phone: phoneToCall,
@@ -544,13 +705,35 @@ blandAuth.post('/test-call', async (req, res) => {
       pathway_id,
       on_warm_transfer: on_warm_transfer !== undefined ? Boolean(on_warm_transfer) : undefined,
       preferred_appointment_type,
+      transfer_on_request: Boolean(transfer_on_request || requestedAdvisor),
+      requested_person: requestedAdvisor,
       override_pause: true,
     });
+
+    let transferResult: any = null;
+    if ((transfer_on_request || requestedAdvisor) && !result.on_warm_transfer) {
+      transferResult = await executeSarahTool(
+        'whisper_warm_transfer',
+        {
+          recipient_name: requestedAdvisor || 'King Amen Ra',
+          prospect_name: req.user!.name || 'Medicare Beneficiary',
+          prospect_phone: phoneToCall,
+          state: 'AZ',
+        },
+        {
+          mode: 'outbound',
+          prospect_name: req.user!.name || 'Medicare Beneficiary',
+          prospect_phone: phoneToCall,
+          state: 'AZ',
+        }
+      );
+    }
 
     res.json({
       ...result,
       test_phone: phoneToCall,
       voice: voice || 'maya',
+      transfer_result: transferResult || result.whisper_transfer,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
