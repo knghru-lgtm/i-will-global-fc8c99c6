@@ -1074,8 +1074,6 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
       inbound_greeting: 'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?',
       whisper_transfer_enabled: 'true',
       auto_ai_whisper: 'true',
-      whisper_briefing: whisperScripts.whisperBriefing,
-      merge_introduction: whisperScripts.mergeIntroduction,
       on_warm_transfer: isOnWarmTransfer ? 'true' : 'false',
       broker_busy_on_warm_transfer: isOnWarmTransfer,
       broker_status: isOnWarmTransfer ? 'ON_WARM_TRANSFER' : 'AVAILABLE',
@@ -1084,7 +1082,7 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
       preferred_appointment_type: rawPreferredApptType ? formatAppointmentTypeLabel(rawPreferredApptType) : undefined,
       operating_instruction: isOnWarmTransfer
         ? 'IMPORTANT: King Amen Ra is currently on a warm transfer call with another client. Do NOT transfer this call. Let the caller know King Amen Ra is currently on a warm transfer call, and ONLY offer and select a Telephone, In-Person, or Video appointment. Collect their choice of Telephone, In-Person, or Video and preferred date/time, confirm it, and end the call so the system continues making calls!'
-        : 'King Amen Ra is available for automatic AI whisper warm transfer via the Connect to King Amen Ra scenario (automatically deliver the AI whisper briefing to King Amen Ra and merge into a 3-way introduction), or you can book strictly a Telephone, In-Person, or Video appointment.',
+        : 'King Amen Ra is available for warm transfer. When the caller agrees, route to "Connect to King Amen Ra". To the caller, ONLY say: "Wonderful! I am connecting you right now with King Amen Ra, our Principal Broker and Licensed Senior Advisor. Please hold for just a moment while I get him on the line." STRICT RULE: The whisper briefing is private and delivered directly to the broker; NEVER speak or recite any whisper briefing or notes to the caller!',
     };
 
     const metadataPayload = {
