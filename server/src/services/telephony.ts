@@ -243,8 +243,8 @@ export async function placeCarrierTrunkCall(params: {
   };
 }
 
-export function getProvider(id = 'enterprise_trunk'): TelephonyProvider {
-  if (id === 'google_voice') return GoogleVoiceProvider;
+export function getProvider(id = 'google_voice'): TelephonyProvider {
+  if (id === 'enterprise_trunk') return EnterpriseTrunkProvider;
   if (id === 'bland_ai') return BlandAIProvider;
-  return EnterpriseTrunkProvider;
+  return GoogleVoiceProvider;
 }

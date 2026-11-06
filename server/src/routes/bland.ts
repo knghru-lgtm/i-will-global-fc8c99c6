@@ -482,7 +482,7 @@ blandAuth.post('/activate', async (req, res) => {
     // 5c. Fill every open line with the next prospects assigned to Bland AI.
     let tick: any = null;
     if (continue_queue) {
-      tick = await runBlandAutoDialerTick({ reason: 'activate' });
+      tick = await runBlandAutoDialerTick({ reason: 'activate', force: true });
       if (tick?.dispatched?.length) dispatched.push(...tick.dispatched);
     }
 
@@ -546,7 +546,7 @@ blandAuth.post('/assign', async (req, res) => {
       [BLAND_AI_USER_ID, lead_ids]
     );
     const cfg = await getBlandConfig();
-    const tick = cfg.is_campaign_active ? await runBlandAutoDialerTick({ reason: 'assign' }) : null;
+    const tick = cfg.is_campaign_active ? await runBlandAutoDialerTick({ reason: 'assign', force: true }) : null;
     const assigned = await countBlandAssignedRemaining();
     res.json({
       success: true,

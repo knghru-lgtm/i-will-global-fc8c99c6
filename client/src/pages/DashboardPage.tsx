@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../lib/api';
+import { api, openGoogleVoiceWindow } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Link } from 'react-router-dom';
 
@@ -9,7 +9,7 @@ export const DashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [blandConfig, setBlandConfig] = useState<any>(null);
   const [activatingBland, setActivatingBland] = useState(false);
-  const [blandQuickPhone, setBlandQuickPhone] = useState('4803345557');
+  const [blandQuickPhone, setBlandQuickPhone] = useState('6232230165');
   const [blandBannerMsg, setBlandBannerMsg] = useState('');
 
   useEffect(() => {
@@ -151,16 +151,29 @@ export const DashboardPage: React.FC = () => {
               onClick={async () => {
                 setActivatingBland(true);
                 setBlandBannerMsg('');
+                const dialPhone = blandQuickPhone.trim() || '6232230165';
+                openGoogleVoiceWindow(dialPhone);
+                window.dispatchEvent(
+                  new CustomEvent('iwg-open-sarah-voice', {
+                    detail: {
+                      mode: 'outbound',
+                      prospect_name: 'Medicare Beneficiary',
+                      phone: dialPhone,
+                      state: 'AZ',
+                      on_warm_transfer: Boolean(blandConfig?.is_on_warm_transfer),
+                    },
+                  })
+                );
                 try {
                   const res = await api.post('/bland/activate', {
-                    phone: blandQuickPhone.trim() || undefined,
+                    phone: dialPhone,
                     on_warm_transfer: Boolean(blandConfig?.is_on_warm_transfer),
                     continue_queue: true,
                   });
-                  setBlandBannerMsg(res.message || 'Bland Agent AI activated!');
+                  setBlandBannerMsg(res.message || 'Sarah Voice AI + Google Voice (480) 331-9455 activated!');
                   window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
                 } catch (err: any) {
-                  setBlandBannerMsg('⚠️ ' + (err.message || 'Failed to activate Bland AI'));
+                  setBlandBannerMsg('⚠️ ' + (err.message || 'Failed to activate Sarah Voice AI'));
                 } finally {
                   setActivatingBland(false);
                 }

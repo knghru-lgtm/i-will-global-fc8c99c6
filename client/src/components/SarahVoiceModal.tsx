@@ -99,7 +99,186 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const playerRef = useRef<AudioPlayer | null>(null);
+  const httpModeRef = useRef<boolean>(false);
+  const recognitionRef = useRef<any>(null);
+  const transcriptsRef = useRef<TranscriptItem[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    transcriptsRef.current = transcripts;
+  }, [transcripts]);
+
+  const speakBrowserText = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      const voices = window.speechSynthesis.getVoices();
+      const femaleVoice =
+        voices.find((v) => /zira|aria|samantha|jenny|google us english|female/i.test(v.name) && /en/i.test(v.lang)) ||
+        voices.find((v) => /en-US/i.test(v.lang));
+      if (femaleVoice) utter.voice = femaleVoice;
+      utter.rate = 1.03;
+      utter.pitch = 1.05;
+      utter.onstart = () => {
+        setIsSpeaking(true);
+        setSarahVolume(0.65);
+      };
+      utter.onend = () => {
+        setIsSpeaking(false);
+        setSarahVolume(0);
+      };
+      utter.onerror = () => {
+        setIsSpeaking(false);
+        setSarahVolume(0);
+      };
+      window.speechSynthesis.speak(utter);
+    } catch {}
+  };
+
+  const sendHttpTurn = async (
+    userText: string,
+    ctxOverride?: {
+      mode?: 'inbound' | 'outbound';
+      lead_id?: string;
+      prospect_name?: string;
+      phone?: string;
+      state?: string;
+      address?: string;
+      on_warm_transfer?: boolean;
+      is_initial?: boolean;
+    }
+  ) => {
+    try {
+      const historyPayload = transcriptsRef.current
+        .filter((t) => (t.speaker === 'sarah' || t.speaker === 'user') && !t.isAction)
+        .slice(-10)
+        .map((t) => ({ speaker: t.speaker as 'sarah' | 'user', text: t.text }));
+
+      const res = await fetch('/api/sarah/turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: userText,
+          is_initial: Boolean(ctxOverride?.is_initial),
+          history: historyPayload,
+          context: {
+            mode: ctxOverride?.mode || callMode,
+            lead_id: ctxOverride?.lead_id !== undefined ? ctxOverride.lead_id : leadId,
+            prospect_name: ctxOverride?.prospect_name || prospectName,
+            prospect_phone: ctxOverride?.phone !== undefined ? ctxOverride.phone : prospectPhone,
+            state: ctxOverride?.state || prospectState,
+            address: ctxOverride?.address !== undefined ? ctxOverride.address : prospectAddress,
+            on_warm_transfer: ctxOverride?.on_warm_transfer !== undefined ? ctxOverride.on_warm_transfer : onWarmTransfer,
+          },
+        }),
+      }).then((r) => r.json());
+
+      if (res?.reply) {
+        appendNewTranscript('sarah', res.reply);
+        speakBrowserText(res.reply);
+        const lower = String(res.reply).toLowerCase();
+        if (lower.includes('$1,788') || lower.includes('$2,400') || lower.includes('20%')) {
+          setActiveScriptStep(2);
+        } else if (
+          lower.includes('please hold') ||
+          lower.includes('30-minute telephone') ||
+          lower.includes('60-minute in-person') ||
+          lower.includes('introducing king')
+        ) {
+          setActiveScriptStep(3);
+        }
+      }
+
+      if (res?.appointment?.success) {
+        setConfirmedAppt(res.appointment);
+        setActiveScriptStep(3);
+        setTranscripts((prev) => [
+          ...prev,
+          {
+            id: 'appt_' + Date.now(),
+            speaker: 'system',
+            text: `📅 Official Appointment Confirmed on (480) 331-9455: ${res.appointment.customer_name} (${res.appointment.appointment_type}) — ${res.appointment.confirmed_datetime}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            isAction: true,
+          },
+        ]);
+        window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
+      }
+
+      if (res?.transfer?.success) {
+        setWhisperTransfer(res.transfer);
+        setActiveScriptStep(3);
+        if (res.transfer.recipient_phone) {
+          openGoogleVoiceWindow(res.transfer.recipient_phone);
+        }
+        setTranscripts((prev) => [
+          ...prev,
+          {
+            id: 'wt_' + Date.now(),
+            speaker: 'system',
+            text: `⚡ Google Voice Automatic AI Whisper Transfer to ${res.transfer.recipient_name} (${res.transfer.recipient_phone}) — Whisper Briefing Delivered & 3-Way Call Merged!`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            isAction: true,
+          },
+        ]);
+        window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
+      }
+    } catch (err) {
+      console.warn('Sarah HTTP turn error:', err);
+    }
+  };
+
+  const activateHttpVoiceFallback = async (ctx: {
+    mode: 'inbound' | 'outbound';
+    lead_id?: string;
+    prospect_name: string;
+    phone?: string;
+    state: string;
+    address?: string;
+    on_warm_transfer: boolean;
+  }) => {
+    if (httpModeRef.current) return;
+    httpModeRef.current = true;
+    setConnectionStatus('connected');
+    setErrorMessage(null);
+
+    // Start Browser SpeechRecognition if supported
+    try {
+      const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRec) {
+        const rec = new SpeechRec();
+        rec.continuous = true;
+        rec.interimResults = false;
+        rec.lang = 'en-US';
+        rec.onresult = (ev: any) => {
+          const lastIdx = ev.results.length - 1;
+          const spoken = ev.results[lastIdx]?.[0]?.transcript?.trim();
+          if (spoken) {
+            appendNewTranscript('user', spoken);
+            sendHttpTurn(spoken, ctx);
+          }
+        };
+        rec.onerror = () => {};
+        rec.onend = () => {
+          if (httpModeRef.current && !isMuted) {
+            try {
+              rec.start();
+            } catch {}
+          }
+        };
+        recognitionRef.current = rec;
+        rec.start();
+      }
+    } catch {}
+
+    await sendHttpTurn('', { ...ctx, is_initial: true });
+    const topicToUse = initialPayload?.initialTopic || initialTopic;
+    if (topicToUse) {
+      appendNewTranscript('user', topicToUse);
+      await sendHttpTurn(topicToUse, ctx);
+    }
+  };
 
   // Auto-scroll transcript to bottom
   useEffect(() => {
@@ -335,23 +514,64 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         }
       };
 
-      ws.onerror = (e) => {
-        console.error('WebSocket error:', e);
-        setConnectionStatus('error');
-        setErrorMessage('Failed to connect to Sarah Voice AI service.');
+      let wsOpened = false;
+      const fallbackCtx = {
+        mode: activeMode,
+        lead_id: activeLeadId,
+        prospect_name: activeName,
+        phone: activePhone,
+        state: activeState,
+        address: activeAddress,
+        on_warm_transfer: Boolean(activeWT),
+      };
+
+      const prevOnOpen = ws.onopen;
+      ws.onopen = async (ev) => {
+        wsOpened = true;
+        if (prevOnOpen) await (prevOnOpen as any).call(ws, ev);
+      };
+
+      ws.onerror = () => {
+        if (!wsOpened) {
+          activateHttpVoiceFallback(fallbackCtx);
+        }
       };
 
       ws.onclose = () => {
-        setConnectionStatus('closed');
+        if (!wsOpened || !httpModeRef.current) {
+          if (!wsOpened) {
+            activateHttpVoiceFallback(fallbackCtx);
+          } else {
+            setConnectionStatus('closed');
+          }
+        }
       };
     } catch (err: any) {
-      console.error('Failed to start session:', err);
-      setConnectionStatus('error');
-      setErrorMessage(err.message || 'Failed to start session');
+      activateHttpVoiceFallback({
+        mode: activeMode,
+        lead_id: activeLeadId,
+        prospect_name: activeName,
+        phone: activePhone,
+        state: activeState,
+        address: activeAddress,
+        on_warm_transfer: Boolean(activeWT),
+      });
     }
   };
 
   const endSession = () => {
+    httpModeRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
     if (recorderRef.current) {
       recorderRef.current.stop();
       recorderRef.current = null;
@@ -369,6 +589,18 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     setIsSpeaking(false);
     setUserVolume(0);
     setSarahVolume(0);
+  };
+
+  const appendNewTranscript = (speaker: 'sarah' | 'user', text: string) => {
+    setTranscripts((prev) => [
+      ...prev,
+      {
+        id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        speaker,
+        text,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
   };
 
   const appendOrUpdateTranscript = (speaker: 'sarah' | 'user', text: string) => {
@@ -399,10 +631,23 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const next = !isMuted;
     setIsMuted(next);
     recorderRef.current?.setMuted(next);
+    if (recognitionRef.current) {
+      try {
+        if (next) recognitionRef.current.stop();
+        else recognitionRef.current.start();
+      } catch {}
+    }
   };
 
   const interruptSarah = () => {
     playerRef.current?.stop();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
+    setIsSpeaking(false);
+    setSarahVolume(0);
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'end_turn' }));
     }
@@ -416,24 +661,35 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       wsRef.current.send(JSON.stringify({ type: 'text', text }));
       appendOrUpdateTranscript('user', text);
       if (!textToSend) setTextInput('');
+    } else {
+      appendNewTranscript('user', text);
+      if (!textToSend) setTextInput('');
+      sendHttpTurn(text);
     }
   };
 
   const triggerScriptStepDirective = (stepNum: number, directiveText: string) => {
     setActiveScriptStep(stepNum);
     playerRef.current?.stop();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
+    setTranscripts((prev) => [
+      ...prev,
+      {
+        id: 'tree_' + Date.now(),
+        speaker: 'system',
+        text: `🌳 Outbound Script Tree → Step ${stepNum}: ${directiveText.slice(0, 95)}...`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isAction: true,
+      },
+    ]);
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'script_step', prompt: directiveText }));
-      setTranscripts((prev) => [
-        ...prev,
-        {
-          id: 'tree_' + Date.now(),
-          speaker: 'system',
-          text: `🌳 Outbound Script Tree → Step ${stepNum}: ${directiveText.slice(0, 95)}...`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isAction: true,
-        },
-      ]);
+    } else {
+      sendHttpTurn(`[SCRIPT TREE DIRECTIVE]: ${directiveText}`);
     }
   };
 
@@ -449,25 +705,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       );
     } else {
       openGoogleVoiceWindow('+16024569681');
-      api
-        .post('/bland/whisper-transfer', {
-          recipient_name: recipientName,
-          prospect_name: prospectName,
-          prospect_phone: prospectPhone,
-          state: prospectState,
-        })
-        .then((res) => {
-          if (res?.ok) {
-            setWhisperTransfer({
-              recipient_name: res.recipient_name || recipientName,
-              recipient_phone: res.recipient_phone || '+16024569681',
-              prospect_name: res.prospect_name || prospectName,
-              whisper_briefing: res.whisper_briefing || '',
-              merge_introduction: res.merge_introduction || '',
-            });
-          }
-        })
-        .catch(() => {});
+      sendHttpTurn(`Please transfer me to ${recipientName} right now.`);
     }
   };
 

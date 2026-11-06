@@ -368,15 +368,14 @@ calls.post('/transfer/complete', async (req, res) => {
                  targetAgent?.email?.toLowerCase() === 'king@iwillglobal.com' ||
                  targetAgent?.name?.toLowerCase().includes('king');
 
-  // ONLY credit scheduler if target agent is King AND call was actually picked up by King!
-  const pickedUpByKing = Boolean(
-    isKing &&
-    (activity.meta?.picked_up_by_king || activity.meta?.accepted_at || activity.meta?.three_way_connected_at || call_picked_up_by_king) &&
+  // Award Scheduler $25.00 Lead Credit when warm transfer is accepted & completed by the licensed agent or Principal!
+  const pickedUpByAgent = Boolean(
+    (activity.meta?.picked_up_by_king || activity.meta?.accepted_at || activity.meta?.three_way_connected_at || call_picked_up_by_king || isKing) &&
     disposition_id === 'warm_transfer_success'
   );
 
-  // Award Scheduler $25.00 Lead Credit ONLY if call was picked up by King!
-  if (schedulerId && pickedUpByKing) {
+  const pickedUpByKing = pickedUpByAgent;
+  if (schedulerId && pickedUpByAgent) {
     const periodStr = new Date().toISOString().slice(0, 7);
     await insert('commissions', {
       agent_id: schedulerId,
@@ -392,7 +391,7 @@ calls.post('/transfer/complete', async (req, res) => {
     await notify(
       schedulerId,
       `🎉 $25 Lead Credit Awarded (Warm Transfer)!`,
-      `Warm transfer for ${leadOrClient?.first_name || 'prospect'} was picked up by King and completed. You earned $25.00 lead credit!`,
+      `Warm transfer for ${leadOrClient?.first_name || 'prospect'} was accepted by ${targetAgent?.name || 'licensed agent'} and completed. You earned $25.00 lead credit!`,
       `/${activity.related_type}s/${activity.related_id}`,
     );
   }

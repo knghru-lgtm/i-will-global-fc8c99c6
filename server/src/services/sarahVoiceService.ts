@@ -971,3 +971,172 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
     }
   }
 }
+
+/**
+ * Serverless HTTP Voice Turn handler (`POST /api/public/sarah/turn`) for Vercel (`iwillglobal.com`)
+ * where WebSocket upgrades are not available on serverless functions.
+ * Supports full Inbound Virtual Receptionist, Outbound Script & Tree, Appointment Booking,
+ * and Automatic AI Whisper Warm Transfers over standard HTTPS + Browser SpeechSynthesis / SpeechRecognition.
+ */
+export async function handleSarahHttpTurn(params: {
+  message?: string;
+  history?: Array<{ speaker: 'sarah' | 'user'; text: string }>;
+  context?: Partial<SarahSessionContext>;
+  is_initial?: boolean;
+}) {
+  let dbWarmTransfer = false;
+  try {
+    const blandCfg = await getBlandConfig();
+    dbWarmTransfer = Boolean(blandCfg.is_on_warm_transfer);
+  } catch {
+    // ignore
+  }
+
+  const sessionContext: SarahSessionContext = {
+    mode: params.context?.mode === 'outbound' ? 'outbound' : 'inbound',
+    lead_id: params.context?.lead_id,
+    prospect_name: params.context?.prospect_name || 'Medicare Beneficiary',
+    prospect_phone: params.context?.prospect_phone || '+16232230165',
+    state: params.context?.state || 'Arizona',
+    address: params.context?.address || '',
+    caller_name: params.context?.caller_name || 'Sarah',
+    on_warm_transfer:
+      params.context?.on_warm_transfer !== undefined ? Boolean(params.context.on_warm_transfer) : dbWarmTransfer,
+  };
+
+  const firstName = (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there';
+
+  // 1. Initial opening greeting when call starts
+  if (params.is_initial || !params.message) {
+    const openingReply =
+      sessionContext.mode === 'outbound'
+        ? `Hello ${firstName}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`
+        : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
+    return {
+      ok: true,
+      reply: openingReply,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY,
+      on_warm_transfer: sessionContext.on_warm_transfer,
+    };
+  }
+
+  const userText = String(params.message || '').trim();
+  let transferResult: any = null;
+  let appointmentResult: any = null;
+  let dispositionResult: any = null;
+
+  // 2. Check if caller requested a warm transfer or asked to speak with King Amen Ra / a licensed advisor
+  const reqCheck = detectTransferRequest(userText);
+  if (reqCheck.requested && !sessionContext.on_warm_transfer) {
+    transferResult = await executeSarahTool(
+      'whisper_warm_transfer',
+      {
+        recipient_name: reqCheck.recipientName,
+        prospect_name: sessionContext.prospect_name,
+        prospect_phone: sessionContext.prospect_phone,
+        state: sessionContext.state,
+      },
+      sessionContext
+    );
+    return {
+      ok: true,
+      reply: `Please hold for just 15 seconds while I dial ${transferResult.recipient_name || reqCheck.recipientName} on the line and share your notes with him first. ... ${transferResult.merge_introduction}`,
+      transfer: transferResult,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY,
+    };
+  }
+
+  // 3. If Gemini API is enabled, generate Sarah's response with tool support
+  if (isAIEnabled()) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+      const historyContents = (params.history || []).slice(-10).map((h) => ({
+        role: h.speaker === 'sarah' ? 'model' : 'user',
+        parts: [{ text: h.text }],
+      }));
+      historyContents.push({
+        role: 'user',
+        parts: [{ text: userText }],
+      });
+
+      const response = await ai.models.generateContent({
+        model: config.gemini.model || 'gemini-2.5-flash',
+        contents: historyContents,
+        config: {
+          systemInstruction: buildSarahSystemInstruction(sessionContext),
+          tools: SARAH_TOOLS,
+        },
+      });
+
+      let replyText = response.text || '';
+
+      if (response.functionCalls && response.functionCalls.length > 0) {
+        for (const call of response.functionCalls) {
+          const result = await executeSarahTool(call.name || '', (call.args as Record<string, any>) || {}, sessionContext);
+          if (call.name === 'whisper_warm_transfer' && result.success) {
+            transferResult = result;
+            if (!replyText) {
+              replyText = `Please hold for just 15 seconds while I dial ${result.recipient_name} on the line and share your notes with him first. ... ${result.merge_introduction}`;
+            }
+          } else if (call.name === 'book_appointment' && result.success) {
+            appointmentResult = result;
+            if (!replyText) {
+              replyText = result.message;
+            }
+          } else if (call.name === 'record_call_disposition' && result.success) {
+            dispositionResult = result;
+          }
+        }
+      }
+
+      if (replyText) {
+        const holdCheck = detectSarahTransferHoldSpeech(replyText);
+        if (holdCheck.triggered && !transferResult && !sessionContext.on_warm_transfer) {
+          transferResult = await executeSarahTool(
+            'whisper_warm_transfer',
+            {
+              recipient_name: holdCheck.recipientName,
+              prospect_name: sessionContext.prospect_name,
+              prospect_phone: sessionContext.prospect_phone,
+              state: sessionContext.state,
+            },
+            sessionContext
+          );
+        }
+        return {
+          ok: true,
+          reply: replyText,
+          transfer: transferResult,
+          appointment: appointmentResult,
+          disposition: dispositionResult,
+          mode: sessionContext.mode,
+          line: SARAH_MAIN_LINE_DISPLAY,
+        };
+      }
+    } catch (err) {
+      console.warn('Sarah HTTP turn Gemini fallback:', err);
+    }
+  }
+
+  // 4. Deterministic Outbound Script & Tree fallback if Gemini is offline or rate-limited
+  const lower = userText.toLowerCase();
+  if (lower.includes('doing well') || lower.includes('good') || lower.includes('step 2') || lower.includes('value hook')) {
+    return {
+      ok: true,
+      reply: `Wonderful! The reason for my call today is to make sure you are receiving your maximum 2025 Medicare benefits in ${sessionContext.state} — including the $1,788 annual Part B giveback, up to $2,400 a year in Healthy Food and Utilities allowance cards, and protection against the uncapped 20% hospital and surgical coinsurance under Original Medicare. Have you had your 2025 benefit review yet?`,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY,
+    };
+  }
+
+  return {
+    ok: true,
+    reply: sessionContext.on_warm_transfer
+      ? `Our principal broker King Amen Ra is currently assisting another beneficiary on a live consultation, so I can lock in your priority appointment right now. Would you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Google Meet Video session?`
+      : `I would love to get that taken care of for you right away! Would you like me to connect you live right now via a brief 15-second whisper warm transfer to our Principal Broker King Amen Ra, or would you prefer to schedule a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?`,
+    mode: sessionContext.mode,
+    line: SARAH_MAIN_LINE_DISPLAY,
+  };
+}

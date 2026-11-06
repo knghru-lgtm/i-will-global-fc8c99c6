@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../lib/api';
+import { api, openGoogleVoiceWindow } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 interface DnsCheckData {
@@ -93,7 +93,7 @@ export const SettingsPage: React.FC = () => {
   const [blandGithubRepo, setBlandGithubRepo] = useState<string>('');
   const [blandDefaultVoice, setBlandDefaultVoice] = useState<string>('maya');
   const [blandModel, setBlandModel] = useState<string>('enhanced');
-  const [blandFromNumber, setBlandFromNumber] = useState<string>('+16024569681');
+  const [blandFromNumber, setBlandFromNumber] = useState<string>('+14803319455');
   const [blandTransferNumber, setBlandTransferNumber] = useState<string>('+16024569681');
   const [blandPrompt, setBlandPrompt] = useState<string>('');
   const [blandWebhookUrl, setBlandWebhookUrl] = useState<string>('https://iwillglobal.com/api/bland/webhook');
@@ -104,7 +104,7 @@ export const SettingsPage: React.FC = () => {
   const [blandSaving, setBlandSaving] = useState<boolean>(false);
   const [blandSuccess, setBlandSuccess] = useState<string>('');
   const [blandError, setBlandError] = useState<string>('');
-  const [blandTestPhone, setBlandTestPhone] = useState<string>('+16024569681');
+  const [blandTestPhone, setBlandTestPhone] = useState<string>('+16232230165');
   const [blandTesting, setBlandTesting] = useState<boolean>(false);
   const [blandTestResult, setBlandTestResult] = useState<string>('');
 
@@ -308,13 +308,24 @@ export const SettingsPage: React.FC = () => {
     setBlandTesting(true);
     setBlandTestResult('');
     setBlandError('');
+    openGoogleVoiceWindow(blandTestPhone);
+    window.dispatchEvent(
+      new CustomEvent('iwg-open-sarah-voice', {
+        detail: {
+          mode: 'outbound',
+          prospect_name: 'Medicare Beneficiary',
+          phone: blandTestPhone,
+          state: 'AZ',
+        },
+      })
+    );
     try {
       const res = await api.post('/bland/test-call', {
         test_phone: blandTestPhone,
         voice: blandDefaultVoice,
         pathway_id: blandPathwayId,
       });
-      setBlandTestResult(`✅ Call dispatched! Call ID: ${res.call_id} (Pathway: ${blandPathwayId}) — ${res.simulated ? 'Simulated Preview Mode' : 'Live Telecom Call'}`);
+      setBlandTestResult(`✅ Google Voice + Sarah AI Call Dispatched! Call ID: ${res.call_id} (Line: (480) 331-9455 → ${blandTestPhone})`);
     } catch (err: any) {
       setBlandError(err.message || 'Test call failed');
     } finally {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../lib/api';
+import { api, openGoogleVoiceWindow } from '../lib/api';
 
 interface BlandVoice {
   id: string;
@@ -113,6 +113,21 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
         ...res,
         call_id: activeCallId,
       });
+      if (lead?.phone) {
+        openGoogleVoiceWindow(lead.phone);
+      }
+      window.dispatchEvent(
+        new CustomEvent('iwg-open-sarah-voice', {
+          detail: {
+            mode: 'outbound',
+            lead_id: lead.id,
+            prospect_name: prospectName,
+            phone: lead.phone,
+            state: lead.state || 'AZ',
+            on_warm_transfer: onWarmTransfer,
+          },
+        })
+      );
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
       if (onCallDispatched) onCallDispatched(res);
     } catch (err: any) {

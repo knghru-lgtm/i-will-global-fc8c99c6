@@ -14,7 +14,7 @@ import { auth, api, googleCallback } from './routes/api.ts';
 import { ai, inbox, publicApi } from './routes/ai.ts';
 import { blandPublic, blandAuth } from './routes/bland.ts';
 import { subscribe } from './realtime.ts';
-import { handleSarahVoiceSession } from './services/sarahVoiceService.ts';
+import { handleSarahVoiceSession, handleSarahHttpTurn, executeSarahTool } from './services/sarahVoiceService.ts';
 
 export function createApp() {
   const app = express();
@@ -23,6 +23,25 @@ export function createApp() {
   app.use(express.json({ limit: '2mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, ai: isAIEnabled() ? 'gemini' : 'demo', google: isGoogleEnabled() }));
+
+  // Public Sarah Voice AI HTTP endpoints for Vercel Serverless (iwillglobal.com) & Browser Voice fallback
+  app.post('/api/sarah/turn', async (req, res) => {
+    try {
+      const result = await handleSarahHttpTurn(req.body || {});
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Sarah voice turn failed' });
+    }
+  });
+  app.post('/api/sarah/tool', async (req, res) => {
+    try {
+      const { name, args, context } = req.body || {};
+      const result = await executeSarahTool(name || '', args || {}, context || { mode: 'inbound' });
+      res.json({ ok: true, result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Sarah tool execution failed' });
+    }
+  });
 
   // Public: website chat widget, SOA e-sign, appointment web confirmation, OAuth callback, Bland AI webhook
   app.use('/api/public', publicApi);

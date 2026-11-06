@@ -340,7 +340,7 @@ export async function getAvailableAgents(state = 'AZ', appointmentAt?: string, d
        (SELECT count(*)::int FROM agent_credentials c WHERE c.user_id=u.id AND c.ready_to_sell=true AND c.status='Active') AS active_credentials
      FROM users u
      WHERE u.active AND u.role IN ('licensed_agent','manager','admin') AND u.states @> $3::jsonb
-     ORDER BY (CASE WHEN u.phone LIKE '%480%331%9455' THEN 0 WHEN u.id = 'u_principal' OR lower(u.email) = 'king@iwillglobal.com' THEN 1 ELSE 2 END), conflicts ASC, total_load_7d ASC, u.name ASC`,
+     ORDER BY (CASE WHEN u.id = 'u_principal' OR lower(u.email) = 'king@iwillglobal.com' THEN 0 WHEN u.phone LIKE '%480%331%9455' THEN 1 ELSE 2 END), conflicts ASC, total_load_7d ASC, u.name ASC`,
     [bufferedStart, bufferedEnd, JSON.stringify([st])],
   );
 
