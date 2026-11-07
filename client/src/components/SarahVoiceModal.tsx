@@ -489,64 +489,123 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const recipientName = transferObj?.recipient_name || 'King Amen Ra';
     const recipientPhone = transferObj?.recipient_phone || '+16024569681';
     const activeCtx = sessionCtxRef.current;
+    const liveCallId = transferObj?.bland_call_id || null;
 
-    // Step 1: Automatically call the transline
+    // Step 1: Place the customer on hold and dial 602-456-9681 FIRST (never announce connection yet!)
     setTranslineStage('dialing_transline');
+    setActiveScriptStep(3);
     openGoogleVoiceWindow(recipientPhone);
 
-    // Step 2: Verify transline connection & whisper receipt with backend
-    setTimeout(() => setTranslineStage('transline_connected'), 250);
-    setTimeout(() => setTranslineStage('whisper_received'), 550);
+    const pendingTransfer: WhisperTransferConfirmation = {
+      ...transferObj,
+      recipient_name: recipientName,
+      recipient_phone: recipientPhone,
+      prospect_name: activeCtx.prospect_name || 'Caller',
+      verification: {
+        transline_dialed: true,
+        transline_number: recipientPhone,
+        transline_connected: false,
+        whisper_delivered: false,
+        whisper_received: false,
+        both_parties_on_line: false,
+        party_a_prospect: activeCtx.prospect_name || 'Caller',
+        party_b_transline: recipientName,
+      },
+    };
+    setWhisperTransfer(pendingTransfer);
 
-    try {
-      const verifyRes = await fetch('/api/sarah/transfer/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipient_name: recipientName,
-          recipient_phone: recipientPhone,
-          prospect_name: activeCtx.prospect_name,
-          prospect_phone: activeCtx.phone,
-          state: activeCtx.state,
-          lead_id: activeCtx.lead_id,
-          mode: activeCtx.mode,
-        }),
-      })
-        .then((r) => r.json())
-        .catch(() => null);
+    setTranscripts((prev) => [
+      ...prev,
+      {
+        id: 'wt_dialing_' + Date.now(),
+        speaker: 'system',
+        text: `📞 Calling ${recipientName} on ${recipientPhone} (602-456-9681)${liveCallId ? ` [Live Call ID: ${liveCallId.slice(0, 8)}...]` : ''} — Waiting for ${recipientName} to Answer & Connect Before Announcing to Customer...`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isAction: true,
+      },
+    ]);
 
-      const confirmedTransfer: WhisperTransferConfirmation = verifyRes?.transfer || {
-        ...transferObj,
-        recipient_name: recipientName,
-        recipient_phone: recipientPhone,
-        prospect_name: activeCtx.prospect_name,
-        verification: {
-          transline_dialed: true,
-          transline_number: recipientPhone,
-          transline_connected: true,
-          whisper_delivered: true,
-          whisper_received: true,
-          both_parties_on_line: true,
-        },
-      };
+    // Step 2: Poll live call status until 602-456-9681 actually answers and connects!
+    if (liveCallId) {
+      const maxPolls = 22; // up to ~44 seconds while 602-456-9681 rings
+      for (let attempt = 0; attempt < maxPolls; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          const statusParams = new URLSearchParams({
+            recipient_name: recipientName,
+            recipient_phone: recipientPhone,
+            prospect_name: activeCtx.prospect_name || 'Caller',
+          });
+          const statusRes = await fetch(`/api/sarah/transfer/status/${encodeURIComponent(liveCallId)}?${statusParams.toString()}`)
+            .then((r) => r.json())
+            .catch(() => null);
 
-      setWhisperTransfer(confirmedTransfer);
-      setTranslineStage('both_parties_on_line');
-      setActiveScriptStep(3);
+          if (statusRes?.connected) {
+            setTranslineStage('transline_connected');
+            setTimeout(() => setTranslineStage('whisper_received'), 200);
+            setTimeout(() => setTranslineStage('both_parties_on_line'), 400);
 
-      setTranscripts((prev) => [
-        ...prev,
-        {
-          id: 'wt_verify_' + Date.now(),
-          speaker: 'system',
-          text: `✅ Verified Transline Bridge: (1) Automatically Called ${recipientName} (${recipientPhone}) → (2) Transline Connected → (3) Private Whisper Received → (4) Both Parties (${activeCtx.prospect_name} & ${recipientName}) Verified on the Line!`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isAction: true,
-        },
-      ]);
-      window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
-    } catch {
-      setTranslineStage('both_parties_on_line');
+            const connectedTransfer: WhisperTransferConfirmation = {
+              ...pendingTransfer,
+              verification: {
+                transline_dialed: true,
+                transline_number: recipientPhone,
+                transline_connected: true,
+                whisper_delivered: true,
+                whisper_received: true,
+                both_parties_on_line: true,
+                party_a_prospect: activeCtx.prospect_name || 'Caller',
+                party_b_transline: recipientName,
+              },
+            };
+            setWhisperTransfer(connectedTransfer);
+
+            const announceText =
+              statusRes.connected_announcement ||
+              transferObj?.merge_introduction ||
+              `Thank you so much for your patience! I have connected with ${recipientName} on the line now. ${recipientName}, I have ${activeCtx.prospect_name || 'our caller'} with us—I will let you two take it from here!`;
+
+            appendNewTranscript('sarah', announceText);
+            playSarahResponseAudio(announceText);
+
+            setTranscripts((prev) => [
+              ...prev,
+              {
+                id: 'wt_verify_' + Date.now(),
+                speaker: 'system',
+                text: `✅ Verified Live Connection: (1) Called ${recipientName} (${recipientPhone}) → (2) ${recipientName} Answered & Connected → (3) Private Whisper Delivered → (4) Announced Connection to Customer!`,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                isAction: true,
+              },
+            ]);
+            window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
+            return;
+          }
+
+          if (statusRes?.unavailable) {
+            setTranslineStage('idle');
+            setWhisperTransfer(null);
+            const fallbackMsg =
+              statusRes.unavailable_message ||
+              `Thank you so much for holding! ${recipientName} is currently wrapping up with another client and wasn't able to grab the line right this second, so let's lock in a priority time for you on his calendar during our work hours of Monday through Friday, 8:00 AM to 8:00 PM. Do you prefer a 30-minute Telephone, 60-minute In-Person, or 30-minute Video consultation?`;
+            appendNewTranscript('sarah', fallbackMsg);
+            playSarahResponseAudio(fallbackMsg);
+            setTranscripts((prev) => [
+              ...prev,
+              {
+                id: 'wt_unavail_' + Date.now(),
+                speaker: 'system',
+                text: `ℹ️ ${recipientName} (${recipientPhone}) was unavailable on the live ring (${statusRes.status || 'no_answer'}) — Transitioned caller to priority appointment booking.`,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                isAction: true,
+              },
+            ]);
+            return;
+          }
+        } catch {
+          // continue polling
+        }
+      }
     }
   };
 
@@ -1209,34 +1268,9 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     setActiveScriptStep(3);
     playerRef.current?.stop();
     stopAllSarahAudio();
-    executeVerifiedTranslineBridge({
-      recipient_name: recipientName,
-      recipient_phone: '+16024569681',
-      prospect_name: prospectName || 'Caller',
-      whisper_briefing: `Whisper to ${recipientName}: I have ${prospectName || 'a beneficiary'} (${prospectPhone || 'Inbound Caller'}) from ${prospectState || 'AZ'} on the line ready to speak with you. Connecting you now.`,
-      merge_introduction: `Thank you for holding! I have verified ${recipientName} is on the line with us now.`,
-    });
-    if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
-      wsRef.current.send(
-        JSON.stringify({
-          clientContent: {
-            turns: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    text: `[URGENT TRANSFER DIRECTIVE]: Call whisper_warm_transfer for ${recipientName} right now and tell the caller: "Please hold one brief moment while I dial ${recipientName}'s line, verify the connection, deliver a quick whisper briefing, and merge us into a 3-way call."`,
-                  },
-                ],
-              },
-            ],
-            turnComplete: true,
-          },
-        })
-      );
-    } else {
-      sendHttpTurn(`Please transfer me to ${recipientName} right now.`);
-    }
+    const userReqText = `Please transfer me to ${recipientName} right now.`;
+    appendNewTranscript('user', userReqText);
+    sendHttpTurn(userReqText);
   };
 
   if (!isOpen) return null;

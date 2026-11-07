@@ -20,6 +20,8 @@ import {
   executeSarahTool,
   synthesizeSarahNeuralAudio,
   getSarahDirectLiveSessionConfig,
+  checkLiveTransferCallStatus,
+  checkReceptionistWorkHours,
 } from './services/sarahVoiceService.ts';
 
 export function createApp() {
@@ -69,28 +71,80 @@ export function createApp() {
   });
   app.post('/api/sarah/transfer/verify', async (req, res) => {
     try {
-      const { recipient_name, recipient_phone, prospect_name, prospect_phone, state, lead_id, mode } = req.body || {};
+      const {
+        call_id,
+        bland_call_id,
+        recipient_name,
+        recipient_phone,
+        prospect_name,
+        prospect_phone,
+        state,
+        lead_id,
+        mode,
+        force_work_hours,
+        simulated_now_iso,
+        force_live_connect,
+      } = req.body || {};
+
+      const activeCallId = call_id || bland_call_id;
+      if (activeCallId) {
+        const liveStatus = await checkLiveTransferCallStatus({
+          call_id: String(activeCallId),
+          recipient_name: recipient_name || 'King Amen Ra',
+          recipient_phone: recipient_phone || '+16024569681',
+          prospect_name: prospect_name || 'Valued Client',
+          state: state || 'AZ',
+        });
+        return res.json({ ok: true, live_status: liveStatus, transfer: liveStatus });
+      }
+
       const result = await executeSarahTool(
         'whisper_warm_transfer',
         {
           recipient_name: recipient_name || 'King Amen Ra',
-          prospect_name: prospect_name || 'Valued Beneficiary',
+          prospect_name: prospect_name || 'Valued Client',
           prospect_phone: prospect_phone || '+16232230165',
           state: state || 'AZ',
           reason: 'Automatic Transline Connection, Private Whisper Receipt, and Both-Parties-on-Line Verification',
+          force_live_connect,
         },
         {
           mode: mode === 'outbound' ? 'outbound' : 'inbound',
           lead_id,
-          prospect_name: prospect_name || 'Valued Beneficiary',
+          prospect_name: prospect_name || 'Valued Client',
           prospect_phone: prospect_phone || '+16232230165',
           state: state || 'AZ',
+          force_work_hours,
+          simulated_now_iso,
+          force_live_connect,
         }
       );
       res.json({ ok: true, transfer: result });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || 'Transfer verification failed' });
     }
+  });
+  app.get('/api/sarah/transfer/status/:callId', async (req, res) => {
+    try {
+      const status = await checkLiveTransferCallStatus({
+        call_id: req.params.callId,
+        recipient_name: String(req.query?.recipient_name || 'King Amen Ra'),
+        recipient_phone: String(req.query?.recipient_phone || '+16024569681'),
+        prospect_name: String(req.query?.prospect_name || 'Valued Client'),
+        state: String(req.query?.state || 'AZ'),
+      });
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Transfer status check failed' });
+    }
+  });
+  app.get('/api/sarah/work-hours', (req, res) => {
+    const wh = checkReceptionistWorkHours({
+      simulated_now_iso: req.query?.now ? String(req.query.now) : undefined,
+      force_work_hours:
+        req.query?.force === 'true' ? true : req.query?.force === 'false' ? false : undefined,
+    });
+    res.json({ ok: true, ...wh });
   });
 
   // Public: website chat widget, SOA e-sign, appointment web confirmation, OAuth callback, Bland AI webhook

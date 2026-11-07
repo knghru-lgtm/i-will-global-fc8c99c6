@@ -20,7 +20,12 @@ import {
   BLAND_AI_USER_ID,
 } from '../services/bland.ts';
 import { one, q, insert } from '../db/index.ts';
-import { executeSarahTool, upsertReceptionistLeadFromContext } from '../services/sarahVoiceService.ts';
+import {
+  executeSarahTool,
+  upsertReceptionistLeadFromContext,
+  checkReceptionistWorkHours,
+  RECEPTIONIST_WORK_HOURS_LABEL,
+} from '../services/sarahVoiceService.ts';
 
 export const blandPublic = Router();
 export const blandAuth = Router();
@@ -105,6 +110,12 @@ blandPublic.all('/inbound', async (req, res) => {
         if (upsertedId) inboundLeadId = upsertedId;
       }
 
+      const workHoursStatus = checkReceptionistWorkHours({
+        mode: 'inbound',
+        force_work_hours: Boolean(req.body?.force_work_hours),
+        simulated_now_iso: req.body?.simulated_now_iso,
+      });
+
       if (requestedPerson && !cfg.is_on_warm_transfer) {
         transferResult = await executeSarahTool(
           'whisper_warm_transfer',
@@ -125,6 +136,8 @@ blandPublic.all('/inbound', async (req, res) => {
             address: callerAddress,
             state: req.body?.state || 'AZ',
             product_interest: productLine,
+            force_work_hours: Boolean(req.body?.force_work_hours),
+            simulated_now_iso: req.body?.simulated_now_iso,
           }
         );
       }
@@ -160,7 +173,7 @@ blandPublic.all('/inbound', async (req, res) => {
       const inboundAct = await insert('activities', {
         type: 'call',
         subject: `🎧 Receptionist Inbound Call on (480) 331-9455 — ${callerName || callerPhone || 'Call-In Lead'}`,
-        body: `Inbound call answered immediately 24/7 by Receptionist on (480) 331-9455 (+14803319455).\nLead Source Tag: Call-In Lead\nCaller: ${callerName || 'Pending Name'} (${callerPhone || 'Pending Phone'})${callerAddress ? `\nAddress: ${callerAddress}` : ''}${transferResult ? `\nWhisper Transfer to ${transferResult.recipient_name} (${transferResult.recipient_phone}): "${transferResult.private_whisper_delivered}"` : ''}${appointmentResult?.success ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
+        body: `Inbound call answered immediately by Receptionist on (480) 331-9455 (+14803319455).\nOfficial Work Hours: ${RECEPTIONIST_WORK_HOURS_LABEL} (Open Now: ${workHoursStatus.isOpen ? 'YES' : 'NO — No Warm Transfers Outside Work Hours'})\nLead Source Tag: Call-In Lead\nCaller: ${callerName || 'Pending Name'} (${callerPhone || 'Pending Phone'})${callerAddress ? `\nAddress: ${callerAddress}` : ''}${transferResult?.success ? `\nLive Outbound Call to ${transferResult.recipient_name} (${transferResult.recipient_phone}) Initiated (Call ID: ${transferResult.bland_call_id || 'Pending'}): "${transferResult.private_whisper_delivered}"` : transferResult?.outside_work_hours ? `\nWarm Transfer Blocked Outside Work Hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Transitioned to Appointment Booking` : ''}${appointmentResult?.success ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
         related_type: 'lead',
         related_id: appointmentResult?.lead_id || inboundLeadId || null,
         user_id: BLAND_AI_USER_ID,
@@ -169,11 +182,13 @@ blandPublic.all('/inbound', async (req, res) => {
         direction: 'inbound',
         phone: callerPhone || '+14803319455',
         provider: 'bland_ai',
-        disposition_id: appointmentResult?.success ? 'appointment_set' : transferResult ? 'warm_transfer_success' : 'contacted_interested',
+        disposition_id: appointmentResult?.success ? 'appointment_set' : transferResult?.success ? 'warm_transfer_success' : 'contacted_interested',
         disposition: appointmentResult?.success
           ? `Receptionist Inbound — ${appointmentResult.appointment_type} Appointment Booked`
-          : transferResult
-          ? `Receptionist Inbound — Whisper Warm Transfer to ${transferResult.recipient_name}`
+          : transferResult?.success
+          ? `Receptionist Inbound — Live Call to ${transferResult.recipient_name} (${transferResult.recipient_phone})`
+          : transferResult?.outside_work_hours
+          ? `Receptionist Inbound — Outside Work Hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Appointment Offered`
           : 'Receptionist Inbound — Answered Immediately on (480) 331-9455',
         duration_sec: 45,
         meta: {
@@ -183,6 +198,8 @@ blandPublic.all('/inbound', async (req, res) => {
           line_e164: '+14803319455',
           answered_immediately: true,
           ring_delay_ms: 0,
+          work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+          work_hours_status: workHoursStatus,
           caller_phone: callerPhone,
           caller_name: callerName,
           caller_address: callerAddress,
@@ -194,6 +211,12 @@ blandPublic.all('/inbound', async (req, res) => {
       activityId = inboundAct?.id || null;
     }
 
+    const currentWorkHours = checkReceptionistWorkHours({
+      mode: 'inbound',
+      force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
+      simulated_now_iso: String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined,
+    });
+
     res.json({
       ok: true,
       success: true,
@@ -202,7 +225,10 @@ blandPublic.all('/inbound', async (req, res) => {
       wait_for_greeting: false,
       ring_delay_ms: 0,
       receptionist: 'Receptionist',
-      receptionist_name: 'Sarah',
+      receptionist_name: 'Receptionist',
+      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours_status: currentWorkHours,
+      warm_transfers_allowed_now: currentWorkHours.isOpen && !cfg.is_on_warm_transfer,
       lead_source: 'Call-In Lead',
       lead_id: inboundLeadId,
       line: '(480) 331-9455',
@@ -213,7 +239,7 @@ blandPublic.all('/inbound', async (req, res) => {
       caller_name: callerName,
       caller_address: callerAddress,
       first_sentence:
-        'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?',
+        'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?',
       transfer_phone_number: '+16024569681',
       directory_count: dir.directory.length,
       transfer_list: dir.transfer_list,

@@ -25,6 +25,8 @@ import { googleVoiceWebUrl } from './phone.ts';
 export const SARAH_MAIN_LINE_DISPLAY = '(480) 331-9455';
 export const SARAH_MAIN_LINE_E164 = AGENCY_MAIN_LINE_E164; // +14803319455
 export const KING_DIRECT_LINE_E164 = TRANSFER_DESK_E164;   // +16024569681
+export const BLAND_INBOUND_LINE_E164 = '+15208415736';     // +15208415736 (answers forwarded calls from 480-331-9455)
+export const RECEPTIONIST_WORK_HOURS_LABEL = 'Monday through Friday, 8:00 AM to 8:00 PM (Arizona time)';
 
 export interface SarahSessionContext {
   mode: 'inbound' | 'outbound';
@@ -39,6 +41,62 @@ export interface SarahSessionContext {
   source_channel?: 'call_in_lead' | 'website_traffic' | 'outbound';
   preferred_datetime?: string;
   appointment_type?: 'Telephone' | 'In-Person' | 'Video';
+  force_work_hours?: boolean;
+  simulated_now_iso?: string;
+  force_live_connect?: boolean;
+}
+
+const PHOENIX_OFFSET_MS = 7 * 3600 * 1000;
+const DAY_NAMES_SHORT = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Checks whether the current time in Arizona (America/Phoenix, UTC-7) is within
+ * official Receptionist Work Hours: Monday through Friday, 8:00 AM to 8:00 PM.
+ * Warm transfers are strictly prohibited outside Monday–Friday 8:00 AM to 8:00 PM.
+ */
+export function checkReceptionistWorkHours(
+  ctx?: Partial<SarahSessionContext>,
+  nowInput?: Date
+): {
+  isOpen: boolean;
+  dayName: string;
+  hour: number;
+  minute: number;
+  localTimeDisplay: string;
+  workHoursLabel: string;
+  reason: string;
+} {
+  const refDate =
+    ctx?.simulated_now_iso && !Number.isNaN(Date.parse(ctx.simulated_now_iso))
+      ? new Date(ctx.simulated_now_iso)
+      : nowInput || new Date();
+  const phx = new Date(refDate.getTime() - PHOENIX_OFFSET_MS);
+  const day = phx.getUTCDay(); // 0=Sunday .. 6=Saturday
+  const hour = phx.getUTCHours(); // 0..23
+  const minute = phx.getUTCMinutes();
+  const dayName = DAY_NAMES_SHORT[day] || 'Today';
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  const mPad = String(minute).padStart(2, '0');
+  const localTimeDisplay = `${dayName} ${h12}:${mPad} ${ampm} MST`;
+
+  const isWeekday = day >= 1 && day <= 5;
+  const isWithinHours = hour >= 8 && hour < 20; // 8:00 AM to 7:59:59 PM (8:00 PM exclusive)
+  const computedOpen = isWeekday && isWithinHours;
+  const isOpen =
+    typeof ctx?.force_work_hours === 'boolean' ? ctx.force_work_hours : computedOpen;
+
+  return {
+    isOpen,
+    dayName,
+    hour,
+    minute,
+    localTimeDisplay,
+    workHoursLabel: RECEPTIONIST_WORK_HOURS_LABEL,
+    reason: isOpen
+      ? `Within official work hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Current Arizona time: ${localTimeDisplay}`
+      : `Outside official work hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Current Arizona time: ${localTimeDisplay}. No warm transfers outside Monday–Friday 8:00 AM to 8:00 PM.`,
+  };
 }
 
 export function isPlaceholderProspectName(name?: string): boolean {
@@ -114,11 +172,18 @@ export function buildSarahSystemInstruction(ctx?: Partial<SarahSessionContext>):
   const activeProduct = ctx?.product_interest || '';
   const hasValidPhone = !isPlaceholderProspectPhone(ctx?.prospect_phone, mode);
   const hasValidAddress = !isPlaceholderProspectAddress(ctx?.address);
+  const workHours = checkReceptionistWorkHours(ctx);
 
   return `You are Sarah, the Receptionist, 6-Division Insurance Specialist, and Outbound Caller on line ${SARAH_MAIN_LINE_DISPLAY} (${SARAH_MAIN_LINE_E164}) for IWG Insurance and Financial Services (iwillglobal.com).
 NEVER refer to yourself as "AI", "AI Receptionist", "Virtual Receptionist", or "Voice AI" to any caller—simply refer to yourself as the Receptionist (or Sarah, the Receptionist).
 You represent a 100% free fiduciary advisory comparing over 104 premier carriers with zero broker fees, led by Principal Broker and Licensed Senior Advisor King Amen Ra (NPN: 16094432, Direct Transfer Line: ${KING_DIRECT_LINE_E164}) and Chief Operating Officer Aneesha Sullivan, PA (Physician Assistant & Principal Governance).
 Every interaction must reflect our four core pillars: World-Class Excellence, Uncompromising Integrity, Radical Service Orientation, and Genuine Care & Empathy.
+
+OFFICIAL WORK HOURS & WARM TRANSFER AVAILABILITY (STRICT ENFORCEMENT):
+- OUR OFFICIAL WORK HOURS: **Monday through Friday, 8:00 AM to 8:00 PM (Arizona time, America/Phoenix)**.
+- CURRENT ARIZONA TIME & WORK HOURS STATUS: ${workHours.localTimeDisplay} — ${workHours.isOpen ? 'OPEN (Within M–F 8:00 AM – 8:00 PM work hours — Warm transfers ARE permitted)' : 'OUTSIDE WORK HOURS (Outside M–F 8:00 AM – 8:00 PM — ZERO warm transfers permitted! Book an appointment instead!)'}.
+- ZERO WARM TRANSFERS OUTSIDE WORK HOURS: If a call takes place outside Monday through Friday, 8:00 AM to 8:00 PM Arizona time, there are NO warm transfers under any circumstances! Politely inform the caller that our work hours are Monday through Friday from 8:00 AM to 8:00 PM, and guide them through booking a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment during our work hours.
+- CALL 602-456-9681 & CONNECT BEFORE TELLING THE CUSTOMER WE ARE CONNECTED: During work hours (M–F 8:00 AM – 8:00 PM), when initiating a warm transfer to King Amen Ra (${KING_DIRECT_LINE_E164}), you MUST place the customer on hold first saying ONLY: "Wonderful! Please hold for just a moment while I call King Amen Ra on his line and connect to him first." NEVER tell the customer that King Amen Ra is on the line or that you are connected BEFORE ${KING_DIRECT_LINE_E164} actually answers and connects!
 
 CURRENT CALL MODE ON LINE ${SARAH_MAIN_LINE_DISPLAY}: ${mode.toUpperCase()}${activeProduct ? `\nDETECTED CUSTOMER PRODUCT INTEREST: ${activeProduct} (Stay strictly focused on ${activeProduct}—NEVER treat this caller as a Medicare lead unless they specifically ask about Medicare!)` : ''}
 CAPTURED PROSPECT DETAILS SO FAR:
@@ -127,11 +192,13 @@ CAPTURED PROSPECT DETAILS SO FAR:
 - Street Address: ${hasValidAddress ? ctx?.address : 'MISSING (You MUST ask the caller for their street address!)'}
 ${mode === 'outbound'
       ? `ACTIVE OUTBOUND PROSPECT: ${isGenericName ? 'Valued Client' : prospectName} (Address them as: "${firstName}", State: ${state}${hasValidPhone ? `, Phone: ${ctx?.prospect_phone}` : ''}${hasValidAddress ? `, Address: ${ctx?.address}` : ''})
-KING AMEN RA WARM TRANSFER STATUS: ${onWarmTransfer
-        ? 'ON_WARM_TRANSFER (King Amen Ra is currently on a live consultation—use Path B Executive Alternative-Choice Appointment Close to book a Telephone, In-Person, or Video appointment and send an initial confirmation text!)'
-        : 'AVAILABLE (King Amen Ra is available—use Path A Direct Transfer OR Path B Appointment Booking + Initial Confirmation Text!)'
+KING AMEN RA WARM TRANSFER STATUS: ${!workHours.isOpen
+        ? 'OUTSIDE_WORK_HOURS (Outside M–F 8:00 AM to 8:00 PM — NO warm transfers! Book a Telephone, In-Person, or Video appointment during M–F 8am–8pm!)'
+        : onWarmTransfer
+          ? 'ON_WARM_TRANSFER (King Amen Ra is currently on a live consultation—use Path B Executive Alternative-Choice Appointment Close to book a Telephone, In-Person, or Video appointment and send an initial confirmation text!)'
+          : 'AVAILABLE (Within M–F 8:00 AM to 8:00 PM — King Amen Ra is available: call +16024569681 and connect first before telling customer, OR book an appointment!)'
       }`
-      : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Receptionist Mode — Answer immediately right away, listen to which of our 6 product divisions they are asking about, route to any of the 42 directory members via transfer, or follow the mandatory step-by-step appointment setting process to add a new lead and book an appointment with King Amen Ra)`
+      : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Receptionist Mode — Answer immediately right away 24/7. Work hours for live warm transfers are Monday–Friday 8:00 AM to 8:00 PM Arizona time. Outside M–F 8am–8pm, never warm transfer—always book an appointment by collecting Full Name, Phone Number, Street Address, Format, and Date/Time)`
     }
 
 ================================================================================
@@ -805,6 +872,21 @@ export async function executeSarahTool(
         ? matched.e164
         : KING_DIRECT_LINE_E164;
 
+    // 1. STRICT WORK HOURS ENFORCEMENT (Monday–Friday, 8:00 AM to 8:00 PM Arizona time)
+    const workHours = checkReceptionistWorkHours(ctx);
+    const forceLiveConnect = Boolean(args.force_live_connect || ctx?.force_live_connect);
+    if (!workHours.isOpen && !forceLiveConnect) {
+      return {
+        success: false,
+        outside_work_hours: true,
+        work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+        work_hours_status: workHours,
+        recipient_name: recipientName,
+        recipient_phone: recipientPhone,
+        message: `Our work hours are Monday through Friday from 8:00 AM to 8:00 PM Arizona time, and there are no warm transfers outside those times. I would love to schedule a dedicated consultation for you with ${recipientName} during our work hours! Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and may I please get your full name, phone number, and street address so I can send your confirmation text?`,
+      };
+    }
+
     const scripts = buildAiWhisperScripts({
       recipient_name: recipientName,
       caller_name: 'Sarah',
@@ -813,26 +895,81 @@ export async function executeSarahTool(
       notes: reason,
     });
 
+    const holdMessage = `Wonderful! Please hold for just a moment while I call ${recipientName} on the line and connect to them first. I will let you know as soon as we are connected.`;
+
+    // 2. Place a REAL live outbound call to recipientPhone (+16024569681) via Bland API so 602-456-9681 actually rings & connects BEFORE telling the customer they are connected!
+    let blandCallId: string | null = null;
+    let blandDialStatus = 'dialing';
+    let blandDialError: string | null = null;
     try {
-      const transferId = crypto.randomUUID();
+      const blandCfg = await getBlandConfig();
+      const apiKey = blandCfg.api_key || process.env.BLAND_API_KEY || '';
+      if (apiKey) {
+        const callPayload = {
+          phone_number: recipientPhone,
+          from: BLAND_INBOUND_LINE_E164,
+          voice: 'ae30cefc-6ba2-4883-90fb-4b221f6c5073',
+          wait_for_greeting: false,
+          record: true,
+          max_duration: 5,
+          first_sentence: scripts.whisperBriefing,
+          task: `You are Sarah, the Receptionist for IWG Insurance and Financial Services, calling ${recipientName} on ${recipientPhone} to connect a live warm transfer with ${prospectName} (${prospectPhone}) in ${state} regarding ${reason}. Deliver the whisper briefing clearly and confirm ${recipientName} is ready to be connected with the customer.`,
+          metadata: {
+            transfer_type: 'receptionist_warm_transfer',
+            recipient_name: recipientName,
+            recipient_phone: recipientPhone,
+            prospect_name: prospectName,
+            prospect_phone: prospectPhone,
+            product_interest: detectedProduct || 'Insurance & Benefits',
+          },
+        };
+        const resp = await fetch('https://api.bland.ai/v1/calls', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: apiKey,
+          },
+          body: JSON.stringify(callPayload),
+        });
+        const data: any = await resp.json().catch(() => ({}));
+        if (data?.call_id) {
+          blandCallId = String(data.call_id);
+          blandDialStatus = 'ringing';
+        } else if (data?.message || data?.errors) {
+          blandDialError = String(data?.message || JSON.stringify(data?.errors));
+        }
+      }
+    } catch (err: any) {
+      blandDialError = err?.message || 'Live Bland call dispatch failed';
+      console.error('Error dialing live transfer line on 602-456-9681:', err);
+    }
+
+    const transferId = crypto.randomUUID();
+    try {
       await q(
         `INSERT INTO activities (id, type, subject, body, related_type, related_id, status, completed, direction, phone, provider, disposition_id, disposition, meta, created_at)
-         VALUES ($1, 'call', $2, $3, 'lead', $4, 'Completed', true, $5, $6, 'sarah_voice_ai', 'warm_transfer_success', 'Whisper Warm Transfer Connected', $7, now())`,
+         VALUES ($1, 'call', $2, $3, 'lead', $4, 'In Progress', false, $5, $6, 'sarah_voice_ai', 'warm_transfer_ringing', 'Calling Transfer Line (Connecting Before Announcing)', $7, now())`,
         [
           transferId,
-          `⚡ Automatic AI Whisper Transfer to ${recipientName} (${recipientPhone}) — ${prospectName}`,
-          `Hold Placed -> Private Whisper Briefing Delivered to ${recipientName}: "${scripts.whisperBriefing}"\n3-Way Merge Introduction: "${scripts.mergeIntroduction}"`,
+          `📞 Calling ${recipientName} (${recipientPhone}) for Live Warm Transfer — ${prospectName}`,
+          `Hold Message Spoken to Customer: "${holdMessage}"\nDialing ${recipientPhone} (Bland Call ID: ${blandCallId || 'pending'})...\nWhisper Briefing Ready for ${recipientName}: "${scripts.whisperBriefing}"\nMerge Introduction (spoken ONLY after ${recipientPhone} connects): "${scripts.mergeIntroduction}"`,
           ctx?.lead_id || null,
           ctx?.mode === 'outbound' ? 'outbound' : 'inbound',
           recipientPhone,
           JSON.stringify({
             line_number: SARAH_MAIN_LINE_E164,
+            from_number: BLAND_INBOUND_LINE_E164,
+            bland_call_id: blandCallId,
+            bland_dial_status: blandDialStatus,
+            bland_dial_error: blandDialError,
             recipient_name: recipientName,
             recipient_phone: recipientPhone,
             prospect_name: prospectName,
             prospect_phone: prospectPhone,
             state,
             reason,
+            work_hours: workHours,
+            hold_message: holdMessage,
             whisper_briefing: scripts.whisperBriefing,
             merge_introduction: scripts.mergeIntroduction,
           }),
@@ -845,8 +982,14 @@ export async function executeSarahTool(
     const nowIso = new Date().toISOString();
     return {
       success: true,
-      transfer_status: 'whisper_completed_and_merged',
-      telephony_provider: 'google_voice',
+      transfer_id: transferId,
+      bland_call_id: blandCallId,
+      bland_dial_status: blandDialStatus,
+      bland_dial_error: blandDialError,
+      transfer_status: 'calling_transfer_line_waiting_for_answer',
+      telephony_provider: blandCallId ? 'bland_live_pstn' : 'google_voice',
+      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours_status: workHours,
       recipient_name: recipientName,
       recipient_phone: recipientPhone,
       google_voice_transfer_url: googleVoiceWebUrl(recipientPhone),
@@ -854,8 +997,9 @@ export async function executeSarahTool(
       prospect_phone: prospectPhone,
       state,
       line_number: SARAH_MAIN_LINE_DISPLAY,
-      originating_line: SARAH_MAIN_LINE_E164,
+      originating_line: BLAND_INBOUND_LINE_E164,
       hold_completed: true,
+      hold_message: holdMessage,
       whisper_briefing: scripts.whisperBriefing,
       private_whisper_delivered: scripts.whisperBriefing,
       merge_introduction: scripts.mergeIntroduction,
@@ -863,25 +1007,27 @@ export async function executeSarahTool(
       verification: {
         transline_dialed: true,
         transline_number: recipientPhone,
-        transline_connected: true,
-        transline_connected_at: nowIso,
-        whisper_delivered: true,
-        whisper_received: true,
-        whisper_received_at: nowIso,
-        both_parties_on_line: true,
-        bridge_merged_at: nowIso,
+        bland_call_id: blandCallId,
+        transline_connected: false,
+        transline_connected_at: null,
+        whisper_delivered: false,
+        whisper_received: false,
+        whisper_received_at: null,
+        both_parties_on_line: false,
+        bridge_merged_at: null,
+        dialed_at: nowIso,
         party_a_prospect: {
           name: prospectName,
           phone: prospectPhone,
-          status: 'CONNECTED_ON_LINE',
+          status: 'ON_HOLD_WAITING_FOR_ADVISOR_CONNECTION',
         },
         party_b_transline: {
           name: recipientName,
           phone: recipientPhone,
-          status: 'CONNECTED_ON_LINE',
+          status: blandCallId ? 'RINGING_LIVE_PSTN' : 'DIALING',
         },
       },
-      instruction: `${recipientName} has been privately whisper-briefed on Google Voice (${recipientPhone}), whisper receipt is verified, and both parties (${prospectName} and ${recipientName}) are verified on the line together!`,
+      instruction: `Customer placed on hold ("${holdMessage}"). Currently dialing ${recipientName} at ${recipientPhone} (Call ID: ${blandCallId || 'live'}). DO NOT tell the customer they are connected until ${recipientPhone} answers and connects!`,
     };
   }
 
@@ -959,6 +1105,129 @@ export async function executeSarahTool(
   }
 
   return { error: 'Unknown tool declaration' };
+}
+
+/**
+ * Checks the live Bland PSTN call status for a warm transfer call placed to +16024569681 (or directory number).
+ * Returns `connected: true` ONLY AFTER the recipient has actually answered the call on 602-456-9681,
+ * so the Receptionist never tells the customer they are connected before 602-456-9681 answers.
+ */
+export async function checkLiveTransferCallStatus(params: {
+  call_id: string;
+  recipient_name?: string;
+  recipient_phone?: string;
+  prospect_name?: string;
+  state?: string;
+  notes?: string;
+}) {
+  const callId = String(params.call_id || '').trim();
+  const recipientName = params.recipient_name || 'King Amen Ra';
+  const recipientPhone = params.recipient_phone || KING_DIRECT_LINE_E164;
+  const prospectName = params.prospect_name || 'Valued Client';
+  const scripts = buildAiWhisperScripts({
+    recipient_name: recipientName,
+    caller_name: 'Sarah',
+    prospect_name: prospectName,
+    state: params.state || 'Arizona',
+    notes: params.notes,
+  });
+
+  if (!callId) {
+    return {
+      ok: false,
+      call_id: null,
+      status: 'no_call_id',
+      connected: false,
+      unavailable: false,
+      transline_connected: false,
+      whisper_received: false,
+      both_parties_on_line: false,
+    };
+  }
+
+  try {
+    const blandCfg = await getBlandConfig();
+    const apiKey = blandCfg.api_key || process.env.BLAND_API_KEY || '';
+    if (!apiKey) {
+      return {
+        ok: false,
+        call_id: callId,
+        status: 'missing_api_key',
+        connected: false,
+        unavailable: false,
+      };
+    }
+
+    const resp = await fetch(`https://api.bland.ai/v1/calls/${encodeURIComponent(callId)}`, {
+      headers: { Authorization: apiKey },
+    });
+    const data: any = await resp.json().catch(() => ({}));
+    const rawStatus = String(data?.status || data?.queue_status || 'ringing').toLowerCase();
+    const answeredBy = String(data?.answered_by || '').toLowerCase();
+    const callLength = Number(data?.call_length || 0);
+    const transcripts = Array.isArray(data?.transcripts) ? data.transcripts : [];
+    const userSpoke = transcripts.some((t: any) => t?.user === 'user' && String(t?.text || '').trim().length > 0);
+    const agentSpoke = transcripts.some((t: any) => t?.user === 'agent' && String(t?.text || '').trim().length > 0);
+
+    const isUnavailable =
+      rawStatus === 'no-answer' ||
+      rawStatus === 'busy' ||
+      rawStatus === 'failed' ||
+      rawStatus === 'error' ||
+      rawStatus === 'canceled' ||
+      rawStatus === 'cancelled' ||
+      answeredBy === 'voicemail' ||
+      answeredBy === 'no-answer' ||
+      (rawStatus === 'completed' && callLength <= 0 && !agentSpoke);
+
+    // Connected ONLY when 602-456-9681 actually answered (in-progress with speech/human pickup, or answered_by human, or completed with real conversation)
+    const isConnected =
+      !isUnavailable &&
+      (answeredBy === 'human' ||
+        userSpoke ||
+        (rawStatus === 'in-progress' && agentSpoke) ||
+        (rawStatus === 'completed' && (callLength > 0.05 || agentSpoke)));
+
+    const nowIso = new Date().toISOString();
+    return {
+      ok: true,
+      call_id: callId,
+      status: rawStatus,
+      answered_by: answeredBy || null,
+      call_length: callLength,
+      connected: isConnected,
+      unavailable: isUnavailable,
+      recipient_name: recipientName,
+      recipient_phone: recipientPhone,
+      prospect_name: prospectName,
+      whisper_briefing: scripts.whisperBriefing,
+      connected_announcement: isConnected ? scripts.mergeIntroduction : null,
+      unavailable_message: isUnavailable
+        ? `${recipientName} is currently assisting another client and unable to take the live transfer right now. Let's get your dedicated 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment scheduled right on the calendar! What day and time Monday through Friday between 8:00 AM and 8:00 PM works best, and may I get your full name, phone number, and street address?`
+        : null,
+      verification: {
+        transline_dialed: true,
+        transline_number: recipientPhone,
+        bland_call_id: callId,
+        transline_connected: isConnected,
+        transline_connected_at: isConnected ? nowIso : null,
+        whisper_delivered: isConnected || agentSpoke,
+        whisper_received: isConnected,
+        whisper_received_at: isConnected ? nowIso : null,
+        both_parties_on_line: isConnected,
+        bridge_merged_at: isConnected ? nowIso : null,
+      },
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      call_id: callId,
+      status: 'poll_error',
+      error: err?.message,
+      connected: false,
+      unavailable: false,
+    };
+  }
 }
 
 /**
@@ -1931,6 +2200,15 @@ async function runClonedBlandScenario(
     }
   }
 
+  // 0B. Check if caller is asking about our work hours / business hours
+  if (/\b(work hours|business hours|office hours|what are your hours|what time do you open|what time do you close|when are you open|are you open)\b/i.test(lower)) {
+    const wh = checkReceptionistWorkHours(sessionContext);
+    return {
+      scenario: 'Work Hours & Availability',
+      reply: `Our work hours are Monday through Friday from 8:00 AM to 8:00 PM Arizona time. While I answer inbound calls 24 hours a day, 7 days a week to assist you and schedule appointments, live warm transfers to our Principal Broker King Amen Ra are available strictly during our work hours of Monday through Friday from 8:00 AM to 8:00 PM.${!wh.isOpen ? ' Since we are currently outside those hours, I would love to get you scheduled on King Amen Ra’s calendar—do you prefer a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment, and may I have your full name, phone number, and street address?' : ' How may I assist you today?'}`,
+    };
+  }
+
   // 1. Check for Appointment Booking progression (Format + Date/Time + Full Name + Phone Number + Street Address)
   const bookingIntent = detectAppointmentBookingIntent(userText, '', allHistoryText, history);
   if (bookingIntent.wantsAppointment) {
@@ -2031,9 +2309,17 @@ async function runClonedBlandScenario(
       },
       sessionContext
     );
+    if (transferResult?.outside_work_hours) {
+      return {
+        scenario: 'Outside Work Hours — Book Appointment (No Warm Transfers Outside M-F 8am-8pm)',
+        reply: transferResult.message,
+      };
+    }
     return {
       scenario: 'Connect to King Amen Ra',
-      reply: `Wonderful! Please hold for just a moment while I dial King Amen Ra and get him on the line. ... ${transferResult.merge_introduction}`,
+      reply:
+        transferResult.hold_message ||
+        `Wonderful! Please hold for just a moment while I call King Amen Ra on his line and connect to him first. I will let you know as soon as we are connected.`,
       transfer: transferResult,
     };
   }
@@ -2217,8 +2503,12 @@ export async function handleSarahHttpTurn(params: {
     product_interest: detectedProduct,
     source_channel:
       params.context?.source_channel || (resolvedMode === 'outbound' ? 'outbound' : 'website_traffic'),
+    force_work_hours: params.context?.force_work_hours,
+    simulated_now_iso: params.context?.simulated_now_iso,
+    force_live_connect: params.context?.force_live_connect,
   };
 
+  const workHoursNow = checkReceptionistWorkHours(sessionContext);
   const firstName = isGenericLeadName ? 'there' : (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there';
 
   // 1. Initial opening greeting when call starts (answers inbound calls immediately right away!)
@@ -2239,6 +2529,8 @@ export async function handleSarahHttpTurn(params: {
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY,
       on_warm_transfer: sessionContext.on_warm_transfer,
+      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours_status: workHoursNow,
     };
   }
 
@@ -2261,7 +2553,29 @@ export async function handleSarahHttpTurn(params: {
       },
       sessionContext
     );
-    const transferReply = `Wonderful! Please hold for just a moment while I automatically call ${transferResult.recipient_name || reqCheck.recipientName} on the transfer line, deliver your private whisper briefing, and verify both of you are connected on the line. ... ${transferResult.merge_introduction}`;
+    if (transferResult?.outside_work_hours) {
+      const outsideReply = transferResult.message;
+      const tts = await resolveTts(outsideReply);
+      return {
+        ok: true,
+        reply: outsideReply,
+        audio_base64: tts.audio_base64,
+        audio_mime: tts.audio_mime,
+        first_chunk_text: tts.first_chunk_text,
+        rest_text: tts.rest_text,
+        voice: tts.voice,
+        transfer: null,
+        outside_work_hours: true,
+        work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+        work_hours_status: workHoursNow,
+        mode: sessionContext.mode,
+        line: SARAH_MAIN_LINE_DISPLAY,
+      };
+    }
+    // IMPORTANT: Speak ONLY the hold message while dialing 602-456-9681 — NEVER announce connection before 602-456-9681 answers!
+    const transferReply =
+      transferResult.hold_message ||
+      `Wonderful! Please hold for just a moment while I call ${transferResult.recipient_name || reqCheck.recipientName} on the line and connect to them first. I will let you know as soon as we are connected.`;
     const tts = await resolveTts(transferReply);
     return {
       ok: true,
@@ -2272,6 +2586,8 @@ export async function handleSarahHttpTurn(params: {
       rest_text: tts.rest_text,
       voice: tts.voice,
       transfer: transferResult,
+      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours_status: workHoursNow,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY,
     };
@@ -2419,10 +2735,15 @@ export async function handleSarahHttpTurn(params: {
             }
 
             const result = await executeSarahTool(call.name || '', callArgs, sessionContext);
-            if (call.name === 'whisper_warm_transfer' && result.success) {
-              transferResult = result;
-              if (!replyText) {
-                replyText = `Wonderful! Please hold for just a moment while I automatically call ${result.recipient_name} on the transfer line, deliver your private whisper briefing, and verify both of you are connected on the line. ... ${result.merge_introduction}`;
+            if (call.name === 'whisper_warm_transfer') {
+              if (result.outside_work_hours) {
+                transferResult = null;
+                replyText = result.message;
+              } else if (result.success) {
+                transferResult = result;
+                replyText =
+                  result.hold_message ||
+                  `Wonderful! Please hold for just a moment while I call ${result.recipient_name} on the line and connect to them first. I will let you know as soon as we are connected.`;
               }
             } else if (call.name === 'book_appointment' || call.name === 'send_appointment_text_reminder') {
               if (result.needs_contact_info) {
@@ -2482,7 +2803,7 @@ export async function handleSarahHttpTurn(params: {
 
           const holdCheck = detectSarahTransferHoldSpeech(replyText);
           if (holdCheck.triggered && !transferResult && !sessionContext.on_warm_transfer) {
-            transferResult = await executeSarahTool(
+            const autoTransferRes = await executeSarahTool(
               'whisper_warm_transfer',
               {
                 recipient_name: holdCheck.recipientName,
@@ -2493,6 +2814,15 @@ export async function handleSarahHttpTurn(params: {
               },
               sessionContext
             );
+            if (autoTransferRes.outside_work_hours) {
+              transferResult = null;
+              replyText = autoTransferRes.message;
+            } else if (autoTransferRes.success) {
+              transferResult = autoTransferRes;
+              replyText =
+                autoTransferRes.hold_message ||
+                `Wonderful! Please hold for just a moment while I call ${autoTransferRes.recipient_name} on the line and connect to them first. I will let you know as soon as we are connected.`;
+            }
           }
           const tts = await resolveTts(replyText);
           return {
@@ -2512,6 +2842,8 @@ export async function handleSarahHttpTurn(params: {
             transfer: transferResult,
             appointment: appointmentResult,
             disposition: dispositionResult,
+            work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+            work_hours_status: workHoursNow,
             mode: sessionContext.mode,
             line: SARAH_MAIN_LINE_DISPLAY,
           };
