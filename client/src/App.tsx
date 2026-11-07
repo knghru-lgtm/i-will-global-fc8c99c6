@@ -300,7 +300,7 @@ export const App: React.FC = () => {
         });
         setIsSarahVoiceOpen(true);
       }
-    } catch {}
+    } catch { }
 
     return () => window.removeEventListener('iwg-open-sarah-voice', handleOpenSarah);
   }, []);
@@ -329,7 +329,7 @@ export const App: React.FC = () => {
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'))}
-          title="Receptionist — Live 24/7 Receptionist on (480) 331-9455"
+          title="Receptionist"
           style={{
             position: 'fixed',
             bottom: '24px',

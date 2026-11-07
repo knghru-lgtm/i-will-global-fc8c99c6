@@ -178,15 +178,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             }}
             title={
               activeRole === 'admin'
-                ? 'Activate Sarah Voice AI on (480) 331-9455 to Call Assigned Leads & Schedule Appointments'
-                : 'Sarah Virtual Receptionist on (480) 331-9455'
+                ? 'Activate Receptionist & Outbound Caller on (480) 331-9455 to Call Assigned Leads & Schedule Appointments'
+                : 'Receptionist'
             }
           >
             <span style={{ fontSize: '1.1rem' }}>🎙️</span>
             <span style={{ lineHeight: 1.2 }}>
-              Sarah Voice AI
+              Receptionist
               <span style={{ display: 'block', fontSize: '0.68rem', color: '#a7f3d0', fontWeight: 700 }}>
-                {activeRole === 'admin' ? '🚀 Activate & Call (480) 331-9455' : '🏢 Receptionist (480) 331-9455'}
+                {activeRole === 'admin' ? '🚀 Activate & Call (480) 331-9455' : '🏢 (480) 331-9455'}
               </span>
             </span>
           </button>
@@ -311,8 +311,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               }
               title={
                 activeRole === 'admin'
-                  ? 'Sarah Voice AI — (480) 331-9455 Virtual Receptionist & Admin Outbound Caller'
-                  : 'Sarah Voice AI — (480) 331-9455 Virtual Receptionist'
+                  ? 'Receptionist & Admin Outbound Caller — (480) 331-9455'
+                  : 'Receptionist'
               }
               style={{
                 background: 'linear-gradient(135deg, #059669 0%, #0284c7 100%)',
@@ -326,7 +326,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               }}
             >
               <span style={{ fontSize: '1.05rem' }}>🎙️</span>
-              <span className="btn-text">Sarah (480) 331-9455</span>
+              <span className="btn-text">Receptionist</span>
             </button>
 
             {/* 2. Admin-Only: Activate Sarah AI Outbound Scheduling Workday & Warm-Transfer Control */}

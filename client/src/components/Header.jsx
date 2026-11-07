@@ -55,7 +55,7 @@ const Header = () => {
               type="button"
               className="btn btn-small"
               onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'))}
-              title="Receptionist — Live 24/7 Receptionist on (480) 331-9455"
+              title="Receptionist"
               style={{
                 background: 'linear-gradient(135deg, #c8963e 0%, #0284c7 100%)',
                 color: '#ffffff',

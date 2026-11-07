@@ -124,7 +124,7 @@ async function runFlow(conv: any, intake: any, text: string): Promise<Reply | nu
     
     // Import and execute unified appointment scheduling
     const { scheduleAppointment } = await import('../appointments.ts');
-    const schUser: any = { id: 'u_sch1', name: 'Global Assistant (AI)', role: 'scheduler' };
+    const schUser: any = { id: 'u_sch1', name: 'Receptionist', role: 'scheduler' };
 
     const res = await scheduleAppointment({
       related_type: 'lead',
@@ -132,7 +132,7 @@ async function runFlow(conv: any, intake: any, text: string): Promise<Reply | nu
       appointment_type: 'telephone',
       appointment_at: at.toISOString(),
       location: `Phone: ${intake.phone}`,
-      notes: `Booked by Global Assistant (AI) via website chat. Conversation: ${conv.id}`,
+      notes: `Booked by Receptionist via website chat. Conversation: ${conv.id}`,
       send_confirmation_sms: Boolean(intake.phone),
       send_confirmation_email: Boolean(intake.email),
       booked_by: schUser,
@@ -191,8 +191,8 @@ export async function handleVisitorMessage(conversationId: string, rawText: stri
         try {
           body = await generateText(
             `Visitor message: "${text}"`,
-            `You are "Global Assistant", the AI for I Will Global, a licensed independent Medicare insurance agency in Arizona (${config.agency.phone}).
-Answer ONLY general Medicare education questions in 2-5 short sentences, plain language, warm tone.
+            `You are the "Receptionist" for I Will Global, a licensed independent insurance agency in Arizona (${config.agency.phone}).
+Answer general Medicare and insurance education questions in 2-5 short sentences, plain language, warm tone. Never refer to yourself as AI or an AI assistant—simply say you are the Receptionist.
 NEVER recommend, compare, or quote specific plans, carriers, premiums, copays, or benefits. NEVER ask for Medicare numbers, SSNs, or bank info.
 If the question needs personal plan advice or enrollment, say a licensed agent can help and offer to book a free appointment.
 If unrelated to Medicare/insurance, politely redirect. Reference knowledge:\n${KB_TEXT}`, 0.3);

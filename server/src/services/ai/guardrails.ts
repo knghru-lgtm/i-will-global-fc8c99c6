@@ -39,4 +39,4 @@ export function schedulerBenefitFlags(text: string): string[] {
 }
 
 export const CUSTOMER_AI_DISCLAIMER =
-  'I\'m an AI assistant for I Will Global, a licensed insurance agency. I can share general Medicare information and connect you with a licensed agent.';
+  'Welcome to I Will Global Insurance and Financial Services! I am your Receptionist. I can share Medicare and insurance information, schedule your appointment, or connect you directly with a licensed advisor.';

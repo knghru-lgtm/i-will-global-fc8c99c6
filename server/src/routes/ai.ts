@@ -163,7 +163,7 @@ inbox.post('/conversations/:id/takeover', async (req, res) => {
 
 inbox.post('/conversations/:id/release', async (req, res) => {
   const conv = await update('conversations', req.params.id, { status: 'ai', assigned_user_id: null });
-  await addMessage(req.params.id, 'system', 'The agent has left. Global Assistant (AI) is back to help.');
+  await addMessage(req.params.id, 'system', 'The agent has left. Receptionist is back to help.');
   publish(`conv:${req.params.id}`, 'status', { status: 'ai' });
   res.json(conv);
 });

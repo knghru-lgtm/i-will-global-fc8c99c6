@@ -277,7 +277,7 @@ export const BookAppointmentModal: React.FC<BookAppointmentModalProps> = ({
 
             <div style={{ background: 'var(--bg-surface)', padding: '1rem', borderRadius: '8px' }}>
               <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--accent)', marginBottom: '0.5rem' }}>
-                ⚡ Actions Executed Automatically by AI:
+                ⚡ Actions Executed Automatically by Receptionist:
               </div>
               <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.85rem', lineHeight: '1.6' }}>
                 {result.actions_taken?.map((act: string, idx: number) => (
@@ -866,7 +866,7 @@ export const BookAppointmentModal: React.FC<BookAppointmentModalProps> = ({
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={submitting} style={{ flex: 2, padding: '0.75rem', fontWeight: 700 }}>
-                {submitting ? 'Booking & Sending AI Confirmation...' : '📅 Schedule & Send AI Confirmation'}
+                {submitting ? 'Booking & Sending Confirmation...' : '📅 Schedule & Send Confirmation'}
               </button>
             </div>
           </form>

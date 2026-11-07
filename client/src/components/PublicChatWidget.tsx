@@ -62,7 +62,7 @@ export const PublicChatWidget: React.FC = () => {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="iwg-public-chat-btn"
-        aria-label="Toggle live AI assistant"
+        aria-label="Receptionist"
       >
         {isOpen ? '✕' : '💬'}
       </button>
@@ -76,8 +76,8 @@ export const PublicChatWidget: React.FC = () => {
               IWG
             </div>
             <div>
-              <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem' }}>Global Assistant</div>
-              <div style={{ color: '#c8963e', fontSize: '0.75rem' }}>I Will Global Medicare AI</div>
+              <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem' }}>Receptionist</div>
+              <div style={{ color: '#c8963e', fontSize: '0.75rem' }}>I Will Global</div>
             </div>
             <button
               type="button"
@@ -85,7 +85,7 @@ export const PublicChatWidget: React.FC = () => {
                 setIsOpen(false);
                 window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'));
               }}
-              title="Switch to live voice call with Receptionist"
+              title="Receptionist"
               style={{
                 marginLeft: 'auto',
                 background: 'linear-gradient(135deg, #c8963e, #0284c7)',
@@ -128,7 +128,7 @@ export const PublicChatWidget: React.FC = () => {
                 {m.body}
               </div>
             ))}
-            {loading && <div style={{ color: '#94a3b8', fontSize: '0.8rem', fontStyle: 'italic' }}>Global Assistant is typing...</div>}
+            {loading && <div style={{ color: '#94a3b8', fontSize: '0.8rem', fontStyle: 'italic' }}>Receptionist is typing...</div>}
           </div>
 
           {/* Quick Reply Pills */}

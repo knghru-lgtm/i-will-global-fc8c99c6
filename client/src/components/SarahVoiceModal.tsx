@@ -1285,7 +1285,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <span style={{ fontWeight: 800, fontSize: '1.12rem', color: '#ffffff' }}>
-                  {callMode === 'inbound' ? 'Receptionist' : 'Receptionist & Admin Outbound Caller — (480) 331-9455'}
+                  {callMode === 'inbound' ? 'Receptionist' : 'Receptionist & Admin Outbound Caller'}
                 </span>
                 <span
                   style={{
@@ -1299,7 +1299,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     textTransform: 'uppercase',
                   }}
                 >
-                  {callMode === 'inbound' ? '🏢 Receptionist • (480) 331-9455' : '📞 Admin Outbound Caller & Scheduler'}
+                  {callMode === 'inbound' ? 'Receptionist' : '📞 Admin Outbound Caller & Scheduler'}
                 </span>
               </div>
               <div style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.15rem' }}>
@@ -1441,7 +1441,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
             }}
           >
             <div style={{ fontSize: '0.8rem', color: '#d1fae5', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <span>🎧 <strong>Receptionist — Line (480) 331-9455:</strong></span>
+              <span>🎧 <strong>Receptionist:</strong></span>
               <span>Answers inbound calls immediately, guides all 6 product lines to an appointment (Full Name, Address & Phone), and sends automatic Confirmation + Day-Before & Same-Day Reminder Texts.</span>
             </div>
             {isAdmin && (
@@ -2264,7 +2264,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.75rem' }}>
                 <span style={{ color: isSpeaking ? '#fbbf24' : isMuted ? '#f87171' : '#4ade80', fontWeight: 700 }}>
                   {isSpeaking
-                    ? '🔊 Receptionist Speaking (Vindemiatrix — Calm & Relaxed Voice)...'
+                    ? '🔊 Receptionist Speaking...'
                     : isMuted
                     ? '🔇 Microphone Muted — Click Unmute Mic or type below'
                     : isMicListening

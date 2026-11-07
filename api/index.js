@@ -6827,7 +6827,7 @@ function schedulerBenefitFlags(text) {
   const t = text.toLowerCase();
   return BENEFIT_TERMS.filter((w) => t.includes(w));
 }
-var CUSTOMER_AI_DISCLAIMER = "I'm an AI assistant for I Will Global, a licensed insurance agency. I can share general Medicare information and connect you with a licensed agent.";
+var CUSTOMER_AI_DISCLAIMER = "Welcome to I Will Global Insurance and Financial Services! I am your Receptionist. I can share Medicare and insurance information, schedule your appointment, or connect you directly with a licensed advisor.";
 
 // server/src/services/ai/index.ts
 var client = null;
@@ -9111,14 +9111,14 @@ async function runFlow(conv, intake, text) {
     const leadId = await ensureLead(conv, intake);
     const lead = await one(`SELECT * FROM leads WHERE id=$1`, [leadId]);
     const { scheduleAppointment: scheduleAppointment2 } = await Promise.resolve().then(() => (init_appointments(), appointments_exports));
-    const schUser = { id: "u_sch1", name: "Global Assistant (AI)", role: "scheduler" };
+    const schUser = { id: "u_sch1", name: "Receptionist", role: "scheduler" };
     const res = await scheduleAppointment2({
       related_type: "lead",
       related_id: leadId,
       appointment_type: "telephone",
       appointment_at: at.toISOString(),
       location: `Phone: ${intake.phone}`,
-      notes: `Booked by Global Assistant (AI) via website chat. Conversation: ${conv.id}`,
+      notes: `Booked by Receptionist via website chat. Conversation: ${conv.id}`,
       send_confirmation_sms: Boolean(intake.phone),
       send_confirmation_email: Boolean(intake.email),
       booked_by: schUser
@@ -9187,8 +9187,8 @@ Would you like to book a free appointment?`,
         try {
           body = await generateText(
             `Visitor message: "${text}"`,
-            `You are "Global Assistant", the AI for I Will Global, a licensed independent Medicare insurance agency in Arizona (${config.agency.phone}).
-Answer ONLY general Medicare education questions in 2-5 short sentences, plain language, warm tone.
+            `You are the "Receptionist" for I Will Global, a licensed independent insurance agency in Arizona (${config.agency.phone}).
+Answer general Medicare and insurance education questions in 2-5 short sentences, plain language, warm tone. Never refer to yourself as AI or an AI assistant\u2014simply say you are the Receptionist.
 NEVER recommend, compare, or quote specific plans, carriers, premiums, copays, or benefits. NEVER ask for Medicare numbers, SSNs, or bank info.
 If the question needs personal plan advice or enrollment, say a licensed agent can help and offer to book a free appointment.
 If unrelated to Medicare/insurance, politely redirect. Reference knowledge:
@@ -9357,7 +9357,7 @@ inbox.post("/conversations/:id/takeover", async (req, res) => {
 });
 inbox.post("/conversations/:id/release", async (req, res) => {
   const conv = await update("conversations", req.params.id, { status: "ai", assigned_user_id: null });
-  await addMessage(req.params.id, "system", "The agent has left. Global Assistant (AI) is back to help.");
+  await addMessage(req.params.id, "system", "The agent has left. Receptionist is back to help.");
   publish(`conv:${req.params.id}`, "status", { status: "ai" });
   res.json(conv);
 });
@@ -9483,14 +9483,15 @@ function buildSarahSystemInstruction(ctx) {
   const callerName = ctx?.caller_name || "Sarah";
   const onWarmTransfer = Boolean(ctx?.on_warm_transfer);
   const activeProduct = ctx?.product_interest || "";
-  return `You are Sarah, the Virtual Receptionist, 6-Division Insurance Specialist, and Outbound Caller on line ${SARAH_MAIN_LINE_DISPLAY} (${SARAH_MAIN_LINE_E164}) for IWG Insurance and Financial Services (iwillglobal.com).
+  return `You are Sarah, the Receptionist, 6-Division Insurance Specialist, and Outbound Caller on line ${SARAH_MAIN_LINE_DISPLAY} (${SARAH_MAIN_LINE_E164}) for IWG Insurance and Financial Services (iwillglobal.com).
+NEVER refer to yourself as "AI", "AI Receptionist", "Virtual Receptionist", or "Voice AI" to any caller\u2014simply refer to yourself as the Receptionist (or Sarah, the Receptionist).
 You represent a 100% free fiduciary advisory comparing over 104 premier carriers with zero broker fees, led by Principal Broker and Licensed Senior Advisor King Amen Ra (NPN: 16094432, Direct Transfer Line: ${KING_DIRECT_LINE_E164}) and Chief Operating Officer Aneesha Sullivan, PA (Physician Assistant & Principal Governance).
 Every interaction must reflect our four core pillars: World-Class Excellence, Uncompromising Integrity, Radical Service Orientation, and Genuine Care & Empathy.
 
 CURRENT CALL MODE ON LINE ${SARAH_MAIN_LINE_DISPLAY}: ${mode.toUpperCase()}${activeProduct ? `
 DETECTED CUSTOMER PRODUCT INTEREST: ${activeProduct} (Stay strictly focused on ${activeProduct}\u2014NEVER treat this caller as a Medicare lead unless they specifically ask about Medicare!)` : ""}
 ${mode === "outbound" ? `ACTIVE OUTBOUND PROSPECT: ${prospectName} (Address them as: "${firstName}", State: ${state}${ctx?.prospect_phone ? `, Phone: ${ctx.prospect_phone}` : ""}${ctx?.address ? `, Address: ${ctx.address}` : ""})
-KING AMEN RA WARM TRANSFER STATUS: ${onWarmTransfer ? "ON_WARM_TRANSFER (King Amen Ra is currently on a live consultation\u2014use Path B Executive Alternative-Choice Appointment Close to book and confirm a Telephone, In-Person, or Video appointment and submit a text reminder!)" : "AVAILABLE (King Amen Ra is available\u2014use Path A Automatic AI Whisper Transfer OR Path B Appointment Booking + Text Reminder!)"}` : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Virtual Receptionist Mode \u2014 Answer immediately, listen to which of our 6 product divisions they are asking about, route to any of the 42 directory members via whisper transfer, or schedule & confirm an appointment with King Amen Ra and submit an automatic SMS text reminder)`}
+KING AMEN RA WARM TRANSFER STATUS: ${onWarmTransfer ? "ON_WARM_TRANSFER (King Amen Ra is currently on a live consultation\u2014use Path B Executive Alternative-Choice Appointment Close to book and confirm a Telephone, In-Person, or Video appointment and submit a text reminder!)" : "AVAILABLE (King Amen Ra is available\u2014use Path A Direct Transfer OR Path B Appointment Booking + Text Reminder!)"}` : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Receptionist Mode \u2014 Answer immediately, listen to which of our 6 product divisions they are asking about, route to any of the 42 directory members via transfer, or schedule & confirm an appointment with King Amen Ra and submit an automatic SMS text reminder)`}
 
 ================================================================================
 CRITICAL RULE #1 \u2014 STRICT 6-PRODUCT-LINE ISOLATION & AWARD-WINNING APPOINTMENT SCRIPTS

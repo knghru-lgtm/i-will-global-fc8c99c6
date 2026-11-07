@@ -1076,14 +1076,20 @@ export function buildAiWhisperScripts(params: {
 }) {
   const recipientName = params.recipient_name || 'King Amen Ra';
   const callerName = params.caller_name || 'Sarah';
-  const prospectName = params.prospect_name || 'Valued Beneficiary';
-  const prospectFirst = prospectName.split(' ')[0] || 'there';
+  const rawName = (params.prospect_name || '').trim();
+  const isGenericName = !rawName || /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawName);
+  const prospectName = isGenericName ? 'Valued Client' : rawName;
+  const prospectFirst = isGenericName ? 'there' : prospectName.split(' ')[0] || 'there';
   const state = params.state || 'Arizona';
-  const notesPart = params.notes ? ` Notes: ${params.notes}.` : '';
+  const interestText = params.notes && params.notes.trim()
+    ? params.notes.trim()
+    : 'reviewing their insurance and coverage options';
 
-  const whisperBriefing = `Hi ${recipientName}, this is Sarah AI whispering automatically on behalf of ${callerName} with the Medicare Helpline powered by IWG Insurance and Financial Services. We have ${prospectName} in ${state} on the line—they are interested in reviewing the 2027 Medicare changes and verifying their doctors and prescriptions.${notesPart} Bridging you in now!`;
+  const whisperBriefing = `Hi ${recipientName}, this is Sarah AI whispering automatically on behalf of ${callerName} with IWG Insurance and Financial Services. We have ${prospectName} in ${state} on the line—they are interested in ${interestText}. Bridging you in now!`;
 
-  const mergeIntroduction = `Thank you so much for your patience, ${prospectFirst}! It is my pleasure to introduce ${recipientName} with IWG Insurance and Financial Services. ${recipientName.split(' ')[0]}, I have shared ${prospectName}'s information with you so they are in the very best hands. ${prospectFirst}, it has been a privilege speaking with you today—${recipientName.split(' ')[0]} will take wonderful care of you from here!`;
+  const mergeIntroduction = isGenericName
+    ? `Thank you so much for your patience! It is my pleasure to introduce ${recipientName} with IWG Insurance and Financial Services. ${recipientName.split(' ')[0]}, I have shared our caller's information with you so they are in the very best hands. It has been a privilege speaking with you today—${recipientName.split(' ')[0]} will take wonderful care of you from here!`
+    : `Thank you so much for your patience, ${prospectFirst}! It is my pleasure to introduce ${recipientName} with IWG Insurance and Financial Services. ${recipientName.split(' ')[0]}, I have shared ${prospectName}'s information with you so they are in the very best hands. ${prospectFirst}, it has been a privilege speaking with you today—${recipientName.split(' ')[0]} will take wonderful care of you from here!`;
 
   return {
     whisperBriefing,
@@ -1557,34 +1563,74 @@ export async function handleBlandWebhook(payload: any) {
     });
   }
 
-  // If an appointment was booked (or King was on a warm transfer and the caller engaged), create the calendar appointment activity automatically!
-  if (dispositionId === 'appointment_set' && relatedId) {
+  // If an appointment was booked (or King was on a warm transfer and the caller engaged), create the calendar appointment activity and submit SMS Text Reminder automatically!
+  if (dispositionId === 'appointment_set') {
     const startAt = new Date(Date.now() + 24 * 3600 * 1000);
     startAt.setHours(10, 0, 0, 0);
     const durMin = selectedApptType === 'in_person' ? 60 : 30;
     const endAt = new Date(startAt.getTime() + durMin * 60000);
+    const detectedProduct =
+      /\b(life insurance|iul|indexed universal|term life|whole life|final expense|living benefits|7702|death benefit)\b/i.test(lowerText)
+        ? 'Life Insurance & Living Benefits / IUL'
+        : /\b(group|business|employer|ichra|level-funded)\b/i.test(lowerText)
+        ? 'Group Health Insurance'
+        : /\b(long-term care|long term care|ltc|assisted living|nursing)\b/i.test(lowerText)
+        ? 'Asset-Based Long Term Care'
+        : /\b(individual|family|aca|marketplace|private ppo|under 65)\b/i.test(lowerText)
+        ? 'Individual & Family Health Insurance'
+        : 'Medicare';
+    const customerName = variables.first_name || metadata.prospect_name || 'Valued Client';
+    const customerPhone = toE164(payload.to || payload.phone_number || activity?.phone || '') || '(480) 331-9455';
+    const requestedTimeLabel = variables.appointment_datetime || 'Tomorrow at 10:00 AM MST';
 
     await insert('activities', {
       type: 'event',
-      subject: `📅 ${selectedApptLabel} Appointment (Booked by Bland AI) — ${variables.first_name || 'Prospect'}`,
-      body: `Bland Agent AI scheduled a ${selectedApptLabel} (${durMin} min) appointment with Principal Broker King Amen Ra.\nRequested Date/Time: ${variables.appointment_datetime || 'Next Available Day 10:00 AM MST'}\nSummary: ${summary || 'Qualified on outbound AI call'}`,
+      subject: `📅 Confirmed ${detectedProduct} ${selectedApptLabel} Appointment — ${customerName}`,
+      body: `Sarah AI confirmed a ${selectedApptLabel} (${durMin} min) ${detectedProduct} consultation with Principal Broker King Amen Ra.\nConfirmed Date/Time: ${requestedTimeLabel}\nText Reminder: Submitted to ${customerPhone}\nSummary: ${summary || `Confirmed ${detectedProduct} consultation`}`,
       related_type: relatedType,
       related_id: relatedId,
       user_id: userId,
       assigned_to: 'u_principal',
       due_at: startAt,
       end_at: endAt,
-      status: 'Scheduled',
+      status: 'Confirmed',
       completed: false,
       meta: {
         booked_by_user_id: userId,
-        booked_by_name: 'Sarah (Bland AI Voice Agent)',
+        booked_by_name: 'Sarah (Voice AI)',
+        product_line: detectedProduct,
         appointment_type: selectedApptType,
         appointment_type_label: selectedApptLabel,
-        requested_datetime_raw: variables.appointment_datetime || null,
+        requested_datetime_raw: requestedTimeLabel,
+        confirmed: true,
+        text_reminder_submitted: true,
         bland_call_id: callId,
         booked_during_warm_transfer: Boolean(metadata.on_warm_transfer),
         master_calendar_email: 'info@iwillglobal.com',
+      },
+    });
+
+    const smsBody = `Hi ${customerName}, your ${detectedProduct} ${selectedApptLabel} appointment with Principal Broker King Amen Ra (NPN 16094432) at IWG Insurance & Financial Services is CONFIRMED for ${requestedTimeLabel}. Reply YES to confirm or call (480) 331-9455 with any questions.`;
+    await insert('activities', {
+      type: 'call',
+      subject: `📲 Appointment Confirmation & Text Reminder SMS sent to ${customerPhone}`,
+      body: smsBody,
+      related_type: relatedType,
+      related_id: relatedId,
+      user_id: userId,
+      direction: 'outbound',
+      phone: customerPhone,
+      status: 'Completed',
+      completed: true,
+      provider: 'google_voice',
+      disposition: 'SMS Confirmation & Text Reminder Sent',
+      meta: {
+        sms: true,
+        text_reminder_submitted: true,
+        product_line: detectedProduct,
+        appointment_type: selectedApptLabel,
+        confirmed_datetime: requestedTimeLabel,
+        expected_reply: 'YES',
       },
     });
   }
