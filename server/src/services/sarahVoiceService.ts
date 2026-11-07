@@ -977,6 +977,15 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
  * Ultra-Realistic Human Neural Voice Synthesizer (Cloned Bland Voice Engine).
  * Uses Gemini 3.8 Flash TTS (`Aoede` warm human female voice) to produce natural 24kHz WAV audio.
  */
+const SARAH_TTS_CACHE = new Map<
+  string,
+  {
+    audio_base64: string;
+    audio_mime: string;
+    voice: string;
+  }
+>();
+
 export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   audio_base64: string | null;
   audio_mime: string;
@@ -988,6 +997,11 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
     .trim();
   if (!cleanText || !isAIEnabled()) {
     return { audio_base64: null, audio_mime: 'audio/wav', voice: 'Aoede' };
+  }
+
+  const cached = SARAH_TTS_CACHE.get(cleanText);
+  if (cached) {
+    return cached;
   }
 
   const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
@@ -1011,11 +1025,17 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
       });
       const inline = r.candidates?.[0]?.content?.parts?.[0]?.inlineData;
       if (inline?.data) {
-        return {
+        const entry = {
           audio_base64: inline.data,
           audio_mime: inline.mimeType || 'audio/wav',
           voice: 'Aoede',
         };
+        if (SARAH_TTS_CACHE.size > 60) {
+          const oldestKey = SARAH_TTS_CACHE.keys().next().value;
+          if (oldestKey) SARAH_TTS_CACHE.delete(oldestKey);
+        }
+        SARAH_TTS_CACHE.set(cleanText, entry);
+        return entry;
       }
     } catch {
       // try next TTS model
@@ -1351,13 +1371,9 @@ export async function handleSarahHttpTurn(params: {
     };
   }
 
-  // 3. Check if deterministic Cloned Bland Scenario (`bland.json` opening hook, 3-point summary, objections, or appointment booking) matches directly
-  const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
-  const isDirectBlandFlow =
-    clonedMatch.scenario !== 'Outbound Value Hook & Assumptive Close' &&
-    clonedMatch.scenario !== 'Inbound 6-Product Funnel';
-
-  if (isDirectBlandFlow) {
+  // 3. Explicit Script Tree Directive button click -> run exact deterministic step
+  if (userText.toLowerCase().includes('[script tree directive]')) {
+    const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
     const tts = await synthesizeSarahNeuralAudio(clonedMatch.reply);
     return {
       ok: true,
@@ -1374,32 +1390,68 @@ export async function handleSarahHttpTurn(params: {
     };
   }
 
-  // 4. For open-ended questions, run Gemini with the full Cloned Bland System Prompt + Tools (trying gemini-3.5-flash -> gemini-3.1-flash-lite -> gemini-3.8-flash)
+  // 4. Primary Conversational Brain: Run Gemini (`gemini-3.5-flash` / `gemini-3.1-flash-lite`) with the full Cloned Bland System Prompt + Tools
+  // so the Virtual Receptionist and Outbound Caller listen directly to the caller's exact words, questions, name, and context.
   if (isAIEnabled()) {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    const historyContents = (params.history || []).slice(-10).map((h) => ({
-      role: h.speaker === 'sarah' ? 'model' : 'user',
-      parts: [{ text: h.text }],
-    }));
-    historyContents.push({
-      role: 'user',
-      parts: [{ text: userText }],
-    });
+
+    // Normalize multi-turn history so it ALWAYS begins with role: 'user' and strictly alternates user <-> model
+    const normalizedHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+    const rawHistory = (params.history || []).slice(-12);
+
+    for (const h of rawHistory) {
+      const text = String(h?.text || '').trim();
+      if (!text) continue;
+      const role: 'user' | 'model' = h.speaker === 'sarah' ? 'model' : 'user';
+      if (normalizedHistory.length === 0 && role === 'model') {
+        normalizedHistory.push({
+          role: 'user',
+          parts: [
+            {
+              text:
+                sessionContext.mode === 'outbound'
+                  ? `[Outbound call connected to ${sessionContext.prospect_name}]`
+                  : `[Inbound caller connected to IWG Virtual Receptionist on ${SARAH_MAIN_LINE_DISPLAY}]`,
+            },
+          ],
+        });
+      }
+      const prev = normalizedHistory[normalizedHistory.length - 1];
+      if (prev && prev.role === role) {
+        prev.parts[0].text += ' ' + text;
+      } else {
+        normalizedHistory.push({ role, parts: [{ text }] });
+      }
+    }
+
+    const lastTurn = normalizedHistory[normalizedHistory.length - 1];
+    if (lastTurn && lastTurn.role === 'user') {
+      if (!lastTurn.parts[0].text.includes(userText)) {
+        lastTurn.parts[0].text += '\n' + userText;
+      }
+    } else {
+      normalizedHistory.push({
+        role: 'user',
+        parts: [{ text: userText }],
+      });
+    }
 
     const candidateModels = [config.gemini.model || 'gemini-3.5-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'];
     for (const modelName of [...new Set(candidateModels)]) {
       try {
         const response = await ai.models.generateContent({
           model: modelName,
-          contents: historyContents,
+          contents: normalizedHistory,
           config: {
-            systemInstruction: buildSarahSystemInstruction(sessionContext),
+            systemInstruction:
+              buildSarahSystemInstruction(sessionContext) +
+              `\n\nCRITICAL CONVERSATIONAL LISTENING RULE:\n- Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").\n- Keep your spoken response warm, natural, human, and concise (1 to 3 sentences) so the conversation flows naturally back and forth.\n- Never repeat your opening greeting once the call has already started.`,
             tools: SARAH_TOOLS,
-            temperature: 0.2,
+            temperature: 0.25,
           },
         });
 
-        let replyText = response.text || '';
+        let replyText = (response.text || '').trim();
 
         if (response.functionCalls && response.functionCalls.length > 0) {
           for (const call of response.functionCalls) {
@@ -1416,6 +1468,9 @@ export async function handleSarahHttpTurn(params: {
               }
             } else if (call.name === 'record_call_disposition' && result.success) {
               dispositionResult = result;
+              if (!replyText) {
+                replyText = `Thank you so much for your time today, ${firstName}. Have a wonderful rest of your day!`;
+              }
             }
           }
         }
@@ -1454,7 +1509,8 @@ export async function handleSarahHttpTurn(params: {
     }
   }
 
-  // 5. Final Cloned Bland Scenario fallback with realistic neural TTS
+  // 5. Deterministic Cloned Bland Scenario fallback if AI is offline
+  const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
   const tts = await synthesizeSarahNeuralAudio(clonedMatch.reply);
   return {
     ok: true,
@@ -1463,6 +1519,9 @@ export async function handleSarahHttpTurn(params: {
     audio_base64: tts.audio_base64,
     audio_mime: tts.audio_mime,
     voice: tts.voice,
+    transfer: clonedMatch.transfer || null,
+    appointment: clonedMatch.appointment || null,
+    disposition: clonedMatch.disposition || null,
     mode: sessionContext.mode,
     line: SARAH_MAIN_LINE_DISPLAY,
   };

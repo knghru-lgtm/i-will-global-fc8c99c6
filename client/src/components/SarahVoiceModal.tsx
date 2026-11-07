@@ -109,6 +109,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isMicListening, setIsMicListening] = useState(false);
+  const [interimSpeech, setInterimSpeech] = useState('');
   const [userVolume, setUserVolume] = useState(0);
   const [sarahVolume, setSarahVolume] = useState(0);
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
@@ -124,7 +126,28 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const isSpeakingRef = useRef<boolean>(false);
   const isTurnInFlightRef = useRef<boolean>(false);
   const isMutedRef = useRef<boolean>(false);
+  const recRunningRef = useRef<boolean>(false);
   const recognitionRef = useRef<any>(null);
+  const keepAliveIntervalRef = useRef<any>(null);
+  const speechBufferRef = useRef<string>('');
+  const speechBufferTimerRef = useRef<any>(null);
+  const lastSarahReplyRef = useRef<string>('');
+  const sessionCtxRef = useRef<{
+    mode: 'inbound' | 'outbound';
+    lead_id?: string;
+    prospect_name: string;
+    phone?: string;
+    state: string;
+    address?: string;
+    on_warm_transfer: boolean;
+  }>({
+    mode: 'inbound',
+    prospect_name: 'Medicare Beneficiary',
+    phone: '(623) 223-0165',
+    state: 'AZ',
+    address: '',
+    on_warm_transfer: false,
+  });
   const transcriptsRef = useRef<TranscriptItem[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -135,6 +158,44 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  useEffect(() => {
+    sessionCtxRef.current = {
+      mode: callMode,
+      lead_id: leadId,
+      prospect_name: prospectName || 'Medicare Beneficiary',
+      phone: prospectPhone,
+      state: prospectState || 'AZ',
+      address: prospectAddress,
+      on_warm_transfer: onWarmTransfer,
+    };
+  }, [callMode, leadId, prospectName, prospectPhone, prospectState, prospectAddress, onWarmTransfer]);
+
+  const isEchoOfSarah = (spokenText: string): boolean => {
+    const cleanSpoken = spokenText
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .trim();
+    if (!cleanSpoken) return true;
+    if (
+      cleanSpoken.includes('thank you for calling iwg') ||
+      cleanSpoken.includes('this is sarah calling') ||
+      cleanSpoken.includes('this is sarah speaking') ||
+      cleanSpoken.includes('100 free fiduciary') ||
+      cleanSpoken.includes('medicare helpline powered by iwg') ||
+      cleanSpoken.includes('over 104 premier carriers')
+    ) {
+      return true;
+    }
+    const cleanSarah = (lastSarahReplyRef.current || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .trim();
+    if (cleanSarah && cleanSpoken.length >= 14 && cleanSarah.includes(cleanSpoken)) {
+      return true;
+    }
+    return false;
+  };
 
   const stopAllSarahAudio = () => {
     if (neuralAudioRef.current) {
@@ -156,12 +217,21 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
   const resumeSpeechRecognitionSafe = () => {
     setTimeout(() => {
-      if (httpModeRef.current && !isMutedRef.current && !isSpeakingRef.current && recognitionRef.current) {
+      if (
+        httpModeRef.current &&
+        !isMutedRef.current &&
+        !isSpeakingRef.current &&
+        !isTurnInFlightRef.current &&
+        recognitionRef.current &&
+        !recRunningRef.current
+      ) {
         try {
           recognitionRef.current.start();
+          recRunningRef.current = true;
+          setIsMicListening(true);
         } catch {}
       }
-    }, 350);
+    }, 150);
   };
 
   const playBrowserFallbackVoice = (text: string) => {
@@ -184,7 +254,18 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       utter.rate = 1.0;
       utter.pitch = 1.0;
 
-      const watchdogMs = Math.max(4000, text.length * 80);
+      let started = false;
+      // If browser blocks speechSynthesis (e.g. no prior click), release mic lock after 1.1s so mic always listens!
+      const startGuard = setTimeout(() => {
+        if (!started) {
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+          setSarahVolume(0);
+          resumeSpeechRecognitionSafe();
+        }
+      }, 1100);
+
+      const watchdogMs = Math.min(12000, Math.max(3500, text.length * 60));
       const watchdog = setTimeout(() => {
         if (isSpeakingRef.current) {
           isSpeakingRef.current = false;
@@ -195,11 +276,14 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       }, watchdogMs);
 
       utter.onstart = () => {
+        started = true;
+        clearTimeout(startGuard);
         isSpeakingRef.current = true;
         setIsSpeaking(true);
         setSarahVolume(0.68);
       };
       utter.onend = () => {
+        clearTimeout(startGuard);
         clearTimeout(watchdog);
         isSpeakingRef.current = false;
         setIsSpeaking(false);
@@ -207,6 +291,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         resumeSpeechRecognitionSafe();
       };
       utter.onerror = () => {
+        clearTimeout(startGuard);
         clearTimeout(watchdog);
         isSpeakingRef.current = false;
         setIsSpeaking(false);
@@ -223,10 +308,12 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   };
 
   const playSarahResponseAudio = (text: string, audioBase64?: string | null, audioMime?: string) => {
+    lastSarahReplyRef.current = text;
     stopAllSarahAudio();
-    if (recognitionRef.current) {
+    if (recognitionRef.current && recRunningRef.current) {
       try {
         recognitionRef.current.stop();
+        recRunningRef.current = false;
       } catch {}
     }
     isSpeakingRef.current = true;
@@ -239,7 +326,17 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         const audio = new Audio(`data:${mime};base64,${audioBase64}`);
         neuralAudioRef.current = audio;
 
+        const maxDurationTimer = setTimeout(() => {
+          if (isSpeakingRef.current) {
+            isSpeakingRef.current = false;
+            setIsSpeaking(false);
+            setSarahVolume(0);
+            resumeSpeechRecognitionSafe();
+          }
+        }, Math.min(16000, Math.max(4000, text.length * 68)));
+
         const finishPlayback = () => {
+          clearTimeout(maxDurationTimer);
           if (neuralAudioRef.current === audio) {
             neuralAudioRef.current = null;
           }
@@ -251,6 +348,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
         audio.onended = finishPlayback;
         audio.onerror = () => {
+          clearTimeout(maxDurationTimer);
           if (neuralAudioRef.current === audio) {
             neuralAudioRef.current = null;
           }
@@ -260,6 +358,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         const playPromise = audio.play();
         if (playPromise && typeof playPromise.catch === 'function') {
           playPromise.catch(() => {
+            clearTimeout(maxDurationTimer);
             if (neuralAudioRef.current === audio) {
               neuralAudioRef.current = null;
             }
@@ -290,13 +389,17 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   ) => {
     if (isTurnInFlightRef.current && !ctxOverride?.is_initial) return;
     isTurnInFlightRef.current = true;
+    setInterimSpeech('');
+    setUserVolume(0);
     try {
-      if (recognitionRef.current) {
+      if (recognitionRef.current && recRunningRef.current) {
         try {
           recognitionRef.current.stop();
+          recRunningRef.current = false;
         } catch {}
       }
 
+      const activeCtx = sessionCtxRef.current;
       const historyPayload = transcriptsRef.current
         .filter((t) => (t.speaker === 'sarah' || t.speaker === 'user') && !t.isAction)
         .slice(-12)
@@ -310,16 +413,19 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
           is_initial: Boolean(ctxOverride?.is_initial),
           history: historyPayload,
           context: {
-            mode: ctxOverride?.mode || callMode,
-            lead_id: ctxOverride?.lead_id !== undefined ? ctxOverride.lead_id : leadId,
-            prospect_name: ctxOverride?.prospect_name || prospectName,
-            prospect_phone: ctxOverride?.phone !== undefined ? ctxOverride.phone : prospectPhone,
-            state: ctxOverride?.state || prospectState,
-            address: ctxOverride?.address !== undefined ? ctxOverride.address : prospectAddress,
-            on_warm_transfer: ctxOverride?.on_warm_transfer !== undefined ? ctxOverride.on_warm_transfer : onWarmTransfer,
+            mode: ctxOverride?.mode || activeCtx.mode,
+            lead_id: ctxOverride?.lead_id !== undefined ? ctxOverride.lead_id : activeCtx.lead_id,
+            prospect_name: ctxOverride?.prospect_name || activeCtx.prospect_name,
+            prospect_phone: ctxOverride?.phone !== undefined ? ctxOverride.phone : activeCtx.phone,
+            state: ctxOverride?.state || activeCtx.state,
+            address: ctxOverride?.address !== undefined ? ctxOverride.address : activeCtx.address,
+            on_warm_transfer:
+              ctxOverride?.on_warm_transfer !== undefined ? ctxOverride.on_warm_transfer : activeCtx.on_warm_transfer,
           },
         }),
       }).then((r) => r.json());
+
+      isTurnInFlightRef.current = false;
 
       if (res?.reply) {
         appendNewTranscript('sarah', res.reply);
@@ -375,9 +481,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       }
     } catch (err) {
       console.warn('Sarah HTTP turn error:', err);
-      resumeSpeechRecognitionSafe();
-    } finally {
       isTurnInFlightRef.current = false;
+      resumeSpeechRecognitionSafe();
     }
   };
 
@@ -392,44 +497,125 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   }) => {
     if (httpModeRef.current) return;
     httpModeRef.current = true;
+    sessionCtxRef.current = ctx;
     setConnectionStatus('connected');
     setErrorMessage(null);
 
-    // Start Browser SpeechRecognition if supported (auto-paused while Sarah speaks so she never hears her own voice)
+    // Explicitly request microphone access so the browser unlocks audio capture
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          stream.getTracks().forEach((t) => t.stop());
+        })
+        .catch(() => {});
+    }
+
+    // Start Browser SpeechRecognition with live interim feedback & automatic keep-alive
     try {
       const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRec) {
         const rec = new SpeechRec();
         rec.continuous = true;
-        rec.interimResults = false;
+        rec.interimResults = true;
         rec.lang = 'en-US';
+
+        rec.onstart = () => {
+          recRunningRef.current = true;
+          setIsMicListening(true);
+        };
+
         rec.onresult = (ev: any) => {
-          if (isSpeakingRef.current || isTurnInFlightRef.current || isMutedRef.current) return;
-          const lastIdx = ev.results.length - 1;
-          const spoken = ev.results[lastIdx]?.[0]?.transcript?.trim();
-          if (!spoken) return;
-          const lowSpoken = spoken.toLowerCase();
-          // Guard against speaker echo picking up Sarah's own words
-          if (
-            lowSpoken.includes('thank you for calling iwg') ||
-            lowSpoken.includes('this is sarah calling') ||
-            lowSpoken.includes('100% free fiduciary') ||
-            lowSpoken.includes('medicare helpline powered by iwg')
-          ) {
+          if (isMutedRef.current || isTurnInFlightRef.current) return;
+
+          let finalChunk = '';
+          let interimChunk = '';
+          for (let i = ev.resultIndex; i < ev.results.length; i++) {
+            const resItem = ev.results[i];
+            const transcript = resItem?.[0]?.transcript || '';
+            if (resItem.isFinal) {
+              finalChunk += ' ' + transcript;
+            } else {
+              interimChunk += ' ' + transcript;
+            }
+          }
+
+          const cleanFinal = finalChunk.trim();
+          const cleanInterim = interimChunk.trim();
+
+          if (isSpeakingRef.current) {
             return;
           }
-          appendNewTranscript('user', spoken);
-          sendHttpTurn(spoken, ctx);
+
+          if (cleanInterim) {
+            setInterimSpeech((speechBufferRef.current ? speechBufferRef.current + ' ' : '') + cleanInterim);
+            setUserVolume(0.55);
+          }
+
+          if (cleanFinal && !isEchoOfSarah(cleanFinal)) {
+            speechBufferRef.current = (speechBufferRef.current ? speechBufferRef.current + ' ' : '') + cleanFinal;
+            setInterimSpeech(speechBufferRef.current);
+            setUserVolume(0.65);
+
+            if (speechBufferTimerRef.current) {
+              clearTimeout(speechBufferTimerRef.current);
+            }
+            speechBufferTimerRef.current = setTimeout(() => {
+              const fullSpoken = speechBufferRef.current.trim();
+              speechBufferRef.current = '';
+              setInterimSpeech('');
+              setUserVolume(0);
+              if (fullSpoken && !isEchoOfSarah(fullSpoken)) {
+                appendNewTranscript('user', fullSpoken);
+                sendHttpTurn(fullSpoken);
+              }
+            }, 650);
+          }
         };
-        rec.onerror = () => {};
+
+        rec.onerror = () => {
+          recRunningRef.current = false;
+        };
+
         rec.onend = () => {
+          recRunningRef.current = false;
           if (httpModeRef.current && !isMutedRef.current && !isSpeakingRef.current && !isTurnInFlightRef.current) {
             try {
               rec.start();
+              recRunningRef.current = true;
+              setIsMicListening(true);
             } catch {}
+          } else {
+            setIsMicListening(false);
           }
         };
+
         recognitionRef.current = rec;
+        try {
+          rec.start();
+          recRunningRef.current = true;
+          setIsMicListening(true);
+        } catch {}
+
+        if (keepAliveIntervalRef.current) {
+          clearInterval(keepAliveIntervalRef.current);
+        }
+        keepAliveIntervalRef.current = setInterval(() => {
+          if (
+            httpModeRef.current &&
+            !isMutedRef.current &&
+            !isSpeakingRef.current &&
+            !isTurnInFlightRef.current &&
+            recognitionRef.current &&
+            !recRunningRef.current
+          ) {
+            try {
+              recognitionRef.current.start();
+              recRunningRef.current = true;
+              setIsMicListening(true);
+            } catch {}
+          }
+        }, 1000);
       }
     } catch {}
 
@@ -726,6 +912,18 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const endSession = () => {
     httpModeRef.current = false;
     isTurnInFlightRef.current = false;
+    recRunningRef.current = false;
+    setIsMicListening(false);
+    setInterimSpeech('');
+    speechBufferRef.current = '';
+    if (keepAliveIntervalRef.current) {
+      clearInterval(keepAliveIntervalRef.current);
+      keepAliveIntervalRef.current = null;
+    }
+    if (speechBufferTimerRef.current) {
+      clearTimeout(speechBufferTimerRef.current);
+      speechBufferTimerRef.current = null;
+    }
     stopAllSarahAudio();
     if (recognitionRef.current) {
       try {
@@ -1694,6 +1892,22 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                   </div>
                 );
               })}
+              {interimSpeech && (
+                <div
+                  style={{
+                    alignSelf: 'flex-end',
+                    backgroundColor: 'rgba(34, 197, 94, 0.16)',
+                    border: '1px dashed rgba(74, 222, 128, 0.55)',
+                    borderRadius: '1rem 0.25rem 1rem 1rem',
+                    padding: '0.55rem 0.9rem',
+                    color: '#86efac',
+                    fontSize: '0.86rem',
+                    maxWidth: '85%',
+                  }}
+                >
+                  🎤 <strong>Hearing you:</strong> “{interimSpeech}”
+                </div>
+              )}
               <div ref={transcriptEndRef} />
             </div>
 
@@ -1708,6 +1922,17 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 gap: '0.65rem',
               }}
             >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                <span style={{ color: isSpeaking ? '#fbbf24' : isMuted ? '#f87171' : '#4ade80', fontWeight: 700 }}>
+                  {isSpeaking
+                    ? '🔊 Sarah Speaking (Aoede Human Neural Voice)...'
+                    : isMuted
+                    ? '🔇 Microphone Muted — Click Unmute Mic or type below'
+                    : isMicListening
+                    ? '🎤 Receptionist Listening Live — Speak naturally into your microphone'
+                    : '🎤 Microphone Ready — Speak naturally or type below'}
+                </span>
+              </div>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <input
                   type="text"
