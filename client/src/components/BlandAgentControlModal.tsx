@@ -116,7 +116,7 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
       }
       await loadState();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to activate Bland Agent AI');
+      setErrorMsg(err.message || 'Failed to activate Sarah Outbound Caller');
     } finally {
       setActivating(false);
     }
@@ -132,7 +132,7 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
         ...(prev || {}),
         is_campaign_active: false,
       }));
-      setStatusMsg(res.message || '🛑 All Bland AI outbound calls and queue dialing have been stopped.');
+      setStatusMsg(res.message || '🛑 All Sarah Outbound Caller calls and queue dialing have been stopped.');
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
       await loadState();
     } catch (err: any) {
@@ -626,11 +626,11 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
           )}
         </div>
 
-        {/* 4. RECENT BLAND AI CALLS */}
+        {/* 4. RECENT SARAH OUTBOUND CALLS */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
             <span style={{ fontSize: '0.86rem', fontWeight: 800, color: '#cbd5e1' }}>
-              Recent Bland Agent AI Calls
+              Recent Sarah Outbound Caller & Receptionist Calls (480) 331-9455
             </span>
             <button
               type="button"
@@ -642,7 +642,7 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
           </div>
           {recentCalls.length === 0 ? (
             <div style={{ padding: '0.9rem', borderRadius: '8px', background: 'var(--bg-surface)', color: '#94a3b8', fontSize: '0.82rem', textAlign: 'center' }}>
-              No recent Bland AI calls logged yet in this session. Click <strong>Call Now</strong> or <strong>Activate AI Lead Queue Dialer</strong> above to begin!
+              No recent Sarah Outbound calls logged yet in this session. Click <strong>Call Now</strong> or <strong>Activate AI Lead Queue Dialer</strong> above to begin!
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '180px', overflowY: 'auto' }}>

@@ -1139,7 +1139,7 @@ async function getBlandConfig() {
     row = null;
   }
   const val = row?.value || {};
-  const envKey = process.env.BLAND_API_KEY || "";
+  const envKey = "";
   let dbWarmTransferActive = false;
   let dbTransferLeadId = null;
   let dbTransferCallId = null;
@@ -1574,7 +1574,7 @@ async function canDispatchOutboundCall(override = false) {
   if (!callingWindow.open && !override) {
     return {
       allowed: false,
-      reason: `\u{1F558} Outside Bland AI outbound calling hours (${callingWindow.schedule_label}). ${callingWindow.next_open_label}`,
+      reason: `\u{1F558} Outside Sarah Outbound Caller hours (${callingWindow.schedule_label}). ${callingWindow.next_open_label}`,
       calls_today: callsToday,
       daily_limit: limit,
       is_paused: false,
@@ -1585,7 +1585,7 @@ async function canDispatchOutboundCall(override = false) {
   }
   return {
     allowed: true,
-    reason: isOnWarmTransfer ? "\u{1F525} King Amen Ra is on a Warm Transfer Call \u2014 Bland Agent AI is continuing to make calls and strictly booking Telephone, In-Person, or Video appointments only." : void 0,
+    reason: isOnWarmTransfer ? "\u{1F525} King Amen Ra is on a Warm Transfer Call \u2014 Sarah Outbound Caller is continuing to make calls and strictly booking Telephone, In-Person, or Video appointments only." : void 0,
     calls_today: callsToday,
     daily_limit: limit,
     is_paused: false,
@@ -1769,7 +1769,7 @@ async function sendBlandCall(opts) {
   const config2 = await getBlandConfig();
   const e164 = toE164(opts.phone);
   if (!e164) {
-    throw Object.assign(new Error("Invalid phone number for Bland AI call"), { status: 400 });
+    throw Object.assign(new Error("Invalid phone number for Sarah Outbound Caller call"), { status: 400 });
   }
   const relatedId = opts.related_id || opts.leadId;
   const relatedType = opts.related_type || "lead";
@@ -2008,7 +2008,7 @@ async function handleBlandWebhook(payload) {
   const metadata = payload.metadata || {};
   const lowerText = `${transcript} ${summary} ${JSON.stringify(variables)}`.toLowerCase();
   let dispositionId = "contacted_interested";
-  let dispositionLabel = "Bland AI \u2014 Qualified / Interested";
+  let dispositionLabel = "Sarah Outbound Caller \u2014 Qualified / Interested";
   const transferred = Boolean(payload.transferred_to || variables.transferred || /transferring you|connecting you|hold while i connect|bridge your call/i.test(lowerText));
   const bookedAppt = Boolean(
     variables.appointment_booked || variables.appointment_time || variables.appointment_datetime || variables.appointment_type || /scheduled|appointment set|booked for|book an appointment|requested an appointment|calendar|telephone appointment|in-person appointment|in person appointment|video appointment/i.test(lowerText)
@@ -2018,13 +2018,13 @@ async function handleBlandWebhook(payload) {
   const selectedApptLabel = formatAppointmentTypeLabel(selectedApptType);
   if (answeredBy === "voicemail" || /voicemail|leave a message/i.test(lowerText)) {
     dispositionId = "voicemail_left";
-    dispositionLabel = "Bland AI \u2014 Voicemail Left";
+    dispositionLabel = "Sarah Outbound Caller \u2014 Voicemail Left";
   } else if (/do not call|take me off|remove my number|stop calling/i.test(lowerText)) {
     dispositionId = "dnc_request";
-    dispositionLabel = "Bland AI \u2014 Do Not Call Request";
+    dispositionLabel = "Sarah Outbound Caller \u2014 Do Not Call Request";
   } else if (transferred && !metadata.on_warm_transfer) {
     dispositionId = "warm_transfer_success";
-    dispositionLabel = "Bland AI \u2014 Live Warm Transfer to King Amen Ra";
+    dispositionLabel = "Sarah Outbound Caller \u2014 Live Warm Transfer to King Amen Ra";
     await setWarmTransferStatus({
       on_warm_transfer: true,
       lead_id: metadata.related_id || null,
@@ -2033,10 +2033,10 @@ async function handleBlandWebhook(payload) {
     });
   } else if (bookedAppt || metadata.on_warm_transfer) {
     dispositionId = "appointment_set";
-    dispositionLabel = `Bland AI \u2014 ${selectedApptLabel} Appointment Booked`;
+    dispositionLabel = `Receptionist \u2014 ${selectedApptLabel} Appointment Booked`;
   } else if (/not interested|already have|no thank you/i.test(lowerText)) {
     dispositionId = "not_interested";
-    dispositionLabel = "Bland AI \u2014 Not Interested";
+    dispositionLabel = "Sarah Outbound Caller \u2014 Not Interested";
   }
   let activity = await one(
     `SELECT * FROM activities WHERE meta->>'bland_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
@@ -2078,7 +2078,7 @@ ${transcript}` : ""
   } else {
     activity = await insert("activities", {
       type: "call",
-      subject: `\u{1F916} Bland AI Call \u2014 ${dispositionLabel}`,
+      subject: `\u{1F4DE} Sarah Outbound Call \u2014 ${dispositionLabel}`,
       body: bodyText,
       related_type: relatedType,
       related_id: relatedId,
@@ -2315,7 +2315,8 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
    - Point 3 (The 104+ Carrier Solution & Assumptive Close): "That is why we run a complimentary 5-minute check across 104+ carriers\u2014comparing Medigap Plan G, Plan N, and Medicare Advantage plans\u2014to ensure your exact doctors and medications are covered at the lowest possible cost. To make this completely effortless for you, {first_name}, our Principal Broker King Amen Ra can verify your doctors and prescriptions in just a few minutes at zero cost. Would you like me to reach out and get him on the line for you right now?"
 4. CALLING HOURS & CONTINUOUS DIALING:
    - Answer every inbound call immediately, 24 hours a day, 7 days a week.
-   - Outbound: call every prospect assigned to Bland AI Monday through Friday 9:00 AM to 7:00 PM and Saturday through Sunday 9:00 AM to 6:00 PM (Arizona time), up to 1,000 calls per day, continuously dialing the assigned queue without stopping.
+   - Official Receptionist & Warm Transfer Work Hours: Monday through Friday, 8:00 AM to 8:00 PM (Arizona time). No warm transfers outside those times.
+   - Outbound: call every prospect assigned to Sarah Outbound Caller Monday through Friday 8:00 AM to 8:00 PM (Arizona time), up to 1,000 calls per day, continuously dialing the assigned queue without stopping.
 5. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}) & MANDATORY STEP-BY-STEP APPOINTMENT SETTING:
    - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER) or when an inbound/outbound caller wants to set an appointment, do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
    - Follow the Appointment Setting Steps in order:
@@ -2394,7 +2395,7 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
     ];
     settingsTableReady = false;
     BLAND_AI_USER_ID = "u_bland_ai";
-    BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: "Sarah \u2014 Voice AI Receptionist & Outbound Caller", email: "sarah@iwillglobal.com", role: "scheduler", phone: "(480) 331-9455" };
+    BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: "Sarah \u2014 Outbound Caller & Receptionist (480) 331-9455", email: "sarah@iwillglobal.com", role: "scheduler", phone: "(480) 331-9455" };
     PHOENIX_OFFSET_MS = 7 * 3600 * 1e3;
     DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     STATE_TIMEZONES = {
@@ -2751,7 +2752,7 @@ async function applyDisposition(ctx) {
       const bCfg = await getBlandConfig2();
       if (bCfg.is_calling_paused) {
         await setBlandCallingPause2(false, null);
-        actions.push("Resumed Bland AI outbound dialer following lead disposition");
+        actions.push("Resumed Sarah Outbound Caller following lead disposition");
       }
     }
   } catch (blandErr) {
@@ -6473,7 +6474,7 @@ var GoogleVoiceProvider = {
 };
 var BlandAIProvider = {
   id: "bland_ai",
-  label: "Bland AI Conversational Voice Agent (Outbound Auto-Setter & Qualifier)",
+  label: "Sarah Outbound Caller & Receptionist \u2014 Google Voice (480) 331-9455",
   prepareDial(phone) {
     const e164 = toE164(phone);
     if (!e164) return null;
@@ -7377,7 +7378,7 @@ calls.post("/transfer/initiate", async (req, res) => {
       on_warm_transfer: true,
       lead_id: target.id,
       call_id: activity.id,
-      reason: `Warm Transfer active with ${target.first_name} ${target.last_name} \u2014 Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls`
+      reason: `Warm Transfer active with ${target.first_name} ${target.last_name} \u2014 Sarah Outbound Caller booking Telephone, In-Person, or Video appointments only & continuing calls`
     });
   } catch {
   }
@@ -7424,7 +7425,7 @@ calls.post("/transfer/accept", async (req, res) => {
       on_warm_transfer: true,
       lead_id: activity.related_id,
       call_id: activity.id,
-      reason: "Broker on Warm Transfer Briefing \u2014 Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls"
+      reason: "Broker on Warm Transfer Briefing \u2014 Sarah Outbound Caller booking Telephone, In-Person, or Video appointments only & continuing calls"
     });
   } catch {
   }
@@ -7461,7 +7462,7 @@ calls.post("/transfer/3way-connect", async (req, res) => {
       on_warm_transfer: true,
       lead_id: activity.related_id,
       call_id: activity.id,
-      reason: "Broker on live 3-Way Conference \u2014 Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls"
+      reason: "Broker on live 3-Way Conference \u2014 Sarah Outbound Caller booking Telephone, In-Person, or Video appointments only & continuing calls"
     });
   } catch {
   }
@@ -12220,14 +12221,14 @@ blandAuth.get("/config", async (_req, res) => {
 });
 blandAuth.post("/config", async (req, res) => {
   if (req.user?.role !== "admin" && req.user?.role !== "manager" && req.user?.role !== "licensed_agent") {
-    return res.status(403).json({ error: "Only administrators or licensed brokers can configure Bland AI Voice Agents" });
+    return res.status(403).json({ error: "Only administrators or licensed brokers can configure Sarah Outbound Caller & Receptionist" });
   }
   try {
     const saved = await saveBlandConfig(req.body);
     const dispatchCheck = await canDispatchOutboundCall();
     res.json({
       success: true,
-      message: "Bland AI Voice Agent configuration saved successfully!",
+      message: "Sarah Outbound Caller & Receptionist configuration saved successfully!",
       config: {
         enabled: saved.enabled,
         pathway_id: saved.pathway_id,
@@ -12304,7 +12305,7 @@ blandAuth.post("/warm-transfer-mode", async (req, res) => {
       is_on_warm_transfer: Boolean(saved.is_on_warm_transfer),
       operating_mode: saved.is_on_warm_transfer ? "APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO" : "WARM_TRANSFER_OR_APPOINTMENT",
       allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
-      message: saved.is_on_warm_transfer ? "Warm Transfer Mode ACTIVE: Bland Agent AI knows you are on a warm transfer call, will ONLY book Telephone, In-Person, or Video appointments, and will continue making calls." : "Warm Transfer Mode OFF: Bland Agent AI will live warm-transfer qualified prospects to +16024569681 or book Telephone, In-Person, or Video appointments.",
+      message: saved.is_on_warm_transfer ? "Warm Transfer Mode ACTIVE: Sarah Outbound Caller knows you are on a warm transfer call, will ONLY book Telephone, In-Person, or Video appointments, and will continue making calls." : "Warm Transfer Mode OFF: Sarah Outbound Caller will live warm-transfer qualified prospects to +16024569681 or book Telephone, In-Person, or Video appointments.",
       config: saved
     });
   } catch (err) {
@@ -12450,17 +12451,17 @@ blandAuth.post("/activate", async (req, res) => {
     const assigned = await countBlandAssignedRemaining(callingWindow.start_of_day);
     let message;
     if (!callingWindow.open) {
-      message = `\u{1F916} Bland AI is ACTIVE and armed. Outside calling hours right now (${callingWindow.schedule_label}). ${callingWindow.next_open_label} ${assigned.remaining_today > 0 ? `${assigned.remaining_today} assigned prospect(s) are queued.` : ""}`.trim();
+      message = `\u{1F4DE} Sarah Outbound Caller is ACTIVE and armed. Outside calling hours right now (${callingWindow.schedule_label}). ${callingWindow.next_open_label} ${assigned.remaining_today > 0 ? `${assigned.remaining_today} assigned prospect(s) are queued.` : ""}`.trim();
     } else if (dispatched.length > 0) {
-      message = `\u{1F916} Bland AI activated! Dialing ${dispatched.length} prospect(s) now${cfg.is_on_warm_transfer ? " in Warm Transfer Mode (Telephone, In-Person, or Video appointments only)" : ""}. ${assigned.remaining_today} assigned prospect(s) remaining today \u2014 Bland keeps calling until ${callingWindow.today_label.split("\u2013 ")[1] || "close"}.`;
+      message = `\u{1F4DE} Sarah Outbound Caller activated! Dialing ${dispatched.length} prospect(s) now via Google Voice on (480) 331-9455${cfg.is_on_warm_transfer ? " in Warm Transfer Mode (Telephone, In-Person, or Video appointments only)" : ""}. ${assigned.remaining_today} assigned prospect(s) remaining today \u2014 Sarah keeps calling until ${callingWindow.today_label.split("\u2013 ")[1] || "close"}.`;
     } else if (assigned.assigned_total === 0) {
-      message = '\u{1F916} Bland AI is ACTIVE, but no prospects are assigned to Bland AI yet. Select prospects and click "Assign to Bland AI" (or "Start Bland AI") to queue them.';
+      message = '\u{1F4DE} Sarah Outbound Caller is ACTIVE, but no prospects are assigned yet. Select prospects and click "Assign to Sarah Outbound" to queue them.';
     } else if (assigned.remaining_today === 0) {
-      message = `\u{1F916} Bland AI is ACTIVE. All ${assigned.assigned_total} assigned prospect(s) have been called today \u2014 new assignments and due callbacks will be dialed automatically.`;
+      message = `\u{1F4DE} Sarah Outbound Caller is ACTIVE. All ${assigned.assigned_total} assigned prospect(s) have been called today \u2014 new assignments and due callbacks will be dialed automatically.`;
     } else {
-      message = `\u{1F916} Bland AI is ACTIVE with ${assigned.remaining_today} assigned prospect(s) queued \u2014 all lines are busy; the next prospect is dialed the moment a line frees up.`;
+      message = `\u{1F4DE} Sarah Outbound Caller is ACTIVE with ${assigned.remaining_today} assigned prospect(s) queued \u2014 all lines are busy; the next prospect is dialed the moment a line frees up.`;
     }
-    if (assignedCount > 0) message = `\u2705 ${assignedCount} prospect(s) assigned to Bland AI. ${message}`;
+    if (assignedCount > 0) message = `\u2705 ${assignedCount} prospect(s) assigned to Sarah Outbound Caller. ${message}`;
     if (gateMessage) message = `${gateMessage} ${message}`;
     res.json({
       success: true,
@@ -12492,7 +12493,7 @@ blandAuth.post("/assign", async (req, res) => {
   try {
     const { lead_ids } = req.body || {};
     if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
-      return res.status(400).json({ error: "Select at least one prospect to assign to Bland AI" });
+      return res.status(400).json({ error: "Select at least one prospect to assign to Sarah Outbound Caller" });
     }
     const updated = await q(
       `UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2) RETURNING id`,
@@ -12508,7 +12509,7 @@ blandAuth.post("/assign", async (req, res) => {
       queue_remaining: assigned.remaining_today,
       dispatched: tick?.dispatched || [],
       is_campaign_active: Boolean(cfg.is_campaign_active),
-      message: `\u{1F916} ${updated.length} prospect(s) assigned to Bland AI.${cfg.is_campaign_active ? " Bland is active and will call them during calling hours." : ' Click "Start Bland AI Calls" to begin dialing.'}`
+      message: `\u{1F4DE} ${updated.length} prospect(s) assigned to Sarah Outbound Caller.${cfg.is_campaign_active ? " Sarah is active and will call them during calling hours." : ' Click "Start Outbound Calls" to begin dialing.'}`
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -12523,7 +12524,7 @@ blandAuth.post("/deactivate", async (req, res) => {
       is_campaign_active: false,
       is_on_warm_transfer: Boolean(result.config.is_on_warm_transfer),
       stopped_call_id: result.stopped_call_id,
-      message: result.message || "Bland Agent AI outbound calling stopped.",
+      message: result.message || "Sarah Outbound Caller stopped.",
       config: result.config
     });
   } catch (err) {

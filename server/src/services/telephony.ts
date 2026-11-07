@@ -48,7 +48,7 @@ export const GoogleVoiceProvider: TelephonyProvider = {
 
 export const BlandAIProvider: TelephonyProvider = {
   id: 'bland_ai',
-  label: 'Bland AI Conversational Voice Agent (Outbound Auto-Setter & Qualifier)',
+  label: 'Sarah Outbound Caller & Receptionist — Google Voice (480) 331-9455',
   prepareDial(phone) {
     const e164 = toE164(phone);
     if (!e164) return null;

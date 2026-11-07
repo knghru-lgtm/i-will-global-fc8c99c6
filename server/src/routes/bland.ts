@@ -313,10 +313,10 @@ blandAuth.get('/config', async (_req, res) => {
   }
 });
 
-// 2. Save Bland AI Configuration (Admin / Manager / Authenticated User)
+// 2. Save Sarah Outbound Caller & Receptionist Configuration (Admin / Manager / Authenticated User)
 blandAuth.post('/config', async (req, res) => {
   if (req.user?.role !== 'admin' && req.user?.role !== 'manager' && req.user?.role !== 'licensed_agent') {
-    return res.status(403).json({ error: 'Only administrators or licensed brokers can configure Bland AI Voice Agents' });
+    return res.status(403).json({ error: 'Only administrators or licensed brokers can configure Sarah Outbound Caller & Receptionist' });
   }
 
   try {
@@ -324,7 +324,7 @@ blandAuth.post('/config', async (req, res) => {
     const dispatchCheck = await canDispatchOutboundCall();
     res.json({
       success: true,
-      message: 'Bland AI Voice Agent configuration saved successfully!',
+      message: 'Sarah Outbound Caller & Receptionist configuration saved successfully!',
       config: {
         enabled: saved.enabled,
         pathway_id: saved.pathway_id,
@@ -412,8 +412,8 @@ blandAuth.post('/warm-transfer-mode', async (req, res) => {
       operating_mode: saved.is_on_warm_transfer ? 'APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO' : 'WARM_TRANSFER_OR_APPOINTMENT',
       allowed_appointment_types: ALLOWED_BLAND_APPOINTMENT_TYPES,
       message: saved.is_on_warm_transfer
-        ? 'Warm Transfer Mode ACTIVE: Bland Agent AI knows you are on a warm transfer call, will ONLY book Telephone, In-Person, or Video appointments, and will continue making calls.'
-        : 'Warm Transfer Mode OFF: Bland Agent AI will live warm-transfer qualified prospects to +16024569681 or book Telephone, In-Person, or Video appointments.',
+        ? 'Warm Transfer Mode ACTIVE: Sarah Outbound Caller knows you are on a warm transfer call, will ONLY book Telephone, In-Person, or Video appointments, and will continue making calls.'
+        : 'Warm Transfer Mode OFF: Sarah Outbound Caller will live warm-transfer qualified prospects to +16024569681 or book Telephone, In-Person, or Video appointments.',
       config: saved,
     });
   } catch (err: any) {
@@ -579,17 +579,17 @@ blandAuth.post('/activate', async (req, res) => {
 
     let message: string;
     if (!callingWindow.open) {
-      message = `🤖 Bland AI is ACTIVE and armed. Outside calling hours right now (${callingWindow.schedule_label}). ${callingWindow.next_open_label} ${assigned.remaining_today > 0 ? `${assigned.remaining_today} assigned prospect(s) are queued.` : ''}`.trim();
+      message = `📞 Sarah Outbound Caller is ACTIVE and armed. Outside calling hours right now (${callingWindow.schedule_label}). ${callingWindow.next_open_label} ${assigned.remaining_today > 0 ? `${assigned.remaining_today} assigned prospect(s) are queued.` : ''}`.trim();
     } else if (dispatched.length > 0) {
-      message = `🤖 Bland AI activated! Dialing ${dispatched.length} prospect(s) now${cfg.is_on_warm_transfer ? ' in Warm Transfer Mode (Telephone, In-Person, or Video appointments only)' : ''}. ${assigned.remaining_today} assigned prospect(s) remaining today — Bland keeps calling until ${callingWindow.today_label.split('– ')[1] || 'close'}.`;
+      message = `📞 Sarah Outbound Caller activated! Dialing ${dispatched.length} prospect(s) now via Google Voice on (480) 331-9455${cfg.is_on_warm_transfer ? ' in Warm Transfer Mode (Telephone, In-Person, or Video appointments only)' : ''}. ${assigned.remaining_today} assigned prospect(s) remaining today — Sarah keeps calling until ${callingWindow.today_label.split('– ')[1] || 'close'}.`;
     } else if (assigned.assigned_total === 0) {
-      message = '🤖 Bland AI is ACTIVE, but no prospects are assigned to Bland AI yet. Select prospects and click "Assign to Bland AI" (or "Start Bland AI") to queue them.';
+      message = '📞 Sarah Outbound Caller is ACTIVE, but no prospects are assigned yet. Select prospects and click "Assign to Sarah Outbound" to queue them.';
     } else if (assigned.remaining_today === 0) {
-      message = `🤖 Bland AI is ACTIVE. All ${assigned.assigned_total} assigned prospect(s) have been called today — new assignments and due callbacks will be dialed automatically.`;
+      message = `📞 Sarah Outbound Caller is ACTIVE. All ${assigned.assigned_total} assigned prospect(s) have been called today — new assignments and due callbacks will be dialed automatically.`;
     } else {
-      message = `🤖 Bland AI is ACTIVE with ${assigned.remaining_today} assigned prospect(s) queued — all lines are busy; the next prospect is dialed the moment a line frees up.`;
+      message = `📞 Sarah Outbound Caller is ACTIVE with ${assigned.remaining_today} assigned prospect(s) queued — all lines are busy; the next prospect is dialed the moment a line frees up.`;
     }
-    if (assignedCount > 0) message = `✅ ${assignedCount} prospect(s) assigned to Bland AI. ${message}`;
+    if (assignedCount > 0) message = `✅ ${assignedCount} prospect(s) assigned to Sarah Outbound Caller. ${message}`;
     if (gateMessage) message = `${gateMessage} ${message}`;
 
     res.json({
@@ -623,12 +623,12 @@ blandAuth.post('/tick', async (_req, res) => {
   }
 });
 
-// 5e. Assign selected prospects to Bland AI (they are dialed automatically during calling hours)
+// 5e. Assign selected prospects to Sarah Outbound Caller (they are dialed automatically during calling hours)
 blandAuth.post('/assign', async (req, res) => {
   try {
     const { lead_ids } = req.body || {};
     if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
-      return res.status(400).json({ error: 'Select at least one prospect to assign to Bland AI' });
+      return res.status(400).json({ error: 'Select at least one prospect to assign to Sarah Outbound Caller' });
     }
     const updated = await q(
       `UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2) RETURNING id`,
@@ -644,7 +644,7 @@ blandAuth.post('/assign', async (req, res) => {
       queue_remaining: assigned.remaining_today,
       dispatched: tick?.dispatched || [],
       is_campaign_active: Boolean(cfg.is_campaign_active),
-      message: `🤖 ${updated.length} prospect(s) assigned to Bland AI.${cfg.is_campaign_active ? ' Bland is active and will call them during calling hours.' : ' Click "Start Bland AI Calls" to begin dialing.'}`,
+      message: `📞 ${updated.length} prospect(s) assigned to Sarah Outbound Caller.${cfg.is_campaign_active ? ' Sarah is active and will call them during calling hours.' : ' Click "Start Outbound Calls" to begin dialing.'}`,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -661,7 +661,7 @@ blandAuth.post('/deactivate', async (req, res) => {
       is_campaign_active: false,
       is_on_warm_transfer: Boolean(result.config.is_on_warm_transfer),
       stopped_call_id: result.stopped_call_id,
-      message: result.message || 'Bland Agent AI outbound calling stopped.',
+      message: result.message || 'Sarah Outbound Caller stopped.',
       config: result.config,
     });
   } catch (err: any) {

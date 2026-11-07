@@ -112,14 +112,14 @@ export const LeadsPage: React.FC = () => {
     setBlandBusy(true);
     try {
       const res = await api.post('/bland/assign', { lead_ids: targetLeadIds });
-      setBlandBannerMsg(res.message || `🤖 ${targetLeadIds.length} prospect(s) assigned to Bland AI.`);
+      setBlandBannerMsg(res.message || `📞 ${targetLeadIds.length} prospect(s) assigned to Sarah Outbound Caller.`);
       setSelectedIds([]);
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
       loadLeads();
       loadPoolStats();
       loadBlandStatus();
     } catch (err: any) {
-      alert(err.message || 'Failed to assign prospects to Bland AI');
+      alert(err.message || 'Failed to assign prospects to Sarah Outbound Caller');
     } finally {
       setBlandBusy(false);
     }
@@ -137,7 +137,7 @@ export const LeadsPage: React.FC = () => {
         continue_queue: true,
       });
       setIsBlandActive(true);
-      setBlandBannerMsg(res.message || '🤖 Sarah Voice AI + Google Voice (480) 331-9455 activated! Outbound calls have started.');
+      setBlandBannerMsg(res.message || '📞 Sarah Outbound Caller + Google Voice (480) 331-9455 activated! Outbound calls have started.');
       const firstDispatched = res.dispatched?.[0];
       const firstLead = idsToCall?.length ? leads.find((l) => l.id === idsToCall[0]) : leads[0];
       const dialPhone = firstDispatched?.phone || firstLead?.phone || '6232230165';
@@ -161,7 +161,7 @@ export const LeadsPage: React.FC = () => {
       loadPoolStats();
       loadBlandStatus();
     } catch (err: any) {
-      alert(err.message || 'Failed to start Bland AI outbound calls');
+      alert(err.message || 'Failed to start Sarah Outbound Caller calls');
     } finally {
       setBlandBusy(false);
     }
@@ -172,11 +172,11 @@ export const LeadsPage: React.FC = () => {
     try {
       const res = await api.post('/bland/stop', { stop_all: true });
       setIsBlandActive(false);
-      setBlandBannerMsg(res.message || '🛑 Bland AI outbound calls and queue dialing have been stopped.');
+      setBlandBannerMsg(res.message || '🛑 Sarah Outbound Caller calls and queue dialing have been stopped.');
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
       loadLeads();
     } catch (err: any) {
-      alert(err.message || 'Failed to stop Bland AI outbound calls');
+      alert(err.message || 'Failed to stop Sarah Outbound Caller calls');
     } finally {
       setBlandBusy(false);
     }

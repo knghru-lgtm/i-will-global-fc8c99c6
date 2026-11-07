@@ -1190,7 +1190,7 @@ export const ActivitiesPage: React.FC = () => {
                           gap: '0.25rem',
                         }}
                       >
-                        <span>🤖</span> <span>Bland AI Voice Agent</span>
+                        <span>🎙️</span> <span>Sarah Outbound & Receptionist (480) 331-9455</span>
                       </span>
                     )}
 
@@ -1254,7 +1254,7 @@ export const ActivitiesPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Bland AI Call Audio Recording */}
+                  {/* Call Audio Recording */}
                   {a.meta?.recording_url && (
                     <div
                       style={{
@@ -1266,7 +1266,7 @@ export const ActivitiesPage: React.FC = () => {
                       }}
                     >
                       <div style={{ fontSize: '0.76rem', fontWeight: 700, color: '#c084fc', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <span>🎧</span> <span>Bland AI Call Audio Recording</span>
+                        <span>🎧</span> <span>Call Audio Recording</span>
                       </div>
                       <audio controls src={a.meta.recording_url} style={{ width: '100%', height: '36px' }} />
                     </div>

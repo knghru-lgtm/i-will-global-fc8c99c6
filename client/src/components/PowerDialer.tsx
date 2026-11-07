@@ -729,9 +729,9 @@ export const PowerDialer: React.FC<{ isOpen: boolean; onClose: () => void }> = (
                       gap: '0.35rem',
                       cursor: 'pointer',
                     }}
-                    title="Hand off this lead to autonomous Bland AI Voice Agent to call, qualify, and set appointment"
+                    title="Hand off this lead to Sarah Outbound Queue Dialer on (480) 331-9455 to call, qualify, and set appointment"
                   >
-                    <span>🤖</span> <span>Bland AI</span>
+                    <span>📞</span> <span>Queue Dialer</span>
                   </button>
                 )}
                 {currentLead?.phone && (

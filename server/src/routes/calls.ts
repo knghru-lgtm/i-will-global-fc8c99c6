@@ -199,13 +199,13 @@ calls.post('/transfer/initiate', async (req, res) => {
   const { notify } = await import('../services/automation.ts');
   const { publish } = await import('../realtime.ts');
 
-  // Inform Bland AI that King Amen Ra is on a warm transfer call -> AI selects ONLY Telephone, In-Person, or Video appointments and continues calling!
+  // Inform Sarah Outbound Caller that King Amen Ra is on a warm transfer call -> selects ONLY Telephone, In-Person, or Video appointments and continues calling!
   try {
     await setWarmTransferStatus({
       on_warm_transfer: true,
       lead_id: target.id,
       call_id: activity.id,
-      reason: `Warm Transfer active with ${target.first_name} ${target.last_name} — Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls`,
+      reason: `Warm Transfer active with ${target.first_name} ${target.last_name} — Sarah Outbound Caller booking Telephone, In-Person, or Video appointments only & continuing calls`,
     });
   } catch { /* ignore */ }
 
@@ -257,7 +257,7 @@ calls.post('/transfer/accept', async (req, res) => {
       on_warm_transfer: true,
       lead_id: activity.related_id,
       call_id: activity.id,
-      reason: 'Broker on Warm Transfer Briefing — Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls',
+      reason: 'Broker on Warm Transfer Briefing — Sarah Outbound Caller booking Telephone, In-Person, or Video appointments only & continuing calls',
     });
   } catch { /* ignore */ }
 
@@ -299,7 +299,7 @@ calls.post('/transfer/3way-connect', async (req, res) => {
       on_warm_transfer: true,
       lead_id: activity.related_id,
       call_id: activity.id,
-      reason: 'Broker on live 3-Way Conference — Bland AI booking Telephone, In-Person, or Video appointments only & continuing calls',
+      reason: 'Broker on live 3-Way Conference — Sarah Outbound Caller booking Telephone, In-Person, or Video appointments only & continuing calls',
     });
   } catch { /* ignore */ }
 

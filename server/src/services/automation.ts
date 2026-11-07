@@ -303,7 +303,7 @@ export async function applyDisposition(ctx: ApplyCtx): Promise<{ actions: string
   }
 
   
-  // If King or an agent dispositions a lead, resume Bland AI outbound calling if it was paused
+  // If King or an agent dispositions a lead, resume Sarah Outbound Caller if it was paused
   try {
     const isKing = ctx.user.id === '3afbca01-76cd-4fa9-91cc-f3a1a4821276' ||
                    ctx.user.id === 'u_principal' ||
@@ -314,7 +314,7 @@ export async function applyDisposition(ctx: ApplyCtx): Promise<{ actions: string
       const bCfg = await getBlandConfig();
       if (bCfg.is_calling_paused) {
         await setBlandCallingPause(false, null);
-        actions.push('Resumed Bland AI outbound dialer following lead disposition');
+        actions.push('Resumed Sarah Outbound Caller following lead disposition');
       }
     }
   } catch (blandErr) {

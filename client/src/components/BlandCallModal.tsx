@@ -131,7 +131,7 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
       if (onCallDispatched) onCallDispatched(res);
     } catch (err: any) {
-      setError(err.message || 'Failed to start Bland AI outbound calls');
+      setError(err.message || 'Failed to start Sarah Outbound Caller calls');
     } finally {
       setCalling(false);
     }
@@ -148,11 +148,11 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
       });
       setIsCampaignActive(false);
       setCallResult(null);
-      setStopMessage(res.message || '🛑 All Bland AI outbound calls and queue dialing have been stopped.');
+      setStopMessage(res.message || '🛑 All Sarah Outbound Caller calls and queue dialing have been stopped.');
       window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
       if (onCallDispatched) onCallDispatched(res);
     } catch (err: any) {
-      setError(err.message || 'Failed to stop Bland AI outbound calls');
+      setError(err.message || 'Failed to stop Sarah Outbound Caller calls');
     } finally {
       setStopping(false);
     }
@@ -168,11 +168,11 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.1rem', gap: '0.75rem', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <span style={{ fontSize: '1.8rem' }}>🤖</span>
+            <span style={{ fontSize: '1.8rem' }}>📞</span>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#c084fc' }}>
-                  Bland AI Outbound Call Control
+                  Sarah Outbound Call Control (480) 331-9455
                 </h2>
                 <span
                   style={{
@@ -189,7 +189,7 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
                 </span>
               </div>
               <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                Activate Bland AI to start or stop autonomous outbound calls from Prospects & Lead Workspace
+                Activate Sarah Outbound Caller via Google Voice on (480) 331-9455
               </div>
             </div>
           </div>
@@ -214,7 +214,7 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
           }}
         >
           <div style={{ fontSize: '0.83rem', color: '#e2e8f0', fontWeight: 700 }}>
-            ⚡ Quick Outbound Controls: Start or Stop Bland AI Calling Anytime
+            ⚡ Quick Outbound Controls: Start or Stop Sarah Outbound Calling Anytime
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
@@ -272,8 +272,8 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.72rem', background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontFamily: 'monospace' }} title={`Bland AI Agent ID: ${pathwayId}`}>
-              Agent: {pathwayId.slice(0, 8)}...
+            <span style={{ fontSize: '0.72rem', background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontFamily: 'monospace' }} title={`Google Voice Line: (480) 331-9455`}>
+              Line: (480) 331-9455
             </span>
             <span style={{ fontSize: '0.74rem', background: '#8b5cf6', color: '#fff', padding: '2px 8px', borderRadius: '12px', fontWeight: 700 }}>
               Target Beneficiary
@@ -354,7 +354,7 @@ export const BlandCallModal: React.FC<BlandCallModalProps> = ({ isOpen, onClose,
           <div style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1.5px solid #10b981', borderRadius: '12px', padding: '1.25rem', textAlign: 'center', margin: '1rem 0' }}>
             <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📞✨</div>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#34d399', margin: '0 0 0.35rem 0' }}>
-              Bland AI Outbound Call Active!
+              Google Voice + Sarah Outbound Call Active!
             </h3>
             <p style={{ fontSize: '0.85rem', color: '#e2e8f0', margin: '0 0 0.8rem 0' }}>
               {callResult.message || `Dialing ${prospectName} (${lead.phone})...`}

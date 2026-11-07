@@ -87,7 +87,6 @@ export const SettingsPage: React.FC = () => {
   const [trunkError, setTrunkError] = useState<string>('');
 
   // Bland AI Voice Agent State
-  const [blandApiKey, setBlandApiKey] = useState<string>('');
   const [blandEnabled, setBlandEnabled] = useState<boolean>(true);
   const [blandPathwayId, setBlandPathwayId] = useState<string>('3b13b658-e85d-4d14-a24a-868b61040c42');
   const [blandGithubRepo, setBlandGithubRepo] = useState<string>('');
@@ -97,10 +96,7 @@ export const SettingsPage: React.FC = () => {
   const [blandTransferNumber, setBlandTransferNumber] = useState<string>('+16024569681');
   const [blandPrompt, setBlandPrompt] = useState<string>('');
   const [blandWebhookUrl, setBlandWebhookUrl] = useState<string>('https://iwillglobal.com/api/bland/webhook');
-  const [blandHasKey, setBlandHasKey] = useState<boolean>(false);
-  const [blandMaskedKey, setBlandMaskedKey] = useState<string | null>(null);
   const [blandVoices, setBlandVoices] = useState<any[]>([]);
-  const [showBlandKey, setShowBlandKey] = useState<boolean>(false);
   const [blandSaving, setBlandSaving] = useState<boolean>(false);
   const [blandSuccess, setBlandSuccess] = useState<string>('');
   const [blandError, setBlandError] = useState<string>('');
@@ -256,13 +252,11 @@ export const SettingsPage: React.FC = () => {
       ]);
       if (cfg) {
         setBlandEnabled(cfg.enabled !== false);
-        setBlandHasKey(Boolean(cfg.has_api_key));
-        setBlandMaskedKey(cfg.masked_api_key);
         if (cfg.pathway_id) setBlandPathwayId(cfg.pathway_id);
         if (cfg.github_repo) setBlandGithubRepo(cfg.github_repo);
         setBlandDefaultVoice(cfg.default_voice || 'maya');
         setBlandModel(cfg.model || 'enhanced');
-        setBlandFromNumber(cfg.from_number || '+16024569681');
+        setBlandFromNumber(cfg.from_number || '+14803319455');
         setBlandTransferNumber(cfg.transfer_phone_number || '+16024569681');
         setBlandPrompt(cfg.prompt_template || '');
         setBlandWebhookUrl(cfg.webhook_url || 'https://iwillglobal.com/api/bland/webhook');
@@ -271,7 +265,7 @@ export const SettingsPage: React.FC = () => {
         setBlandVoices(voicesRes.voices);
       }
     } catch (err: any) {
-      console.error('Failed to load Bland AI configuration:', err);
+      console.error('Failed to load Sarah Outbound Caller configuration:', err);
     }
   };
 
@@ -282,7 +276,6 @@ export const SettingsPage: React.FC = () => {
     setBlandSaving(true);
     try {
       const res = await api.post('/bland/config', {
-        api_key: blandApiKey || undefined,
         enabled: blandEnabled,
         pathway_id: blandPathwayId,
         github_repo: blandGithubRepo,
@@ -293,11 +286,10 @@ export const SettingsPage: React.FC = () => {
         prompt_template: blandPrompt,
         webhook_url: blandWebhookUrl,
       });
-      setBlandSuccess(res.message || 'Bland AI Voice Agent configuration saved!');
-      setBlandApiKey('');
+      setBlandSuccess(res.message || 'Sarah Outbound Caller & Receptionist configuration saved!');
       await fetchBlandConfig();
     } catch (err: any) {
-      setBlandError(err.message || 'Failed to save Bland AI configuration');
+      setBlandError(err.message || 'Failed to save Sarah Outbound Caller configuration');
     } finally {
       setBlandSaving(false);
     }
@@ -931,18 +923,18 @@ export const SettingsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ------------------------------------------------------------------ SECTION 0.75: BLAND AI CONVERSATIONAL VOICE AGENTS */}
+      {/* ------------------------------------------------------------------ SECTION 0.75: SARAH OUTBOUND CALLER & RECEPTIONIST (GOOGLE VOICE 480-331-9455) */}
       <div style={{ background: 'var(--bg-card)', border: '1.5px solid #8b5cf6', borderRadius: '16px', padding: '1.75rem', boxShadow: '0 8px 30px rgba(139, 92, 246, 0.2)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <span style={{ fontSize: '1.8rem' }}>🤖</span>
+              <span style={{ fontSize: '1.8rem' }}>🎙️</span>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#c084fc' }}>
-                Bland AI Conversational Voice Agents
+                Sarah Outbound Caller & Receptionist — Google Voice (480) 331-9455
               </h2>
             </div>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
-              Autonomous, hyper-realistic voice agents for outbound Medicare qualification, appointment scheduling, and live warm transfers.
+              100% Free Cloned Voice Engine on Google Voice (480) 331-9455 for inbound call answering, 6-product appointment setting, and warm transfers to (602) 456-9681.
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -952,12 +944,12 @@ export const SettingsPage: React.FC = () => {
                 fontWeight: 700,
                 padding: '4px 10px',
                 borderRadius: '12px',
-                background: blandHasKey ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                border: `1px solid ${blandHasKey ? '#10b981' : '#f59e0b'}`,
-                color: blandHasKey ? '#34d399' : '#fbbf24',
+                background: 'rgba(16, 185, 129, 0.15)',
+                border: '1px solid #10b981',
+                color: '#34d399',
               }}
             >
-              {blandHasKey ? '● Live Bland.ai Connected' : '○ Simulated Preview Mode'}
+              ● 100% Free Google Voice (480) 331-9455 Active
             </span>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '4px 10px', borderRadius: '12px', background: 'rgba(139, 92, 246, 0.15)', border: '1px solid #8b5cf6', color: '#c084fc' }}>
               Voice: {blandDefaultVoice.toUpperCase()}
@@ -977,37 +969,12 @@ export const SettingsPage: React.FC = () => {
           </div>
         )}
 
-        {/* Bland AI Configuration Form */}
+        {/* Sarah Outbound & Receptionist Configuration Form */}
         <form onSubmit={handleSaveBlandConfig} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '1.75rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
             <div>
               <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e2e8f0', display: 'block', marginBottom: '0.35rem' }}>
-                Bland AI API Key
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showBlandKey ? 'text' : 'password'}
-                  value={blandApiKey}
-                  onChange={(e) => setBlandApiKey(e.target.value)}
-                  placeholder={blandMaskedKey || 'sk_live_... or test key'}
-                  style={{ width: '100%', padding: '0.68rem 2.2rem 0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowBlandKey(!showBlandKey)}
-                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.85rem' }}
-                >
-                  {showBlandKey ? '🙈' : '👁️'}
-                </button>
-              </div>
-              <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                Acquire from <a href="https://app.bland.ai/settings" target="_blank" rel="noopener noreferrer" style={{ color: '#c084fc', textDecoration: 'underline' }}>app.bland.ai/settings</a>. Leave blank to keep existing key.
-              </div>
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e2e8f0', display: 'block', marginBottom: '0.35rem' }}>
-                Default AI Voice Persona
+                Default Voice Persona
               </label>
               <select
                 value={blandDefaultVoice}
@@ -1037,39 +1004,17 @@ export const SettingsPage: React.FC = () => {
 
             <div>
               <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e2e8f0', display: 'block', marginBottom: '0.35rem' }}>
-                Outbound Caller ID (From Number)
+                Main Google Voice Line (Inbound & Outbound)
               </label>
               <input
                 type="text"
                 value={blandFromNumber}
                 onChange={(e) => setBlandFromNumber(e.target.value)}
-                placeholder="+16024569681"
+                placeholder="+14803319455"
                 style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
               />
               <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                Agency caller ID displayed on prospect phones.
-              </div>
-            </div>
-
-            <div>
-              <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e2e8f0', display: 'block', marginBottom: '0.35rem' }}>
-                Bland AI Agent Pathway ID (Conversational Pathway)
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type="text"
-                  value={blandPathwayId}
-                  onChange={(e) => setBlandPathwayId(e.target.value)}
-                  placeholder="3b13b658-e85d-4d14-a24a-868b61040c42"
-                  style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#38bdf8', fontFamily: 'monospace', fontSize: '0.82rem' }}
-                />
-              </div>
-              <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                <span>Agent Operation:</span>
-                <span style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '1px 6px', borderRadius: '4px', fontFamily: 'monospace' }}>
-                  setup:3b13b658-e85d-4d14-a24a-868b61040c42
-                </span>
-                <span>(Visual pathway builder & state machine)</span>
+                Free Google Voice line (480) 331-9455 answering inbound & making outbound calls.
               </div>
             </div>
 
@@ -1085,13 +1030,13 @@ export const SettingsPage: React.FC = () => {
                 style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
               />
               <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                Connect GitHub repo for Bland pathway definitions, webhooks, and CI/CD.
+                Connected GitHub repo for cloned pathway definitions, webhooks, and CI/CD.
               </div>
             </div>
 
             <div>
               <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e2e8f0', display: 'block', marginBottom: '0.35rem' }}>
-                Live Warm Transfer Line (Licensed Agent)
+                Live Warm Transfer Line (Principal Broker King Amen Ra)
               </label>
               <input
                 type="text"
@@ -1101,14 +1046,14 @@ export const SettingsPage: React.FC = () => {
                 style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
               />
               <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                Target phone number for immediate live agent 3-way transfers.
+                Target phone number (+16024569681) for live warm transfers (Mon–Fri 8am–8pm).
               </div>
             </div>
           </div>
 
           <div>
             <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e2e8f0', display: 'block', marginBottom: '0.35rem' }}>
-              Bland AI System Prompt & Compliance Guardrails
+              Receptionist & Outbound System Prompt & Compliance Guardrails
             </label>
             <textarea
               rows={6}
@@ -1126,7 +1071,7 @@ export const SettingsPage: React.FC = () => {
           <div style={{ background: 'var(--bg-surface)', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
             <div>
               <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#cbd5e1' }}>
-                Bland AI Webhook URL (For Transcripts, Recordings & Dispositions)
+                Call Completion Webhook URL (For Transcripts, Recordings & Dispositions)
               </div>
               <div style={{ fontSize: '0.82rem', color: '#38bdf8', fontFamily: 'monospace', marginTop: '0.15rem' }}>
                 {blandWebhookUrl}
@@ -1147,7 +1092,7 @@ export const SettingsPage: React.FC = () => {
               disabled={blandSaving}
               style={{ padding: '0.65rem 1.5rem', borderRadius: '8px', fontWeight: 700, fontSize: '0.88rem', background: '#8b5cf6', border: 'none', color: '#fff', cursor: 'pointer' }}
             >
-              {blandSaving ? 'Saving...' : '💾 Save Bland AI Settings'}
+              {blandSaving ? 'Saving...' : '💾 Save Receptionist & Outbound Settings'}
             </button>
           </div>
         </form>
@@ -1155,10 +1100,10 @@ export const SettingsPage: React.FC = () => {
         {/* Interactive Live Test Call Box */}
         <div style={{ background: 'var(--bg-surface)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '12px', padding: '1.25rem' }}>
           <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#c084fc', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-            <span>📞</span> <span>Interactive Bland AI Voice Test Call</span>
+            <span>📞</span> <span>Interactive Google Voice + Sarah Outbound Test Call (480) 331-9455</span>
           </div>
           <p style={{ fontSize: '0.82rem', color: '#94a3b8', margin: '0 0 1rem 0' }}>
-            Experience the voice agent yourself. Enter your phone number below and Bland AI will place an immediate live test call to your device.
+            Experience our cloned Receptionist & Outbound Caller yourself. Enter a phone number below to place an immediate live test call via Google Voice on (480) 331-9455.
           </p>
 
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>

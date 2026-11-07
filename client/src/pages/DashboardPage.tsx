@@ -143,7 +143,7 @@ export const DashboardPage: React.FC = () => {
                 fontWeight: 700,
                 fontSize: '0.86rem',
               }}
-              title="Phone number for immediate Bland AI call"
+              title="Phone number for immediate Sarah Outbound call"
             />
             <button
               type="button"
