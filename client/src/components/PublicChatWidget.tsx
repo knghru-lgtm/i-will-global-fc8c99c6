@@ -85,7 +85,7 @@ export const PublicChatWidget: React.FC = () => {
                 setIsOpen(false);
                 window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'));
               }}
-              title="Switch to live voice call with Sarah"
+              title="Switch to live voice call with Receptionist"
               style={{
                 marginLeft: 'auto',
                 background: 'linear-gradient(135deg, #c8963e, #0284c7)',
@@ -103,7 +103,7 @@ export const PublicChatWidget: React.FC = () => {
               }}
             >
               <span>🎙️</span>
-              <span>Speak to Sarah</span>
+              <span>Receptionist</span>
             </button>
           </div>
 

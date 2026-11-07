@@ -135,14 +135,14 @@ export const PublicTeamDirectorySection: React.FC = () => {
             Meet the Team — IWG Insurance & Financial Services Directory
           </h2>
           <p style={{ fontSize: '1.05rem', color: '#cbd5e1', maxWidth: '820px', margin: '0 auto 1.25rem', lineHeight: 1.65 }}>
-            Connect directly with our Executive Leadership, Licensed Senior Advisors, or Scheduling Specialists. Call our 24/7 AI Receptionist Sarah on our main line at{' '}
+            Connect directly with our Executive Leadership, Licensed Senior Advisors, or Scheduling Specialists. Call our 24/7 Receptionist on our main line at{' '}
             <a href="tel:+14803319455" style={{ color: '#ffd88a', fontWeight: 800, textDecoration: 'underline' }}>
               (480) 331-9455
             </a>{' '}
-            and ask for any team member by name for an instant AI whisper transfer, or tap <strong>Talk to Sarah (Voice AI)</strong> to speak with her live in your browser for free.
+            and ask for any team member by name for an instant whisper transfer, or tap <strong>Receptionist</strong> to speak live in your browser for free.
           </p>
 
-          {/* AI Receptionist Live Routing Callout */}
+          {/* Receptionist Live Routing Callout */}
           <div
             style={{
               display: 'inline-flex',
@@ -160,7 +160,7 @@ export const PublicTeamDirectorySection: React.FC = () => {
           >
             <Headphones size={18} color="#34d399" />
             <span>
-              <strong>Live AI Receptionist & Product Funnel:</strong> Ask Sarah for <strong>Medicare (2027 Changes)</strong>, <strong>Individual Health</strong>, <strong>Group Health</strong>, <strong>Investment Grade Life (IUL)</strong>, <strong>Long Term Care</strong>, <strong>Term Life</strong>, or <strong>any team member below</strong>!
+              <strong>Live Receptionist & Product Funnel:</strong> Ask our Receptionist for <strong>Medicare (2027 Changes)</strong>, <strong>Individual Health</strong>, <strong>Group Health</strong>, <strong>Investment Grade Life (IUL)</strong>, <strong>Long Term Care</strong>, <strong>Term Life</strong>, or <strong>any team member below</strong>!
             </span>
           </div>
         </div>

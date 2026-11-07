@@ -55,7 +55,7 @@ const Header = () => {
               type="button"
               className="btn btn-small"
               onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'))}
-              title="Talk with Sarah — 100% Free Live Voice AI Receptionist (Spoken Audio)"
+              title="Receptionist — Live 24/7 Receptionist on (480) 331-9455"
               style={{
                 background: 'linear-gradient(135deg, #c8963e 0%, #0284c7 100%)',
                 color: '#ffffff',
@@ -71,7 +71,7 @@ const Header = () => {
               }}
             >
               <span>🎙️</span>
-              <span>Talk to Sarah (Voice AI)</span>
+              <span>Receptionist</span>
             </button>
             <a 
               href="https://my.destinationrx.com/hub/s/SMPJW7R2A" 
@@ -127,7 +127,7 @@ const Header = () => {
                   gap: '0.45rem',
                 }}
               >
-                <span>🎙️</span> <span>Talk to Sarah (Voice AI)</span>
+                <span>🎙️</span> <span>Receptionist</span>
               </button>
               <a href="https://my.destinationrx.com/hub/s/SMPJW7R2A" target="_blank" rel="noreferrer" className="btn btn-accent" style={{ textAlign: 'center', width: '100%', fontWeight: 700 }}>
                 Find a Plan (Medicare) ↗

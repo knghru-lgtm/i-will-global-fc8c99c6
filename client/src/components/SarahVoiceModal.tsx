@@ -55,8 +55,24 @@ interface TranscriptItem {
 interface AppointmentConfirmation {
   appointment_id?: string;
   customer_name: string;
+  customer_address?: string;
   appointment_type: string;
+  product_line?: string;
   confirmed_datetime: string;
+  appointment_confirmed?: boolean;
+  confirmation_text_sent?: boolean;
+  text_reminder_submitted?: boolean;
+  day_before_reminder_scheduled?: boolean;
+  day_before_reminder_at?: string;
+  same_day_reminder_scheduled?: boolean;
+  same_day_reminder_at?: string;
+  sms_reminder_phone?: string;
+  sms_reminder_text?: string;
+  sms_cadence?: {
+    immediate_confirmation_text: string;
+    day_before_reminder_text: string;
+    same_day_reminder_text: string;
+  };
   message: string;
 }
 
@@ -110,7 +126,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
   const [callMode, setCallMode] = useState<'inbound' | 'outbound'>('inbound');
   const [leadId, setLeadId] = useState<string>('');
-  const [prospectName, setProspectName] = useState<string>('Medicare Beneficiary');
+  const [prospectName, setProspectName] = useState<string>('Valued Client');
   const [prospectPhone, setProspectPhone] = useState<string>('(623) 223-0165');
   const [prospectState, setProspectState] = useState<string>('AZ');
   const [prospectAddress, setProspectAddress] = useState<string>('');
@@ -154,6 +170,10 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const liveInterimRef = useRef<string>('');
   const speechBufferTimerRef = useRef<any>(null);
   const lastSarahReplyRef = useRef<string>('');
+  const confirmedApptRef = useRef<AppointmentConfirmation | null>(null);
+  const lastUserTurnRef = useRef<string>('');
+  const lastSarahTurnRef = useRef<string>('');
+  const convoHistoryTextRef = useRef<string>('');
   const sessionCtxRef = useRef<{
     mode: 'inbound' | 'outbound';
     lead_id?: string;
@@ -164,7 +184,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     on_warm_transfer: boolean;
   }>({
     mode: 'inbound',
-    prospect_name: 'Medicare Beneficiary',
+    prospect_name: 'Valued Client',
     phone: '(623) 223-0165',
     state: 'AZ',
     address: '',
@@ -178,6 +198,10 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   }, [transcripts]);
 
   useEffect(() => {
+    confirmedApptRef.current = confirmedAppt;
+  }, [confirmedAppt]);
+
+  useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
 
@@ -185,7 +209,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     sessionCtxRef.current = {
       mode: callMode,
       lead_id: leadId,
-      prospect_name: prospectName || 'Medicare Beneficiary',
+      prospect_name: prospectName || 'Valued Client',
       phone: prospectPhone,
       state: prospectState || 'AZ',
       address: prospectAddress,
@@ -535,6 +559,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       address?: string;
       on_warm_transfer?: boolean;
       is_initial?: boolean;
+      skip_transcript_append?: boolean;
     }
   ) => {
     if (isTurnInFlightRef.current && !ctxOverride?.is_initial) return;
@@ -578,8 +603,23 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
       isTurnInFlightRef.current = false;
 
+      if (res?.prospect_name && res.prospect_name !== 'Valued Client') {
+        setProspectName(res.prospect_name);
+        sessionCtxRef.current.prospect_name = res.prospect_name;
+      }
+      if (res?.prospect_phone) {
+        setProspectPhone(res.prospect_phone);
+        sessionCtxRef.current.phone = res.prospect_phone;
+      }
+      if (res?.prospect_address) {
+        setProspectAddress(res.prospect_address);
+        sessionCtxRef.current.address = res.prospect_address;
+      }
+
       if (res?.reply) {
-        appendNewTranscript('sarah', res.reply);
+        if (!ctxOverride?.skip_transcript_append) {
+          appendNewTranscript('sarah', res.reply);
+        }
         playSarahResponseAudio(res.reply, res.audio_base64, res.audio_mime, res.rest_text);
         const lower = String(res.reply).toLowerCase();
         if (lower.includes('$1,788') || lower.includes('$2,400') || lower.includes('20%')) {
@@ -597,15 +637,33 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       }
 
       if (res?.appointment?.success) {
+        confirmedApptRef.current = res.appointment;
         setConfirmedAppt(res.appointment);
         setActiveScriptStep(3);
+        const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const smsPhone = res.appointment.sms_reminder_phone || activeCtx.phone || '(623) 223-0165';
+        const customerAddr = res.appointment.customer_address || activeCtx.address || 'Address Verified on File';
         setTranscripts((prev) => [
           ...prev,
           {
             id: 'appt_' + Date.now(),
             speaker: 'system',
-            text: `📅 Official Appointment Confirmed on (480) 331-9455: ${res.appointment.customer_name} (${res.appointment.appointment_type}) — ${res.appointment.confirmed_datetime}`,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            text: `📅 Official Appointment Confirmed: ${res.appointment.customer_name} • 📍 ${customerAddr} • 📞 ${smsPhone} (${res.appointment.appointment_type}${res.appointment.product_line ? ` • ${res.appointment.product_line}` : ''}) — ${res.appointment.confirmed_datetime}`,
+            timestamp: nowStamp,
+            isAction: true,
+          },
+          {
+            id: 'sms_conf_' + Date.now(),
+            speaker: 'system',
+            text: `📲 [1/3] Immediate Confirmation Text Sent to ${smsPhone}: "${res.appointment.sms_reminder_text || `Your ${res.appointment.appointment_type} consultation with King Amen Ra is confirmed for ${res.appointment.confirmed_datetime}.`}"`,
+            timestamp: nowStamp,
+            isAction: true,
+          },
+          {
+            id: 'sms_day_before_' + Date.now(),
+            speaker: 'system',
+            text: `📅 [2/3] Day-Before Reminder Text Scheduled (24h prior) + ⏰ [3/3] Same-Day Reminder Text Scheduled (2h prior) for ${smsPhone}`,
+            timestamp: nowStamp,
             isAction: true,
           },
         ]);
@@ -616,7 +674,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         await executeVerifiedTranslineBridge(res.transfer);
       }
     } catch (err) {
-      console.warn('Sarah HTTP turn error:', err);
+      console.warn('Receptionist HTTP turn error:', err);
       isTurnInFlightRef.current = false;
       resumeSpeechRecognitionSafe();
     }
@@ -637,7 +695,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     setConnectionStatus('connected');
     setErrorMessage(null);
 
-    // Explicitly request microphone access so the browser unlocks audio capture
+    // Explicitly request microphone access in parallel (non-blocking) so the Receptionist answers immediately
     if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
       navigator.mediaDevices
         .getUserMedia({ audio: true })
@@ -761,7 +819,19 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       }
     } catch {}
 
-    await sendHttpTurn('', { ...ctx, is_initial: true });
+    // Immediately answer inbound/outbound call on Frame 0 so there is zero wait time!
+    const rawName = (ctx.prospect_name || '').trim();
+    const isGeneric =
+      !rawName ||
+      /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawName);
+    const greetFirst = isGeneric ? 'there' : rawName.split(/\s+/)[0] || 'there';
+    const immediateGreetingText =
+      ctx.mode === 'outbound'
+        ? `Hello ${greetFirst}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?`
+        : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?`;
+
+    appendNewTranscript('sarah', immediateGreetingText);
+    await sendHttpTurn('', { ...ctx, is_initial: true, skip_transcript_append: true });
     const topicToUse = initialPayload?.initialTopic || initialTopic;
     if (topicToUse) {
       appendNewTranscript('user', topicToUse);
@@ -801,7 +871,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       const requestedMode = initialPayload?.mode || 'inbound';
       const nextMode: 'inbound' | 'outbound' = isAdmin ? requestedMode : 'inbound';
       const nextLeadId = initialPayload?.lead_id || '';
-      const nextName = initialPayload?.prospect_name || 'Medicare Beneficiary';
+      const nextName = initialPayload?.prospect_name || 'Valued Client';
       const nextPhone = initialPayload?.phone || '(623) 223-0165';
       const nextState = initialPayload?.state || 'AZ';
       const nextAddr = initialPayload?.address || '';
@@ -837,7 +907,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const lead = leadQueue[idx];
     if (!lead) return;
     setQueueIndex(idx);
-    const fullName = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Medicare Beneficiary';
+    const fullName = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Valued Client';
     setLeadId(lead.id || '');
     setProspectName(fullName);
     setProspectPhone(lead.phone || '');
@@ -917,7 +987,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const requestedMode = overrideParams?.mode || callMode;
     const activeMode: 'inbound' | 'outbound' = isAdmin ? requestedMode : 'inbound';
     const activeLeadId = overrideParams?.lead_id !== undefined ? overrideParams.lead_id : leadId;
-    const activeName = overrideParams?.prospect_name || prospectName || 'Medicare Beneficiary';
+    const activeName = overrideParams?.prospect_name || prospectName || 'Valued Client';
     const activePhone = overrideParams?.phone !== undefined ? overrideParams.phone : prospectPhone;
     const activeState = overrideParams?.state || prospectState || 'AZ';
     const activeAddress = overrideParams?.address !== undefined ? overrideParams.address : prospectAddress;
@@ -926,6 +996,10 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     setConnectionStatus('connecting');
     setErrorMessage(null);
     setConfirmedAppt(null);
+    confirmedApptRef.current = null;
+    lastUserTurnRef.current = '';
+    lastSarahTurnRef.current = '';
+    convoHistoryTextRef.current = '';
     setWhisperTransfer(null);
     setTranslineStage('idle');
     setActiveScriptStep(1);
@@ -937,7 +1011,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         text:
           activeMode === 'outbound'
             ? `📞 Outbound Caller on (480) 331-9455 — Dialing ${activeName}${activePhone ? ` (${activePhone})` : ''} using Unified Outbound Script & Tree...`
-            : `🏢 Virtual Receptionist on (480) 331-9455 — Answering Inbound Call (100% Free Fiduciary Advisory & 42-Member Directory)...`,
+            : `🏢 Receptionist on (480) 331-9455 — Answering Inbound Call Immediately (100% Free Fiduciary Advisory & 42-Member Directory)...`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ]);
@@ -953,231 +1027,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     };
     sessionCtxRef.current = fallbackCtx;
 
-    const player = new AudioPlayer({
-      sampleRate: 24000,
-      onVolumeChange: (vol) => setSarahVolume(vol),
-      onPlaybackStateChange: (playing) => {
-        isSpeakingRef.current = playing;
-        setIsSpeaking(playing);
-      },
-    });
-    playerRef.current = player;
-
-    try {
-      const liveCfg: any = await api.post('/sarah/live-session', {
-        mode: activeMode,
-        lead_id: activeLeadId || '',
-        prospect_name: activeName,
-        prospect_phone: activePhone || '',
-        state: activeState,
-        address: activeAddress || '',
-        on_warm_transfer: Boolean(activeWT),
-      });
-
-      if (!liveCfg?.ws_url || !liveCfg?.setup) {
-        await activateHttpVoiceFallback(fallbackCtx);
-        return;
-      }
-
-      const ws = new WebSocket(liveCfg.ws_url);
-      wsRef.current = ws;
-
-      let wsOpened = false;
-      let receivedAudioTurn = false;
-
-      ws.onopen = async () => {
-        wsOpened = true;
-        try {
-          ws.send(JSON.stringify(liveCfg.setup));
-        } catch (setupErr) {
-          console.error('Error sending Gemini Live setup:', setupErr);
-        }
-
-        try {
-          const recorder = new AudioRecorder({
-            sampleRate: 16000,
-            onAudioData: (base64) => {
-              if (ws.readyState === WebSocket.OPEN && !isMutedRef.current) {
-                ws.send(
-                  JSON.stringify({
-                    realtimeInput: {
-                      audio: { data: base64, mimeType: 'audio/pcm;rate=16000' },
-                    },
-                  })
-                );
-              }
-            },
-            onVolumeChange: (vol) => setUserVolume(vol),
-            onError: (err) => {
-              console.warn('Microphone warning:', err);
-            },
-          });
-          recorderRef.current = recorder;
-          await recorder.start();
-          setIsMicListening(true);
-        } catch (micErr: any) {
-          console.warn('Microphone access denied or unavailable, continuing in text/listen mode:', micErr);
-          setTranscripts((prev) => [
-            ...prev,
-            {
-              id: 'mic_warn_' + Date.now(),
-              speaker: 'system',
-              text: 'Microphone muted or permission not granted. You can listen to Sarah and use the Script Tree buttons or text input below.',
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            },
-          ]);
-        }
-      };
-
-      ws.onmessage = async (event) => {
-        try {
-          const rawText = typeof event.data === 'string' ? event.data : await (event.data as Blob).text();
-          const msg = JSON.parse(rawText);
-
-          if (msg.setupComplete !== undefined) {
-            setConnectionStatus('connected');
-            const topicToUse = initialPayload?.initialTopic || initialTopic;
-            const greetingPrompt = topicToUse
-              ? `${liveCfg.initial_greeting_prompt} Then immediately address: ${topicToUse}`
-              : liveCfg.initial_greeting_prompt;
-            if (ws.readyState === WebSocket.OPEN && greetingPrompt) {
-              ws.send(
-                JSON.stringify({
-                  clientContent: {
-                    turns: [{ role: 'user', parts: [{ text: greetingPrompt }] }],
-                    turnComplete: true,
-                  },
-                })
-              );
-            }
-          }
-
-          if (msg.serverContent) {
-            const { modelTurn, turnComplete, interrupted, inputTranscription, outputTranscription } = msg.serverContent;
-
-            if (interrupted) {
-              player.stop();
-            }
-
-            if (modelTurn?.parts) {
-              for (const part of modelTurn.parts) {
-                if (part.inlineData?.data) {
-                  receivedAudioTurn = true;
-                  player.enqueueChunk(part.inlineData.data);
-                }
-              }
-            }
-
-            if (outputTranscription?.text) {
-              const spokenText = outputTranscription.text;
-              appendOrUpdateTranscript('sarah', spokenText);
-              const lower = spokenText.toLowerCase();
-              if (lower.includes('$1,788') || lower.includes('$2,400') || lower.includes('20%')) {
-                setActiveScriptStep(2);
-              } else if (
-                lower.includes('please hold') ||
-                lower.includes('30-minute telephone') ||
-                lower.includes('60-minute in-person') ||
-                lower.includes('introducing king')
-              ) {
-                setActiveScriptStep(3);
-              }
-            }
-
-            if (inputTranscription?.text) {
-              const userText = inputTranscription.text.trim();
-              if (userText) {
-                appendOrUpdateTranscript('user', userText);
-              }
-            }
-
-            if (turnComplete) {
-              setSarahVolume(0);
-            }
-          }
-
-          if (msg.toolCall?.functionCalls) {
-            const functionResponses: any[] = [];
-            for (const call of msg.toolCall.functionCalls) {
-              try {
-                const toolRes: any = await api.post('/sarah/tool', {
-                  name: call.name,
-                  args: call.args || {},
-                  context: fallbackCtx,
-                });
-                const resultObj = toolRes?.result || { success: true };
-
-                if (call.name === 'book_appointment' && resultObj?.success) {
-                  setConfirmedAppt(resultObj);
-                  setActiveScriptStep(3);
-                  setTranscripts((prev) => [
-                    ...prev,
-                    {
-                      id: 'appt_' + Date.now(),
-                      speaker: 'system',
-                      text: `📅 Official Appointment Confirmed on (480) 331-9455: ${resultObj.customer_name} (${resultObj.appointment_type}) — ${resultObj.confirmed_datetime}`,
-                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                      isAction: true,
-                    },
-                  ]);
-                  window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
-                } else if (call.name === 'whisper_warm_transfer' && resultObj?.success) {
-                  executeVerifiedTranslineBridge(resultObj);
-                }
-
-                functionResponses.push({
-                  id: call.id,
-                  name: call.name,
-                  response: { result: resultObj },
-                });
-              } catch (toolErr: any) {
-                functionResponses.push({
-                  id: call.id,
-                  name: call.name,
-                  response: { error: toolErr?.message || 'Tool execution error' },
-                });
-              }
-            }
-
-            if (ws.readyState === WebSocket.OPEN && functionResponses.length > 0) {
-              ws.send(
-                JSON.stringify({
-                  toolResponse: {
-                    functionResponses,
-                  },
-                })
-              );
-            }
-          }
-        } catch (e) {
-          console.error('Error parsing Gemini Live WS message:', e);
-        }
-      };
-
-      ws.onerror = () => {
-        if (!wsOpened || !receivedAudioTurn) {
-          if (recorderRef.current) {
-            recorderRef.current.stop();
-            recorderRef.current = null;
-          }
-          activateHttpVoiceFallback(fallbackCtx);
-        }
-      };
-
-      ws.onclose = () => {
-        if (!wsOpened || !receivedAudioTurn) {
-          if (recorderRef.current) {
-            recorderRef.current.stop();
-            recorderRef.current = null;
-          }
-          activateHttpVoiceFallback(fallbackCtx);
-        } else if (!httpModeRef.current) {
-          setConnectionStatus('closed');
-        }
-      };
-    } catch (err: any) {
-      activateHttpVoiceFallback(fallbackCtx);
-    }
+    // Answer inbound & outbound calls immediately on Frame 0 with zero WebSocket handshake delay
+    await activateHttpVoiceFallback(fallbackCtx);
   };
 
   const endSession = () => {
@@ -1233,30 +1084,6 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     ]);
   };
 
-  const appendOrUpdateTranscript = (speaker: 'sarah' | 'user', text: string) => {
-    setTranscripts((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && last.speaker === speaker && !last.isAction) {
-        return [
-          ...prev.slice(0, -1),
-          {
-            ...last,
-            text: last.text.endsWith(' ') ? last.text + text : last.text + ' ' + text,
-          },
-        ];
-      }
-      return [
-        ...prev,
-        {
-          id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-          speaker,
-          text,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ];
-    });
-  };
-
   const toggleMute = () => {
     const next = !isMuted;
     setIsMuted(next);
@@ -1288,6 +1115,9 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const sendTextMessage = (textToSend?: string) => {
     const text = textToSend || textInput.trim();
     if (!text) return;
+
+    lastUserTurnRef.current += ' ' + text;
+    convoHistoryTextRef.current += ' ' + text;
 
     if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
       playerRef.current?.stop();
@@ -1450,12 +1280,12 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 fontSize: '1.25rem',
               }}
             >
-              S
+              {callMode === 'inbound' ? 'R' : 'S'}
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <span style={{ fontWeight: 800, fontSize: '1.12rem', color: '#ffffff' }}>
-                  Sarah — Line (480) 331-9455
+                  {callMode === 'inbound' ? 'Receptionist' : 'Receptionist & Admin Outbound Caller — (480) 331-9455'}
                 </span>
                 <span
                   style={{
@@ -1469,17 +1299,17 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     textTransform: 'uppercase',
                   }}
                 >
-                  {callMode === 'inbound' ? '🏢 Virtual Receptionist (Inbound)' : '📞 Admin Outbound Caller & Scheduler'}
+                  {callMode === 'inbound' ? '🏢 Receptionist • (480) 331-9455' : '📞 Admin Outbound Caller & Scheduler'}
                 </span>
               </div>
               <div style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.15rem' }}>
                 <Shield size={13} color="#c8963e" />
-                <span>Medicare Helpline by IWG • 104+ Carriers • Auto-Transline Whisper Bridge (602) 456-9681</span>
+                <span>IWG Insurance & Financial Services • 104+ Carriers • Auto-Confirmation & Reminder Texts</span>
               </div>
             </div>
           </div>
 
-          {/* Mode Toggle Tabs: Virtual Receptionist (All Users) vs Outbound Caller (Strictly Admin Only) */}
+          {/* Mode Toggle Tabs: Receptionist (All Users) vs Outbound Caller (Strictly Admin Only) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
             <div
               style={{
@@ -1511,7 +1341,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 }}
               >
                 <PhoneIncoming size={14} />
-                <span>Virtual Receptionist (480) 331-9455</span>
+                <span>Receptionist</span>
               </button>
               {isAdmin && (
                 <button
@@ -1589,14 +1419,14 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 color: '#ffffff',
                 cursor: 'pointer',
               }}
-              title="Close voice session"
+              title="Close Receptionist"
             >
               <X size={18} />
             </button>
           </div>
         </div>
 
-        {/* Inbound Google Voice Receptionist Bar (Visible in Inbound Mode) */}
+        {/* Inbound Receptionist Bar (Visible in Inbound Mode) */}
         {callMode === 'inbound' && (
           <div
             style={{
@@ -1611,32 +1441,34 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
             }}
           >
             <div style={{ fontSize: '0.8rem', color: '#d1fae5', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <span>🎧 <strong>Google Voice Inbound Receptionist on (480) 331-9455:</strong></span>
-              <span>Sarah answers incoming calls 24/7, funnels 6 product lines, and automatically dials + verifies the transline whisper bridge.</span>
+              <span>🎧 <strong>Receptionist — Line (480) 331-9455:</strong></span>
+              <span>Answers inbound calls immediately, guides all 6 product lines to an appointment (Full Name, Address & Phone), and sends automatic Confirmation + Day-Before & Same-Day Reminder Texts.</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <a
-                href="https://voice.google.com/u/0/calls"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  background: 'linear-gradient(135deg, #059669, #10b981)',
-                  color: '#ffffff',
-                  borderRadius: '6px',
-                  padding: '0.35rem 0.75rem',
-                  fontSize: '0.76rem',
-                  fontWeight: 800,
-                  textDecoration: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                }}
-                title="Open Google Voice (480) 331-9455 Incoming Calls Window"
-              >
-                <span>📞 Open Google Voice (480) 331-9455 Inbox</span>
-                <ExternalLink size={12} />
-              </a>
-            </div>
+            {isAdmin && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <a
+                  href="https://voice.google.com/u/0/calls"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    background: 'linear-gradient(135deg, #059669, #10b981)',
+                    color: '#ffffff',
+                    borderRadius: '6px',
+                    padding: '0.35rem 0.75rem',
+                    fontSize: '0.76rem',
+                    fontWeight: 800,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                  }}
+                  title="Open Google Voice (480) 331-9455 Incoming Calls Window"
+                >
+                  <span>📞 Open Google Voice (480) 331-9455 Inbox</span>
+                  <ExternalLink size={12} />
+                </a>
+              </div>
+            )}
           </div>
         )}
 
@@ -1937,10 +1769,10 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                   }}
                 />
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#e2e8f0' }}>
-                  {connectionStatus === 'connecting' && 'Connecting Sarah on (480) 331-9455...'}
-                  {connectionStatus === 'connected' && isSpeaking && 'Sarah is speaking on (480) 331-9455...'}
+                  {connectionStatus === 'connecting' && 'Connecting Receptionist...'}
+                  {connectionStatus === 'connected' && isSpeaking && 'Receptionist is speaking...'}
                   {connectionStatus === 'connected' && !isSpeaking && isMuted && 'Microphone muted (Click Unmute to speak)'}
-                  {connectionStatus === 'connected' && !isSpeaking && !isMuted && 'Sarah is listening... (Speak naturally)'}
+                  {connectionStatus === 'connected' && !isSpeaking && !isMuted && 'Receptionist is listening... (Speak naturally)'}
                   {connectionStatus === 'closed' && 'Call ended'}
                   {connectionStatus === 'error' && (errorMessage || 'Connection error')}
                 </span>
@@ -2020,32 +1852,93 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 </div>
               )}
 
-              {/* Appointment Confirmation Banner */}
+              {/* Appointment Confirmation + 3-Step SMS Cadence Banner */}
               {confirmedAppt && (
                 <div
                   style={{
                     marginTop: '0.5rem',
                     backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                    border: '1px solid rgba(16, 185, 129, 0.45)',
+                    border: '1px solid rgba(16, 185, 129, 0.5)',
                     borderRadius: '0.5rem',
-                    padding: '0.45rem 0.85rem',
+                    padding: '0.55rem 0.85rem',
                     display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
+                    flexDirection: 'column',
+                    gap: '0.32rem',
                     fontSize: '0.78rem',
                     color: '#6ee7b7',
+                    maxWidth: '96%',
+                    width: '100%',
                   }}
                 >
-                  <CheckCircle2 size={15} color="#34d399" />
-                  <span>
-                    <strong>Appointment Booked!</strong> {confirmedAppt.appointment_type} consultation for{' '}
-                    {confirmedAppt.customer_name} ({confirmedAppt.confirmed_datetime}) with King Amen Ra.
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <CheckCircle2 size={15} color="#34d399" />
+                      <span>
+                        <strong>Appointment Confirmed!</strong> {confirmedAppt.appointment_type} consultation
+                        {confirmedAppt.product_line ? ` (${confirmedAppt.product_line})` : ''} for{' '}
+                        <strong>{confirmedAppt.customer_name}</strong> — <strong>{confirmedAppt.confirmed_datetime}</strong> with King Amen Ra.
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <span
+                        style={{
+                          backgroundColor: '#10b981',
+                          color: '#051039',
+                          padding: '0.12rem 0.5rem',
+                          borderRadius: '999px',
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                        }}
+                      >
+                        ✅ [1/3] CONFIRMATION TEXT SENT
+                      </span>
+                      <span
+                        style={{
+                          backgroundColor: 'rgba(56, 189, 248, 0.25)',
+                          color: '#7dd3fc',
+                          border: '1px solid #38bdf8',
+                          padding: '0.12rem 0.5rem',
+                          borderRadius: '999px',
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                        }}
+                      >
+                        📅 [2/3] DAY-BEFORE REMINDER SCHEDULED
+                      </span>
+                      <span
+                        style={{
+                          backgroundColor: 'rgba(200, 150, 62, 0.28)',
+                          color: '#ffd88a',
+                          border: '1px solid #c8963e',
+                          padding: '0.12rem 0.5rem',
+                          borderRadius: '999px',
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                        }}
+                      >
+                        ⏰ [3/3] SAME-DAY REMINDER SCHEDULED
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#e2e8f0', display: 'flex', gap: '0.85rem', flexWrap: 'wrap' }}>
+                    <span>👤 <strong>Name:</strong> {confirmedAppt.customer_name}</span>
+                    <span>📍 <strong>Address:</strong> {confirmedAppt.customer_address || prospectAddress || 'Verified on File'}</span>
+                    <span>📞 <strong>Phone:</strong> {confirmedAppt.sms_reminder_phone || prospectPhone || '(623) 223-0165'}</span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#d1fae5' }}>
+                    📲 <strong>Confirmation Text Sent:</strong>{' '}
+                    <em>
+                      "
+                      {confirmedAppt.sms_reminder_text ||
+                        `Hi ${confirmedAppt.customer_name}, your ${confirmedAppt.appointment_type} consultation with King Amen Ra is confirmed for ${confirmedAppt.confirmed_datetime}.`}
+                      "
+                    </em>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Quick Action Prompts (Tailored to Inbound Receptionist vs Outbound Caller) */}
+            {/* Quick Action Prompts (All 6 Award-Winning Product Scripts + Booking & Transfer) */}
             <div
               style={{
                 padding: '0.55rem 1rem',
@@ -2059,6 +1952,110 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
             >
               {callMode === 'inbound' ? (
                 <>
+                  <button
+                    onClick={() => sendTextMessage('I am looking for Term or Whole Life Insurance with Living Benefits.')}
+                    style={{
+                      background: 'rgba(200, 150, 62, 0.18)',
+                      border: '1px solid rgba(200, 150, 62, 0.45)',
+                      borderRadius: '999px',
+                      padding: '0.28rem 0.75rem',
+                      color: '#ffd88a',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🛡️ Life Insurance (Living Benefits)
+                  </button>
+                  <button
+                    onClick={() => sendTextMessage('Tell me about Investment Grade High Cash-Value IUL (Section 7702) tax-free retirement.')}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.14)',
+                      borderRadius: '999px',
+                      padding: '0.28rem 0.75rem',
+                      color: '#cbd5e1',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📈 High Cash-Value IUL (7702)
+                  </button>
+                  <button
+                    onClick={() => sendTextMessage('What Individual & Family ACA or Private PPO health plans do you offer?')}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.14)',
+                      borderRadius: '999px',
+                      padding: '0.28rem 0.75rem',
+                      color: '#cbd5e1',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🏥 Individual & Family Health (ACA/PPO)
+                  </button>
+                  <button
+                    onClick={() => sendTextMessage('We need Group Health Insurance and employee benefits for our business.')}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.14)',
+                      borderRadius: '999px',
+                      padding: '0.28rem 0.75rem',
+                      color: '#cbd5e1',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🏢 Group Health (1–50+ Employees)
+                  </button>
+                  <button
+                    onClick={() => sendTextMessage('How does Asset-Based Long Term Care protect my home and retirement savings?')}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.14)',
+                      borderRadius: '999px',
+                      padding: '0.28rem 0.75rem',
+                      color: '#cbd5e1',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🏡 Asset-Based Long-Term Care
+                  </button>
+                  <button
+                    onClick={() => sendTextMessage('Can you explain the upcoming 2027 Medicare changes and the $2,400 prescription cap?')}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.14)',
+                      borderRadius: '999px',
+                      padding: '0.28rem 0.75rem',
+                      color: '#cbd5e1',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ⚕️ 2027 Medicare Review
+                  </button>
+                  <button
+                    onClick={() =>
+                      sendTextMessage(
+                        'My name is Marcus Sterling, my address is 4820 E Camelback Rd, Phoenix AZ 85018, and my phone is (602) 555-0194. Please book a Telephone appointment for tomorrow at 10:00 AM.'
+                      )
+                    }
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.15)',
+                      border: '1px solid rgba(16, 185, 129, 0.4)',
+                      borderRadius: '999px',
+                      padding: '0.28rem 0.75rem',
+                      color: '#6ee7b7',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📅 Book Appointment + Confirmation Text
+                  </button>
                   <button
                     onClick={() => triggerImmediateWhisperTransfer('King Amen Ra')}
                     style={{
@@ -2074,62 +2071,6 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                   >
                     ⚡ Transfer to King Amen Ra
                   </button>
-                  <button
-                    onClick={() => sendTextMessage('Can you explain the upcoming 2027 Medicare changes and the $2,400 prescription cap?')}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.06)',
-                      border: '1px solid rgba(255, 255, 255, 0.14)',
-                      borderRadius: '999px',
-                      padding: '0.28rem 0.75rem',
-                      color: '#cbd5e1',
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    🛡️ 2027 Medicare Funnel
-                  </button>
-                  <button
-                    onClick={() => sendTextMessage('I want to book a 30-minute Telephone consultation with King Amen Ra.')}
-                    style={{
-                      background: 'rgba(16, 185, 129, 0.15)',
-                      border: '1px solid rgba(16, 185, 129, 0.4)',
-                      borderRadius: '999px',
-                      padding: '0.28rem 0.75rem',
-                      color: '#6ee7b7',
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    📅 Book Consultation
-                  </button>
-                  <button
-                    onClick={() => sendTextMessage('What Individual & Family ACA or Private PPO health plans do you offer?')}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.06)',
-                      border: '1px solid rgba(255, 255, 255, 0.14)',
-                      borderRadius: '999px',
-                      padding: '0.28rem 0.75rem',
-                      color: '#cbd5e1',
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    🏥 ACA / PPO Health
-                  </button>
-                  <button
-                    onClick={() => sendTextMessage('Tell me about High Cash-Value IUL (Section 7702) and Asset-Based Long Term Care.')}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.06)',
-                      border: '1px solid rgba(255, 255, 255, 0.14)',
-                      borderRadius: '999px',
-                      padding: '0.28rem 0.75rem',
-                      color: '#cbd5e1',
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    📈 IUL & LTC
-                  </button>
                 </>
               ) : (
                 <>
@@ -2137,7 +2078,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     onClick={() =>
                       triggerScriptStepDirective(
                         1,
-                        `Deliver Step 1 Warm Opening & 2027 Value Hook to ${firstName}: "Hello ${firstName}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?"`
+                        `Deliver Step 1 Warm Opening & Value Hook to ${firstName}: "Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. How are you doing today?"`
                       )
                     }
                     style={{
@@ -2192,7 +2133,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     onClick={() =>
                       triggerScriptStepDirective(
                         3,
-                        `Execute Step 3 Path B (Executive Alternative-Choice Appointment Close): Say to ${firstName}: "Because King Amen Ra is currently on a live consultation helping another family with their 2027 benefits, I want to reserve a dedicated one-on-one time for you on his private calendar so you receive his undivided attention. Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and would morning or afternoon work best for you?"`
+                        `Execute Step 3 Path B (Executive Alternative-Choice Appointment Close): Say to ${firstName}: "Because King Amen Ra is currently on a live consultation helping another family, I want to reserve a dedicated one-on-one time for you on his private calendar. To lock that in and send your confirmation text along with day-before and same-day reminders, may I confirm your full name, street address, and best phone number—and do you prefer a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?"`
                       )
                     }
                     style={{
@@ -2270,7 +2211,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     >
                       {isSarah ? <Sparkles size={12} /> : <User size={12} />}
                       <span style={{ fontWeight: 700 }}>
-                        {isSarah ? 'Sarah — (480) 331-9455' : callMode === 'outbound' ? firstName : 'Caller'}
+                        {isSarah ? 'Receptionist' : callMode === 'outbound' ? firstName : 'Caller'}
                       </span>
                       <span style={{ color: '#64748b' }}>{item.timestamp}</span>
                     </div>
@@ -2323,7 +2264,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.75rem' }}>
                 <span style={{ color: isSpeaking ? '#fbbf24' : isMuted ? '#f87171' : '#4ade80', fontWeight: 700 }}>
                   {isSpeaking
-                    ? '🔊 Sarah Speaking (Vindemiatrix — Calm & Relaxed Bland Voice)...'
+                    ? '🔊 Receptionist Speaking (Vindemiatrix — Calm & Relaxed Voice)...'
                     : isMuted
                     ? '🔇 Microphone Muted — Click Unmute Mic or type below'
                     : isMicListening
@@ -2336,8 +2277,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                   type="text"
                   placeholder={
                     callMode === 'outbound'
-                      ? `Simulate ${firstName}'s response or type a directive for Sarah...`
-                      : 'Speak into your mic or type a question for Sarah here...'
+                      ? `Simulate ${firstName}'s response or type a directive...`
+                      : 'Speak into your mic or type your message for the Receptionist here...'
                   }
                   value={textInput}
                   onChange={(e) => setTextInput(e.target.value)}
@@ -2508,7 +2449,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     { num: 1, label: '1. Greeting' },
                     { num: 2, label: '2. 2027 Plan' },
                     { num: 3, label: '3. Transfer/Appt' },
-                    { num: 4, label: '4. Rebuttals' },
+                    { num: 4, label: '4. 6 Products' },
                   ].map((s) => (
                     <button
                       key={s.num}
@@ -2540,16 +2481,16 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                         1A. WARM OPENING GREETING (LINE 1):
                       </div>
                       <p style={{ margin: 0, color: '#fff', lineHeight: 1.45 }}>
-                        "Hello <strong>{firstName}</strong>, this is <strong>Sarah</strong> calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
+                        "Hello <strong>{firstName}</strong>, this is <strong>Sarah</strong> calling from IWG Insurance and Financial Services. How are you today?"
                       </p>
                     </div>
 
                     <div style={{ background: 'rgba(16,185,129,0.12)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid #10b981' }}>
                       <div style={{ fontWeight: 800, color: '#34d399', fontSize: '0.74rem', marginBottom: '0.25rem' }}>
-                        1B. 2027 MEDICARE VALUE HOOK:
+                        1B. FIDUCIARY VALUE HOOK (ALL 6 DIVISIONS):
                       </div>
                       <p style={{ margin: '0 0 0.6rem', color: '#e2e8f0', lineHeight: 1.45 }}>
-                        "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?"
+                        "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you across Life Insurance with Living Benefits, High Cash-Value IUL, Individual & Group Health, Long-Term Care, and 2027 Medicare."
                       </p>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                         <button
@@ -2606,7 +2547,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                             textAlign: 'left',
                           }}
                         >
-                          💡 Prospect Has Objection / Other Product → Step 4 Rebuttals
+                          💡 Other Product Scripts (Life, IUL, ACA, Group, LTC) & Rebuttals → Step 4
                         </button>
                       </div>
                     </div>
@@ -2654,7 +2595,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                           onClick={() =>
                             triggerScriptStepDirective(
                               3,
-                              `Use Path B Executive Alternative-Choice Appointment Close with ${firstName}: Offer a 30-minute Telephone consultation, 60-minute In-Person visit, or 30-minute Video consultation with King Amen Ra.`
+                              `Use Path B Executive Alternative-Choice Appointment Close with ${firstName}: Collect Full Name, Street Address, and Phone Number, and offer a 30-minute Telephone consultation, 60-minute In-Person visit, or 30-minute Video consultation with King Amen Ra.`
                             )
                           }
                           style={{
@@ -2685,7 +2626,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                         <strong>1. Hold Framing:</strong> "Wonderful, {firstName}. Please stay with me for 15 seconds while I dial Principal Broker King Amen Ra and share your notes."
                       </p>
                       <p style={{ margin: '0 0 0.5rem', color: '#cbd5e1', fontSize: '0.74rem', fontStyle: 'italic' }}>
-                        <strong>2. Private Whisper to King:</strong> "Hi King Amen Ra, this is Sarah AI whispering automatically on behalf of the Medicare Helpline by IWG. We have {prospectName} on the line—bridging you in now!"
+                        <strong>2. Private Whisper to King:</strong> "Hi King Amen Ra, this is Sarah AI whispering automatically on behalf of IWG. We have {prospectName} on the line—bridging you in now!"
                       </p>
                       <button
                         type="button"
@@ -2708,10 +2649,10 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
                     <div style={{ background: '#16244d', padding: '0.75rem', borderRadius: '8px', border: '1.5px solid #3b82f6' }}>
                       <div style={{ fontWeight: 800, color: '#60a5fa', marginBottom: '0.35rem' }}>
-                        PATH B — EXECUTIVE APPOINTMENT CLOSE (3 TYPES ONLY)
+                        PATH B — EXECUTIVE APPOINTMENT CLOSE (NAME, ADDRESS & PHONE + 3 SMS REMINDERS)
                       </div>
                       <p style={{ margin: '0 0 0.5rem', color: '#e2e8f0', fontSize: '0.76rem' }}>
-                        "Do you prefer a <strong>30-minute Telephone consultation</strong>, a <strong>60-minute In-Person visit</strong>, or a <strong>30-minute Video consultation</strong>—and would morning or afternoon work best?"
+                        "May I confirm your <strong>full name</strong>, <strong>street address</strong>, and <strong>best phone number</strong> so I can lock in your appointment and send your automatic confirmation text followed by day-before and same-day reminders?"
                       </p>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.35rem' }}>
                         {(['Telephone', 'In-Person', 'Video'] as const).map((t) => (
@@ -2721,7 +2662,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                             onClick={() =>
                               triggerScriptStepDirective(
                                 3,
-                                `${firstName} selected a ${t} appointment for Tomorrow at 10:00 AM! Immediately call the book_appointment tool with customer_name="${prospectName}", phone="${prospectPhone}", appointment_type="${t}", preferred_datetime="Tomorrow at 10:00 AM", state="${prospectState}" and confirm warmly.`
+                                `${firstName} selected a ${t} appointment for Tomorrow at 10:00 AM! Immediately call the book_appointment tool with customer_name="${prospectName}", phone="${prospectPhone}", address="${prospectAddress || 'Phoenix, AZ'}", appointment_type="${t}", preferred_datetime="Tomorrow at 10:00 AM", state="${prospectState}" and confirm the appointment plus the immediate confirmation text, day-before reminder, and same-day reminder.`
                               )
                             }
                             style={{
@@ -2745,25 +2686,37 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
                 {activeScriptStep === 4 && (
                   <>
-                    <div style={{ fontWeight: 800, color: '#f87171', fontSize: '0.76rem' }}>
-                      CLICK ANY OBJECTION OR PRODUCT LINE FOR SARAH TO SPEAK:
+                    <div style={{ fontWeight: 800, color: '#ffd88a', fontSize: '0.76rem' }}>
+                      AWARD-WINNING SCRIPTS FOR ALL 6 PRODUCT DIVISIONS & REBUTTALS:
                     </div>
                     {[
                       {
-                        title: '❌ "I’m happy with my current plan / don’t want to change"',
-                        prompt: `Speak Objection Rebuttal 1 to ${firstName}: "I love hearing that, ${firstName}, and our goal is never to move you if your current plan is still the #1 option for you. Because insurance carriers adjust their doctor networks, drug tiers, and copays for 2027, our free 5-minute fiduciary audit simply confirms in writing that your current plan still gives you the highest benefits at the lowest cost—and if it does, we tell you to stay right where you are. Let’s have King Amen Ra verify that for your peace of mind, fair enough?"`,
+                        title: '🛡️ 1. Modern Term & Whole Life Insurance (Living Benefits)',
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Modern Term & Whole Life with Living Benefits script to ${firstName}: "I would love to help you with Life Insurance! Unlike old-fashioned policies that only pay out when you pass away, our modern Term and Whole Life policies across 104+ carriers include Living Benefits at no extra cost—meaning if you ever suffer a heart attack, stroke, cancer, or chronic illness, the policy accelerates tax-free cash directly to you while you are alive. To have Principal Broker King Amen Ra prepare your custom side-by-side quote and lock in your appointment with an instant confirmation text plus day-before and same-day reminders, may I get your full name, street address, and best phone number?"`,
                       },
                       {
-                        title: '❌ "How much does this cost? / What is the catch?"',
-                        prompt: `Speak Objection Rebuttal 2 to ${firstName}: "There is never a fee, markup, or obligation—ever. By federal law, Medicare and insurance premiums are fixed, meaning you pay the exact same rate whether you navigate 104 carriers alone or have our Principal Broker King Amen Ra and clinical leadership under Aneesha Sullivan, PA advocate for you year-round for free."`,
+                        title: '📈 2. Investment Grade High Cash-Value IUL (Section 7702)',
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Investment Grade High Cash-Value IUL (Section 7702) script to ${firstName}: "Our Investment Grade High Cash-Value IUL structured under IRS Section 7702 gives you S&P 500 market-linked growth with a 0% contractual floor so you never lose a dime in a market crash, tax-free retirement income distributions, and full Living Benefits. To schedule your strategy session with King Amen Ra and send your instant confirmation text plus day-before and same-day reminders, may I confirm your full name, street address, and best phone number?"`,
                       },
                       {
-                        title: '❌ "I already have a broker / agent"',
-                        prompt: `Speak Objection Rebuttal 3 to ${firstName}: "That is wonderful—having an advocate is so important. Many of our clients keep their current plan until they ask us for a complimentary second opinion across all 104+ national carriers, since many agents only represent a handful of companies. It takes 3 minutes to verify you aren't overpaying for 2027—would you be open to a quick, no-obligation second look?"`,
+                        title: '🏥 3. Individual & Family Health (ACA & Private PPO)',
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Individual & Family Health Insurance script to ${firstName}: "For individuals, families, and self-employed professionals under 65, we shop both ACA Marketplace plans with maximum federal tax subsidies and Private Underwritten PPO networks side-by-side across 104+ carriers to cut deductibles and keep your preferred doctors in-network. To reserve your review with King Amen Ra and send your automatic confirmation text plus day-before and same-day reminders, may I have your full name, street address, and best phone number?"`,
                       },
                       {
-                        title: '❌ "Just mail me something / I’m busy right now"',
-                        prompt: `Speak Objection Rebuttal 4 to ${firstName}: "I completely respect your time, ${firstName}. Because there are over 104 carriers, mailing a stack of generic brochures wouldn't show which plan covers your specific doctors and prescriptions. Instead, let’s lock in a quick Telephone, In-Person, or Video appointment at a time that is convenient for you, and we’ll prepare your custom 1-page summary in advance. Does tomorrow morning or afternoon work better?"`,
+                        title: '🏢 4. Group Health Insurance (1–50+ Employees, Level-Funded & ICHRA)',
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Group Health & Corporate Benefits script to ${firstName}: "For businesses with 1 to 50+ employees, we design Level-Funded PPO, Small Group, and tax-deductible ICHRA benefit strategies that typically lower employer premium costs by 15% to 30% while upgrading employee networks. To schedule your census audit with King Amen Ra and send your confirmation text plus day-before and same-day reminders, may I get your full name, business or street address, and best phone number?"`,
+                      },
+                      {
+                        title: '🏡 5. Asset-Based Long Term Care (Hybrid Estate Protection)',
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Asset-Based Long Term Care script to ${firstName}: "Traditional health insurance and Medicare do not cover extended nursing home, assisted living, or private home care. Our Asset-Based Hybrid Long-Term Care policies guarantee tax-free monthly care benefits—and if you never need care, 100% of your principal passes tax-free to your family so it is never 'use it or lose it.' To schedule your estate-protection review with King Amen Ra and send your confirmation text plus day-before and same-day reminders, may I have your full name, street address, and best phone number?"`,
+                      },
+                      {
+                        title: '❌ Objection: "I’m happy with my current plan / don’t want to change"',
+                        prompt: `Speak Objection Rebuttal 1 to ${firstName}: "I love hearing that, ${firstName}, and our goal is never to move you if your current plan is still the #1 option for you. Our free 5-minute fiduciary audit across 104+ carriers simply confirms in writing that your current plan still gives you the highest benefits at the lowest cost—and if it does, we tell you to stay right where you are. Let’s lock in a quick appointment with your full name, street address, and phone number so we can send your confirmation text, fair enough?"`,
+                      },
+                      {
+                        title: '❌ Objection: "Just mail me something / I’m busy right now"',
+                        prompt: `Speak Objection Rebuttal 4 to ${firstName}: "I completely respect your time, ${firstName}. Because there are over 104 carriers, mailing generic brochures wouldn't show your exact rates. Instead, let’s grab your full name, street address, and phone number to lock in a quick Telephone, In-Person, or Video appointment, and we’ll send an instant confirmation text followed by day-before and same-day reminders. Does tomorrow morning or afternoon work better?"`,
                       },
                     ].map((obj, i) => (
                       <button
@@ -2772,7 +2725,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                         onClick={() => triggerScriptStepDirective(4, obj.prompt)}
                         style={{
                           background: '#16244d',
-                          border: '1px solid rgba(239, 68, 68, 0.35)',
+                          border: '1px solid rgba(200, 150, 62, 0.35)',
                           borderRadius: '8px',
                           padding: '0.55rem 0.7rem',
                           color: '#e2e8f0',

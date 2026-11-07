@@ -325,11 +325,11 @@ export const App: React.FC = () => {
         </Routes>
         {/* Embed public AI chat widget button for testing */}
         <PublicChatWidget />
-        {/* Global Floating Pill for Sarah Voice AI Receptionist */}
+        {/* Global Floating Pill for Receptionist */}
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice'))}
-          title="Talk to Sarah — Voice AI Receptionist (100% Free Spoken Audio, $0.00 / min)"
+          title="Receptionist — Live 24/7 Receptionist on (480) 331-9455"
           style={{
             position: 'fixed',
             bottom: '24px',
@@ -351,7 +351,7 @@ export const App: React.FC = () => {
           }}
         >
           <span style={{ fontSize: '1.2rem' }}>🎙️</span>
-          <span>Talk to Sarah</span>
+          <span>Receptionist</span>
           <span
             style={{
               backgroundColor: '#22c55e',
@@ -363,7 +363,7 @@ export const App: React.FC = () => {
               textTransform: 'uppercase',
             }}
           >
-            Voice AI
+            Live
           </span>
         </button>
         {/* Global Sarah Voice AI Receptionist & Outbound Caller Modal */}
