@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "IWG Receptionist — Google Voice Auto-Answer & Caller (480) 331-9455",
+  "version": "2.0.0",
+  "description": "Automatically answers inbound calls on Google Voice (480) 331-9455, runs the IWG Receptionist voice engine, books appointments, and dials warm transfers to (602) 456-9681.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://voice.google.com/*",
+    "https://iwillglobal.com/*",
+    "http://localhost:4000/*",
+    "http://localhost:5173/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://voice.google.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://iwillglobal.com/*",
+        "http://localhost:4000/*",
+        "http://localhost:5173/*"
+      ],
+      "js": [
+        "crm-bridge.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

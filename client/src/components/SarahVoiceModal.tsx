@@ -1652,7 +1652,33 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
               </span>
             </div>
             {isAdmin && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const snippet = `fetch('https://iwillglobal.com/gv-auto-answer.js').then(r=>r.text()).then(eval);`;
+                    navigator.clipboard?.writeText(snippet);
+                    alert(
+                      'Copied 1-Click Auto-Answer Script!\n\nTo activate instant auto-answer inside your open Google Voice window:\n1. Click on your "Google Voice - Voice - Calls" window and press Ctrl+Shift+J (opens Console)\n2. Paste (Ctrl+V) and press Enter — OR in chrome://extensions click "Load unpacked" and select:\nc:\\Users\\Amen Ra Family\\King Amen Ra\\i-will-global-fc8c99c6\\google-voice-extension'
+                    );
+                  }}
+                  style={{
+                    background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
+                    color: '#ffffff',
+                    border: '1px solid #a855f7',
+                    borderRadius: '6px',
+                    padding: '0.35rem 0.7rem',
+                    fontSize: '0.74rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                  }}
+                  title="Copy 1-Click Auto-Answer Script to activate inside Google Voice (480) 331-9455"
+                >
+                  <span>⚡ Activate Google Voice Auto-Answer</span>
+                </button>
                 <a
                   href="https://voice.google.com/u/0/calls"
                   target="_blank"
