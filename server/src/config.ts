@@ -10,7 +10,11 @@ export const config = {
   dataDir: process.env.DATA_DIR || fileURLToPath(new URL('../data/pg', import.meta.url)),
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || '',
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    model:
+      process.env.GEMINI_MODEL && process.env.GEMINI_MODEL !== 'gemini-2.5-flash'
+        ? process.env.GEMINI_MODEL
+        : 'gemini-3.5-flash',
+    ttsModel: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
   },
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID || '',

@@ -28,7 +28,8 @@ var init_config = __esm({
       dataDir: process.env.DATA_DIR || fileURLToPath(new URL("../data/pg", import.meta.url)),
       gemini: {
         apiKey: process.env.GEMINI_API_KEY || "",
-        model: process.env.GEMINI_MODEL || "gemini-2.5-flash"
+        model: process.env.GEMINI_MODEL && process.env.GEMINI_MODEL !== "gemini-2.5-flash" ? process.env.GEMINI_MODEL : "gemini-3.5-flash",
+        ttsModel: process.env.GEMINI_TTS_MODEL || "gemini-3.8-flash-tts"
       },
       google: {
         clientId: process.env.GOOGLE_CLIENT_ID || "",
@@ -10232,6 +10233,197 @@ async function handleSarahVoiceSession(clientWs, initialCtx) {
     }
   }
 }
+async function synthesizeSarahNeuralAudio(text) {
+  const cleanText = String(text || "").replace(/\*\*/g, "").replace(/\[[^\]]+\]/g, "").trim();
+  if (!cleanText || !isAIEnabled()) {
+    return { audio_base64: null, audio_mime: "audio/wav", voice: "Aoede" };
+  }
+  const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+  const ttsModels = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
+  for (const modelName of ttsModels) {
+    try {
+      const r = await ai2.models.generateContent({
+        model: modelName,
+        contents: [{ role: "user", parts: [{ text: cleanText }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: "Aoede"
+              }
+            }
+          }
+        }
+      });
+      const inline = r.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      if (inline?.data) {
+        return {
+          audio_base64: inline.data,
+          audio_mime: inline.mimeType || "audio/wav",
+          voice: "Aoede"
+        };
+      }
+    } catch {
+    }
+  }
+  return { audio_base64: null, audio_mime: "audio/wav", voice: "Aoede" };
+}
+async function runClonedBlandScenario(userText, history, sessionContext) {
+  const lower = userText.toLowerCase().trim();
+  const firstName = (sessionContext.prospect_name || "there").split(/\s+/)[0] || "there";
+  const lastSarahMsg = [...history || []].reverse().find((h) => h.speaker === "sarah")?.text?.toLowerCase() || "";
+  if (lower.includes("[script tree directive]")) {
+    if (lower.includes("step 1")) {
+      return {
+        scenario: "Outbound Opening Greeting",
+        reply: `Hello ${firstName}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`
+      };
+    }
+    if (lower.includes("step 2") || lower.includes("value hook")) {
+      return {
+        scenario: "Outbound 2027 Value Hook",
+        reply: `We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?`
+      };
+    }
+    if (lower.includes("step 3") || lower.includes("3-point") || lower.includes("summary")) {
+      return {
+        scenario: "3-Point 2027 Medicare Summary",
+        reply: `Under Original Medicare in 2027, Part A has a $1,788 hospital deductible and Part B is projected at $209.50 a month with a $292 annual deductible and an uncapped 20% medical coinsurance with no annual limit. Second, Part D caps annual out-of-pocket prescription costs at $2,400 with a $35 insulin cap and $0 adult vaccines, though carrier drug formularies change every January. That is why we run a complimentary 5-minute check across 104+ carriers\u2014comparing Medigap Plan G, Plan N, and Medicare Advantage plans\u2014to ensure your exact doctors and medications are covered at the lowest possible cost. To make this completely effortless for you, ${firstName}, our Principal Broker King Amen Ra can verify your doctors and prescriptions in just a few minutes at zero cost. Would you like me to reach out and get him on the line for you right now?`
+      };
+    }
+  }
+  const mentionsApptType = /\b(telephone|phone consultation|in-person|in person|face to face|video|google meet|zoom)\b/i.test(userText);
+  const mentionsTimeOrSchedule = /\b(tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|morning|afternoon|\d{1,2}\s*(am|pm|:00|:30)|schedule|book|appointment)\b/i.test(
+    userText
+  );
+  if (mentionsApptType && (mentionsTimeOrSchedule || lastSarahMsg.includes("telephone") || lastSarahMsg.includes("appointment")) || mentionsTimeOrSchedule && (lastSarahMsg.includes("morning or afternoon") || lastSarahMsg.includes("what day and time"))) {
+    const apptTypeRaw = /in-person|in person|face/i.test(userText) ? "In-Person" : /video|meet|zoom/i.test(userText) ? "Video" : "Telephone";
+    const timeMatch = userText.match(
+      /\b((?:tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|next week)[^.,;!?]*|\d{1,2}(?::\d{2})?\s*(?:am|pm)[^.,;!?]*|morning|afternoon)\b/i
+    )?.[0] || "Tomorrow at 10:00 AM";
+    const apptRes = await executeSarahTool(
+      "book_appointment",
+      {
+        customer_name: sessionContext.prospect_name,
+        phone: sessionContext.prospect_phone,
+        appointment_type: apptTypeRaw,
+        preferred_datetime: timeMatch,
+        state: sessionContext.state,
+        address: sessionContext.address,
+        notes: `Booked by Sarah Voice AI (Cloned Bland Agent Model) during ${sessionContext.mode} call`
+      },
+      sessionContext
+    );
+    return {
+      scenario: "Book Appointment (Telephone, In-Person, or Video)",
+      reply: apptRes.message || `Wonderful, ${firstName}! I have officially reserved your ${apptTypeRaw} appointment with our Principal Broker King Amen Ra for ${timeMatch}. You are all set on his calendar\u2014thank you so much, and have a wonderful day!`,
+      appointment: apptRes
+    };
+  }
+  const isAffirmative = /^(yes|yeah|yep|sure|okay|ok|please|absolutely|definitely|sounds good|let's do it|go ahead|connect me|put him on|get him on|right now)\b/i.test(
+    lower
+  ) || /\b(yes please|connect me|get him on the line|talk to king|speak with king|speak to an advisor)\b/i.test(lower);
+  if (isAffirmative && (lastSarahMsg.includes("get him on the line") || lastSarahMsg.includes("connect you with king") || lastSarahMsg.includes("connect you with a licensed") || lastSarahMsg.includes("connect you now") || lastSarahMsg.includes("verify that for your peace of mind"))) {
+    if (sessionContext.on_warm_transfer) {
+      return {
+        scenario: "Book Appointment (Executive Alternative-Choice Close)",
+        reply: `Because King Amen Ra is currently on a live consultation helping another family with their 2027 benefits, I want to reserve a dedicated one-on-one time for you on his private calendar so you receive his undivided attention. Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation\u2014and would morning or afternoon work best for you?`
+      };
+    }
+    const transferResult = await executeSarahTool(
+      "whisper_warm_transfer",
+      {
+        recipient_name: "King Amen Ra",
+        prospect_name: sessionContext.prospect_name,
+        prospect_phone: sessionContext.prospect_phone,
+        state: sessionContext.state
+      },
+      sessionContext
+    );
+    return {
+      scenario: "Connect to King Amen Ra",
+      reply: `Wonderful, ${firstName}! Please hold for just a moment while I dial King Amen Ra and get him on the line. ... ${transferResult.merge_introduction}`,
+      transfer: transferResult
+    };
+  }
+  if (lastSarahMsg.includes("how are you today") && !/\b(not interested|stop|remove|do not call|busy|cost|catch|happy with my)\b/i.test(lower)) {
+    return {
+      scenario: "Outbound 2027 Value Hook",
+      reply: `I'm doing wonderful, thank you for asking, ${firstName}! We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?`
+    };
+  }
+  if ((lastSarahMsg.includes("upcoming changes for 2027") || lastSarahMsg.includes("changes for 2027")) && (isAffirmative || /\b(what changes|tell me|what are they|go ahead|sure|yes)\b/i.test(lower))) {
+    return {
+      scenario: "3-Point High-Impact 2027 Medicare Summary & Assumptive Close",
+      reply: `Absolutely, ${firstName}! First, under Original Medicare for 2027, Part A has a $1,788 hospital deductible and Part B is projected at $209.50 a month with a $292 deductible, leaving an uncapped 20% medical coinsurance with no annual limit. Second, Part D now caps annual out-of-pocket prescription costs at $2,400 with a $700 max deductible, a $35 insulin cap, and $0 adult vaccines\u2014though carrier drug formularies change every January. Third, that is why we run a complimentary 5-minute check across 104+ carriers\u2014comparing Medigap Plan G, Plan N, and Medicare Advantage plans\u2014to ensure your exact doctors and medications are covered at the lowest possible cost. To make this completely effortless for you, ${firstName}, our Principal Broker King Amen Ra can verify your doctors and prescriptions in just a few minutes at zero cost. Would you like me to reach out and get him on the line for you right now?`
+    };
+  }
+  if (/\b(happy with my|keep my plan|don't want to change|already have a plan|satisfied with my)\b/i.test(lower)) {
+    return {
+      scenario: "Objection: Happy With Current Plan",
+      reply: `I love hearing that, ${firstName}, and our goal is never to move you if your current plan is still the number one option for you. Because insurance carriers adjust their doctor networks, drug tiers, and copays for 2027, our free 5-minute fiduciary audit simply confirms that your current plan still gives you the highest benefits at the lowest cost\u2014and if it does, we tell you to stay right where you are. Let\u2019s have King Amen Ra verify that for your peace of mind, fair enough?`
+    };
+  }
+  if (/\b(how much does (this|it) cost|what('s| is) the catch|do you charge|broker fee|is this free)\b/i.test(lower)) {
+    return {
+      scenario: "Objection: Cost / Fiduciary Guarantee",
+      reply: `There is never a fee, markup, or obligation\u2014ever. By federal law, Medicare and insurance premiums are fixed, meaning you pay the exact same rate whether you navigate 104 carriers alone or have our Principal Broker King Amen Ra and clinical leadership under Aneesha Sullivan, PA advocate for you year-round for free. Would you like me to connect you with King Amen Ra now so he can review your options side by side?`
+    };
+  }
+  if (/\b(mail me|send me something|busy right now|call me back|in a hurry|don't have time|schedule|appointment)\b/i.test(lower)) {
+    return {
+      scenario: "Objection: Busy / Schedule Appointment",
+      reply: `I completely respect your time, ${firstName}. Because there are over 104 carriers, mailing generic brochures wouldn't show which plan covers your specific doctors and prescriptions. Instead, let\u2019s lock in a quick 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video appointment at a time that is convenient for you, and we\u2019ll prepare your custom 1-page summary in advance. Which of those three do you prefer, and does tomorrow morning or afternoon work better?`
+    };
+  }
+  if (/\b(part a|part b|part c|part d|medigap|plan g|plan n|deductible|premium|coinsurance|2027|insulin|prescription|cap|medicare)\b/i.test(lower)) {
+    return {
+      scenario: "2027 Medicare Costs & Plan Help",
+      reply: `Here are the official 2027 Medicare cost standards: Part A is $0 monthly premium for over 99% of beneficiaries with a $1,788 inpatient hospital deductible per benefit period. Part B is projected at $209.50 per month with a $292 annual deductible and an uncapped 20% coinsurance. Part D caps your annual out-of-pocket prescription costs at $2,400 with a $700 max deductible, $35 per month insulin cap, and $0 adult vaccines. Because Original Medicare has no annual out-of-pocket cap, Medigap Plan G covers 100% of the $1,788 hospital deductible and 20% Part B coinsurance after the $292 deductible, while Medicare Advantage plans bundle medical, drug, dental, vision, and hearing benefits. Would you like me to connect you with our Principal Broker, King Amen Ra, right now for a free side-by-side comparison across 104+ carriers?`
+    };
+  }
+  if (/\b(individual|family|aca|marketplace|obamacare|ppo|subsidy|tax credit|under 65|kids|dental|vision)\b/i.test(lower)) {
+    return {
+      scenario: "Individual Health Quote",
+      reply: `We would be honored to help you and your family. As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we compare both ACA Marketplace plans\u2014manually optimizing Premium Tax Credits and Silver CSR deductibles\u2014and off-exchange nationwide private PPO networks with no primary care referrals, plus standalone dental and vision plans. May I connect you with our Principal Broker, King Amen Ra, right now to check if you qualify for a $0 or reduced-cost plan?`
+    };
+  }
+  if (/\b(group|business|employer|employee|company health|ichra|level-funded|level funded|small business)\b/i.test(lower)) {
+    return {
+      scenario: "Group Health Plans",
+      reply: `We would love to support your business. As an independent fiduciary advisory representing over 104 premier carriers with zero broker fees, we design Level-Funded and ICHRA corporate benefit plans for businesses with 1 to 50+ employees that typically save employers 15% to 30% while refunding unused claims reserves directly back to your business. May I connect you with King Amen Ra right now for a complimentary corporate benefits audit?`
+    };
+  }
+  if (/\b(life insurance|iul|indexed universal|7702|infinite banking|tax-free retirement|term life|living benefits|death benefit)\b/i.test(lower)) {
+    return {
+      scenario: "Life Insurance & IUL",
+      reply: `We specialize in institutional-grade wealth and family protection across 104+ premier carriers with zero fees. We offer both Investment Grade Indexed Universal Life policies under IRS Section 7702\u2014delivering tax-free retirement income with a contractual 0% downside market floor\u2014and Modern Term Life with Living Benefits that lock in guaranteed level rates with 15-minute no-exam digital approvals and cash payouts for critical or chronic illness. Would you like me to connect you with King Amen Ra right now to design your custom illustration?`
+    };
+  }
+  if (/\b(long-term care|long term care|ltc|nursing|home health|assisted living|hybrid)\b/i.test(lower)) {
+    return {
+      scenario: "Long-Term Care",
+      reply: `Protecting your life savings and dignity is at the heart of what we do. Remember that Medicare's Skilled Nursing benefit only covers Days 1 through 20 at $0 and charges $223.50 per day for Days 21 through 100, with 0% coverage after Day 100. That is why we represent over 104 premier carriers offering modern 'use-it-or-leave-it' Asset-Based Long Term Care\u2014paying tax-free benefits for home health or assisted living if you need care, or returning 100% of the benefit tax-free to your family if you never use it. Would you like to review a custom asset-protection strategy with King Amen Ra right now?`
+    };
+  }
+  if (/\b(who are you|what is i will global|fiduciary|carriers|which companies|states|where do you operate|about us)\b/i.test(lower)) {
+    return {
+      scenario: "Company & Carrier Info",
+      reply: `I Will Global Insurance and Financial Services is a 100% free independent fiduciary brokerage led by Principal Broker King Amen Ra and Chief Operating Officer Aneesha Sullivan, PA. We represent you\u2014never an insurance company\u2014with direct contracts across 104+ premier carriers including UnitedHealthcare, Humana, Aetna, Cigna, Blue Cross Blue Shield, Wellcare, Devoted Health, Mutual of Omaha, and Anthem across 7 states: Arizona, Texas, California, Nevada, Florida, New Mexico, and Colorado. How can I help protect your health or retirement benefits today?`
+    };
+  }
+  if (sessionContext.mode === "outbound") {
+    return {
+      scenario: "Outbound Value Hook & Assumptive Close",
+      reply: `We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you, ${firstName}. Our Principal Broker King Amen Ra can verify your exact doctors, prescriptions, and 2027 benefits\u2014including the $2,400 Part D prescription cap and side-by-side Medigap versus Advantage comparisons\u2014in just 5 minutes. Would you like me to connect you with King Amen Ra right now, or would you prefer to schedule a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?`
+    };
+  }
+  return {
+    scenario: "Inbound 6-Product Funnel",
+    reply: `As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we specialize in six core divisions: 2027 Medicare Plans, Individual & Family Health Insurance, Corporate Group Health, Investment Grade IUL Life Insurance, Asset-Based Long Term Care, and Modern Term Life with Living Benefits\u2014or I can connect you with anyone on our 42-member I Will Global Team Directory. Which area can I help you with today, or would you like me to connect you directly with our Principal Broker, King Amen Ra?`
+  };
+}
 async function handleSarahHttpTurn(params) {
   let dbWarmTransfer = false;
   try {
@@ -10239,28 +10431,34 @@ async function handleSarahHttpTurn(params) {
     dbWarmTransfer = Boolean(blandCfg.is_on_warm_transfer);
   } catch {
   }
+  const resolvedMode = params.context?.mode === "outbound" || params.mode === "outbound" ? "outbound" : "inbound";
   const sessionContext = {
-    mode: params.context?.mode === "outbound" ? "outbound" : "inbound",
+    mode: resolvedMode,
     lead_id: params.context?.lead_id,
-    prospect_name: params.context?.prospect_name || "Medicare Beneficiary",
-    prospect_phone: params.context?.prospect_phone || "+16232230165",
-    state: params.context?.state || "Arizona",
+    prospect_name: params.context?.prospect_name || params.leadName || "Medicare Beneficiary",
+    prospect_phone: params.context?.prospect_phone || params.leadPhone || "+16232230165",
+    state: params.context?.state || params.leadState || "Arizona",
     address: params.context?.address || "",
     caller_name: params.context?.caller_name || "Sarah",
     on_warm_transfer: params.context?.on_warm_transfer !== void 0 ? Boolean(params.context.on_warm_transfer) : dbWarmTransfer
   };
   const firstName = (sessionContext.prospect_name || "there").split(/\s+/)[0] || "there";
-  if (params.is_initial || !params.message) {
+  const rawMessage = String(params.message ?? params.userText ?? "").trim();
+  if (params.is_initial || !rawMessage) {
     const openingReply = sessionContext.mode === "outbound" ? `Hello ${firstName}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?` : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
+    const tts2 = await synthesizeSarahNeuralAudio(openingReply);
     return {
       ok: true,
       reply: openingReply,
+      audio_base64: tts2.audio_base64,
+      audio_mime: tts2.audio_mime,
+      voice: tts2.voice,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY,
       on_warm_transfer: sessionContext.on_warm_transfer
     };
   }
-  const userText = String(params.message || "").trim();
+  const userText = rawMessage;
   let transferResult = null;
   let appointmentResult = null;
   let dispositionResult = null;
@@ -10276,92 +10474,119 @@ async function handleSarahHttpTurn(params) {
       },
       sessionContext
     );
+    const transferReply = `Wonderful, ${firstName}! Please hold for just a moment while I dial ${transferResult.recipient_name || reqCheck.recipientName} and get them on the line. ... ${transferResult.merge_introduction}`;
+    const tts2 = await synthesizeSarahNeuralAudio(transferReply);
     return {
       ok: true,
-      reply: `Please hold for just 15 seconds while I dial ${transferResult.recipient_name || reqCheck.recipientName} on the line and share your notes with him first. ... ${transferResult.merge_introduction}`,
+      reply: transferReply,
+      audio_base64: tts2.audio_base64,
+      audio_mime: tts2.audio_mime,
+      voice: tts2.voice,
       transfer: transferResult,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY
     };
   }
-  if (isAIEnabled()) {
-    try {
-      const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-      const historyContents = (params.history || []).slice(-10).map((h) => ({
-        role: h.speaker === "sarah" ? "model" : "user",
-        parts: [{ text: h.text }]
-      }));
-      historyContents.push({
-        role: "user",
-        parts: [{ text: userText }]
-      });
-      const response = await ai2.models.generateContent({
-        model: config.gemini.model || "gemini-2.5-flash",
-        contents: historyContents,
-        config: {
-          systemInstruction: buildSarahSystemInstruction(sessionContext),
-          tools: SARAH_TOOLS
-        }
-      });
-      let replyText = response.text || "";
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        for (const call of response.functionCalls) {
-          const result = await executeSarahTool(call.name || "", call.args || {}, sessionContext);
-          if (call.name === "whisper_warm_transfer" && result.success) {
-            transferResult = result;
-            if (!replyText) {
-              replyText = `Please hold for just 15 seconds while I dial ${result.recipient_name} on the line and share your notes with him first. ... ${result.merge_introduction}`;
-            }
-          } else if (call.name === "book_appointment" && result.success) {
-            appointmentResult = result;
-            if (!replyText) {
-              replyText = result.message;
-            }
-          } else if (call.name === "record_call_disposition" && result.success) {
-            dispositionResult = result;
-          }
-        }
-      }
-      if (replyText) {
-        const holdCheck = detectSarahTransferHoldSpeech(replyText);
-        if (holdCheck.triggered && !transferResult && !sessionContext.on_warm_transfer) {
-          transferResult = await executeSarahTool(
-            "whisper_warm_transfer",
-            {
-              recipient_name: holdCheck.recipientName,
-              prospect_name: sessionContext.prospect_name,
-              prospect_phone: sessionContext.prospect_phone,
-              state: sessionContext.state
-            },
-            sessionContext
-          );
-        }
-        return {
-          ok: true,
-          reply: replyText,
-          transfer: transferResult,
-          appointment: appointmentResult,
-          disposition: dispositionResult,
-          mode: sessionContext.mode,
-          line: SARAH_MAIN_LINE_DISPLAY
-        };
-      }
-    } catch (err) {
-      console.warn("Sarah HTTP turn Gemini fallback:", err);
-    }
-  }
-  const lower = userText.toLowerCase();
-  if (lower.includes("doing well") || lower.includes("good") || lower.includes("step 2") || lower.includes("value hook")) {
+  const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
+  const isDirectBlandFlow = clonedMatch.scenario !== "Outbound Value Hook & Assumptive Close" && clonedMatch.scenario !== "Inbound 6-Product Funnel";
+  if (isDirectBlandFlow) {
+    const tts2 = await synthesizeSarahNeuralAudio(clonedMatch.reply);
     return {
       ok: true,
-      reply: `Wonderful! The reason for my call today is to make sure you are receiving your maximum 2025 Medicare benefits in ${sessionContext.state} \u2014 including the $1,788 annual Part B giveback, up to $2,400 a year in Healthy Food and Utilities allowance cards, and protection against the uncapped 20% hospital and surgical coinsurance under Original Medicare. Have you had your 2025 benefit review yet?`,
+      reply: clonedMatch.reply,
+      scenario: clonedMatch.scenario,
+      audio_base64: tts2.audio_base64,
+      audio_mime: tts2.audio_mime,
+      voice: tts2.voice,
+      transfer: clonedMatch.transfer || null,
+      appointment: clonedMatch.appointment || null,
+      disposition: clonedMatch.disposition || null,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY
     };
   }
+  if (isAIEnabled()) {
+    const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+    const historyContents = (params.history || []).slice(-10).map((h) => ({
+      role: h.speaker === "sarah" ? "model" : "user",
+      parts: [{ text: h.text }]
+    }));
+    historyContents.push({
+      role: "user",
+      parts: [{ text: userText }]
+    });
+    const candidateModels = [config.gemini.model || "gemini-3.5-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
+    for (const modelName of [...new Set(candidateModels)]) {
+      try {
+        const response = await ai2.models.generateContent({
+          model: modelName,
+          contents: historyContents,
+          config: {
+            systemInstruction: buildSarahSystemInstruction(sessionContext),
+            tools: SARAH_TOOLS,
+            temperature: 0.2
+          }
+        });
+        let replyText = response.text || "";
+        if (response.functionCalls && response.functionCalls.length > 0) {
+          for (const call of response.functionCalls) {
+            const result = await executeSarahTool(call.name || "", call.args || {}, sessionContext);
+            if (call.name === "whisper_warm_transfer" && result.success) {
+              transferResult = result;
+              if (!replyText) {
+                replyText = `Wonderful, ${firstName}! Please hold for just a moment while I dial ${result.recipient_name} and get them on the line. ... ${result.merge_introduction}`;
+              }
+            } else if (call.name === "book_appointment" && result.success) {
+              appointmentResult = result;
+              if (!replyText) {
+                replyText = result.message;
+              }
+            } else if (call.name === "record_call_disposition" && result.success) {
+              dispositionResult = result;
+            }
+          }
+        }
+        if (replyText) {
+          const holdCheck = detectSarahTransferHoldSpeech(replyText);
+          if (holdCheck.triggered && !transferResult && !sessionContext.on_warm_transfer) {
+            transferResult = await executeSarahTool(
+              "whisper_warm_transfer",
+              {
+                recipient_name: holdCheck.recipientName,
+                prospect_name: sessionContext.prospect_name,
+                prospect_phone: sessionContext.prospect_phone,
+                state: sessionContext.state
+              },
+              sessionContext
+            );
+          }
+          const tts2 = await synthesizeSarahNeuralAudio(replyText);
+          return {
+            ok: true,
+            reply: replyText,
+            audio_base64: tts2.audio_base64,
+            audio_mime: tts2.audio_mime,
+            voice: tts2.voice,
+            transfer: transferResult,
+            appointment: appointmentResult,
+            disposition: dispositionResult,
+            mode: sessionContext.mode,
+            line: SARAH_MAIN_LINE_DISPLAY
+          };
+        }
+      } catch (err) {
+        console.warn(`Sarah HTTP turn model ${modelName} fallback:`, err?.message || err);
+      }
+    }
+  }
+  const tts = await synthesizeSarahNeuralAudio(clonedMatch.reply);
   return {
     ok: true,
-    reply: sessionContext.on_warm_transfer ? `Our principal broker King Amen Ra is currently assisting another beneficiary on a live consultation, so I can lock in your priority appointment right now. Would you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Google Meet Video session?` : `I would love to get that taken care of for you right away! Would you like me to connect you live right now via a brief 15-second whisper warm transfer to our Principal Broker King Amen Ra, or would you prefer to schedule a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?`,
+    reply: clonedMatch.reply,
+    scenario: clonedMatch.scenario,
+    audio_base64: tts.audio_base64,
+    audio_mime: tts.audio_mime,
+    voice: tts.voice,
     mode: sessionContext.mode,
     line: SARAH_MAIN_LINE_DISPLAY
   };

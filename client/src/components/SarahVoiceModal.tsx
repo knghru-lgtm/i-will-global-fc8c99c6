@@ -119,7 +119,11 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const playerRef = useRef<AudioPlayer | null>(null);
+  const neuralAudioRef = useRef<HTMLAudioElement | null>(null);
   const httpModeRef = useRef<boolean>(false);
+  const isSpeakingRef = useRef<boolean>(false);
+  const isTurnInFlightRef = useRef<boolean>(false);
+  const isMutedRef = useRef<boolean>(false);
   const recognitionRef = useRef<any>(null);
   const transcriptsRef = useRef<TranscriptItem[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -128,32 +132,147 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     transcriptsRef.current = transcripts;
   }, [transcripts]);
 
-  const speakBrowserText = (text: string) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text) return;
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  const stopAllSarahAudio = () => {
+    if (neuralAudioRef.current) {
+      try {
+        neuralAudioRef.current.pause();
+        neuralAudioRef.current.src = '';
+      } catch {}
+      neuralAudioRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
+    isSpeakingRef.current = false;
+    setIsSpeaking(false);
+    setSarahVolume(0);
+  };
+
+  const resumeSpeechRecognitionSafe = () => {
+    setTimeout(() => {
+      if (httpModeRef.current && !isMutedRef.current && !isSpeakingRef.current && recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch {}
+      }
+    }, 350);
+  };
+
+  const playBrowserFallbackVoice = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text) {
+      isSpeakingRef.current = false;
+      setIsSpeaking(false);
+      setSarahVolume(0);
+      resumeSpeechRecognitionSafe();
+      return;
+    }
     try {
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
-      const femaleVoice =
-        voices.find((v) => /zira|aria|samantha|jenny|google us english|female/i.test(v.name) && /en/i.test(v.lang)) ||
-        voices.find((v) => /en-US/i.test(v.lang));
-      if (femaleVoice) utter.voice = femaleVoice;
-      utter.rate = 1.03;
-      utter.pitch = 1.05;
+      const naturalVoice =
+        voices.find((v) => /natural|aria|jenny|ana|ava|samantha|google us english/i.test(v.name) && /en/i.test(v.lang)) ||
+        voices.find((v) => /en-US/i.test(v.lang) && !/zira/i.test(v.name)) ||
+        voices.find((v) => /en/i.test(v.lang));
+      if (naturalVoice) utter.voice = naturalVoice;
+      utter.rate = 1.0;
+      utter.pitch = 1.0;
+
+      const watchdogMs = Math.max(4000, text.length * 80);
+      const watchdog = setTimeout(() => {
+        if (isSpeakingRef.current) {
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+          setSarahVolume(0);
+          resumeSpeechRecognitionSafe();
+        }
+      }, watchdogMs);
+
       utter.onstart = () => {
+        isSpeakingRef.current = true;
         setIsSpeaking(true);
-        setSarahVolume(0.65);
+        setSarahVolume(0.68);
       };
       utter.onend = () => {
+        clearTimeout(watchdog);
+        isSpeakingRef.current = false;
         setIsSpeaking(false);
         setSarahVolume(0);
+        resumeSpeechRecognitionSafe();
       };
       utter.onerror = () => {
+        clearTimeout(watchdog);
+        isSpeakingRef.current = false;
         setIsSpeaking(false);
         setSarahVolume(0);
+        resumeSpeechRecognitionSafe();
       };
       window.speechSynthesis.speak(utter);
-    } catch {}
+    } catch {
+      isSpeakingRef.current = false;
+      setIsSpeaking(false);
+      setSarahVolume(0);
+      resumeSpeechRecognitionSafe();
+    }
+  };
+
+  const playSarahResponseAudio = (text: string, audioBase64?: string | null, audioMime?: string) => {
+    stopAllSarahAudio();
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    isSpeakingRef.current = true;
+    setIsSpeaking(true);
+    setSarahVolume(0.75);
+
+    if (audioBase64 && typeof window !== 'undefined') {
+      try {
+        const mime = audioMime || 'audio/wav';
+        const audio = new Audio(`data:${mime};base64,${audioBase64}`);
+        neuralAudioRef.current = audio;
+
+        const finishPlayback = () => {
+          if (neuralAudioRef.current === audio) {
+            neuralAudioRef.current = null;
+          }
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+          setSarahVolume(0);
+          resumeSpeechRecognitionSafe();
+        };
+
+        audio.onended = finishPlayback;
+        audio.onerror = () => {
+          if (neuralAudioRef.current === audio) {
+            neuralAudioRef.current = null;
+          }
+          playBrowserFallbackVoice(text);
+        };
+
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => {
+            if (neuralAudioRef.current === audio) {
+              neuralAudioRef.current = null;
+            }
+            playBrowserFallbackVoice(text);
+          });
+        }
+        return;
+      } catch {
+        // Fall through to browser fallback if Audio constructor fails
+      }
+    }
+
+    playBrowserFallbackVoice(text);
   };
 
   const sendHttpTurn = async (
@@ -169,10 +288,18 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       is_initial?: boolean;
     }
   ) => {
+    if (isTurnInFlightRef.current && !ctxOverride?.is_initial) return;
+    isTurnInFlightRef.current = true;
     try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+
       const historyPayload = transcriptsRef.current
         .filter((t) => (t.speaker === 'sarah' || t.speaker === 'user') && !t.isAction)
-        .slice(-10)
+        .slice(-12)
         .map((t) => ({ speaker: t.speaker as 'sarah' | 'user', text: t.text }));
 
       const res = await fetch('/api/sarah/turn', {
@@ -196,7 +323,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
       if (res?.reply) {
         appendNewTranscript('sarah', res.reply);
-        speakBrowserText(res.reply);
+        playSarahResponseAudio(res.reply, res.audio_base64, res.audio_mime);
         const lower = String(res.reply).toLowerCase();
         if (lower.includes('$1,788') || lower.includes('$2,400') || lower.includes('20%')) {
           setActiveScriptStep(2);
@@ -208,6 +335,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         ) {
           setActiveScriptStep(3);
         }
+      } else {
+        resumeSpeechRecognitionSafe();
       }
 
       if (res?.appointment?.success) {
@@ -246,6 +375,9 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       }
     } catch (err) {
       console.warn('Sarah HTTP turn error:', err);
+      resumeSpeechRecognitionSafe();
+    } finally {
+      isTurnInFlightRef.current = false;
     }
   };
 
@@ -263,7 +395,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     setConnectionStatus('connected');
     setErrorMessage(null);
 
-    // Start Browser SpeechRecognition if supported
+    // Start Browser SpeechRecognition if supported (auto-paused while Sarah speaks so she never hears her own voice)
     try {
       const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRec) {
@@ -272,23 +404,32 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         rec.interimResults = false;
         rec.lang = 'en-US';
         rec.onresult = (ev: any) => {
+          if (isSpeakingRef.current || isTurnInFlightRef.current || isMutedRef.current) return;
           const lastIdx = ev.results.length - 1;
           const spoken = ev.results[lastIdx]?.[0]?.transcript?.trim();
-          if (spoken) {
-            appendNewTranscript('user', spoken);
-            sendHttpTurn(spoken, ctx);
+          if (!spoken) return;
+          const lowSpoken = spoken.toLowerCase();
+          // Guard against speaker echo picking up Sarah's own words
+          if (
+            lowSpoken.includes('thank you for calling iwg') ||
+            lowSpoken.includes('this is sarah calling') ||
+            lowSpoken.includes('100% free fiduciary') ||
+            lowSpoken.includes('medicare helpline powered by iwg')
+          ) {
+            return;
           }
+          appendNewTranscript('user', spoken);
+          sendHttpTurn(spoken, ctx);
         };
         rec.onerror = () => {};
         rec.onend = () => {
-          if (httpModeRef.current && !isMuted) {
+          if (httpModeRef.current && !isMutedRef.current && !isSpeakingRef.current && !isTurnInFlightRef.current) {
             try {
               rec.start();
             } catch {}
           }
         };
         recognitionRef.current = rec;
-        rec.start();
       }
     } catch {}
 
@@ -411,10 +552,30 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       },
     ]);
 
+    const fallbackCtx = {
+      mode: activeMode,
+      lead_id: activeLeadId,
+      prospect_name: activeName,
+      phone: activePhone,
+      state: activeState,
+      address: activeAddress,
+      on_warm_transfer: Boolean(activeWT),
+    };
+
+    // On serverless hosts (iwillglobal.com / vercel.app), immediately connect to Cloned Bland + Aoede Neural Voice engine
+    const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
+    if (host.endsWith('iwillglobal.com') || host.endsWith('.vercel.app')) {
+      await activateHttpVoiceFallback(fallbackCtx);
+      return;
+    }
+
     const player = new AudioPlayer({
       sampleRate: 24000,
       onVolumeChange: (vol) => setSarahVolume(vol),
-      onPlaybackStateChange: (playing) => setIsSpeaking(playing),
+      onPlaybackStateChange: (playing) => {
+        isSpeakingRef.current = playing;
+        setIsSpeaking(playing);
+      },
     });
     playerRef.current = player;
 
@@ -433,7 +594,11 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
+      let wsOpened = false;
+      let receivedAudioTurn = false;
+
       ws.onopen = async () => {
+        wsOpened = true;
         setConnectionStatus('connected');
         try {
           const recorder = new AudioRecorder({
@@ -475,6 +640,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
               sendTextMessage(topicToUse);
             }
           } else if (data.type === 'audio' && data.data) {
+            receivedAudioTurn = true;
             player.enqueueChunk(data.data);
           } else if (data.type === 'transcript') {
             appendOrUpdateTranscript(data.speaker, data.text);
@@ -525,72 +691,47 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
               },
             ]);
             window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
-          } else if (data.type === 'error') {
-            setErrorMessage(data.message || 'Voice service error');
-            setConnectionStatus('error');
+          } else if (data.type === 'error' || data.type === 'closed') {
+            if (!receivedAudioTurn) {
+              if (recorderRef.current) {
+                recorderRef.current.stop();
+                recorderRef.current = null;
+              }
+              activateHttpVoiceFallback(fallbackCtx);
+            }
           }
         } catch (e) {
           console.error('Error parsing WS message:', e);
         }
       };
 
-      let wsOpened = false;
-      const fallbackCtx = {
-        mode: activeMode,
-        lead_id: activeLeadId,
-        prospect_name: activeName,
-        phone: activePhone,
-        state: activeState,
-        address: activeAddress,
-        on_warm_transfer: Boolean(activeWT),
-      };
-
-      const prevOnOpen = ws.onopen;
-      ws.onopen = async (ev) => {
-        wsOpened = true;
-        if (prevOnOpen) await (prevOnOpen as any).call(ws, ev);
-      };
-
       ws.onerror = () => {
-        if (!wsOpened) {
+        if (!wsOpened || !receivedAudioTurn) {
           activateHttpVoiceFallback(fallbackCtx);
         }
       };
 
       ws.onclose = () => {
-        if (!wsOpened || !httpModeRef.current) {
-          if (!wsOpened) {
-            activateHttpVoiceFallback(fallbackCtx);
-          } else {
-            setConnectionStatus('closed');
-          }
+        if (!wsOpened || !receivedAudioTurn) {
+          activateHttpVoiceFallback(fallbackCtx);
+        } else if (!httpModeRef.current) {
+          setConnectionStatus('closed');
         }
       };
     } catch (err: any) {
-      activateHttpVoiceFallback({
-        mode: activeMode,
-        lead_id: activeLeadId,
-        prospect_name: activeName,
-        phone: activePhone,
-        state: activeState,
-        address: activeAddress,
-        on_warm_transfer: Boolean(activeWT),
-      });
+      activateHttpVoiceFallback(fallbackCtx);
     }
   };
 
   const endSession = () => {
     httpModeRef.current = false;
+    isTurnInFlightRef.current = false;
+    stopAllSarahAudio();
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch {}
       recognitionRef.current = null;
-    }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
     }
     if (recorderRef.current) {
       recorderRef.current.stop();
@@ -650,24 +791,20 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const toggleMute = () => {
     const next = !isMuted;
     setIsMuted(next);
+    isMutedRef.current = next;
     recorderRef.current?.setMuted(next);
     if (recognitionRef.current) {
       try {
         if (next) recognitionRef.current.stop();
-        else recognitionRef.current.start();
+        else if (!isSpeakingRef.current) recognitionRef.current.start();
       } catch {}
     }
   };
 
   const interruptSarah = () => {
     playerRef.current?.stop();
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
-    }
-    setIsSpeaking(false);
-    setSarahVolume(0);
+    stopAllSarahAudio();
+    resumeSpeechRecognitionSafe();
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'end_turn' }));
     }
@@ -677,7 +814,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const text = textToSend || textInput.trim();
     if (!text) return;
 
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
       wsRef.current.send(JSON.stringify({ type: 'text', text }));
       appendOrUpdateTranscript('user', text);
       if (!textToSend) setTextInput('');
@@ -691,11 +828,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const triggerScriptStepDirective = (stepNum: number, directiveText: string) => {
     setActiveScriptStep(stepNum);
     playerRef.current?.stop();
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
-    }
+    stopAllSarahAudio();
     setTranscripts((prev) => [
       ...prev,
       {
@@ -706,7 +839,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         isAction: true,
       },
     ]);
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
       wsRef.current.send(JSON.stringify({ type: 'script_step', prompt: directiveText }));
     } else {
       sendHttpTurn(`[SCRIPT TREE DIRECTIVE]: ${directiveText}`);
@@ -716,7 +849,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const triggerImmediateWhisperTransfer = (recipientName = 'King Amen Ra') => {
     setActiveScriptStep(3);
     playerRef.current?.stop();
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    stopAllSarahAudio();
+    if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
       wsRef.current.send(
         JSON.stringify({
           type: 'execute_whisper_transfer',
