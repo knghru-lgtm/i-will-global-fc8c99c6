@@ -28,6 +28,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const [isWarmTransferOpen, setIsWarmTransferOpen] = useState(false);
   const [isBlandControlOpen, setIsBlandControlOpen] = useState(false);
   const [blandStatus, setBlandStatus] = useState<{ is_campaign_active: boolean; is_on_warm_transfer: boolean }>({ is_campaign_active: false, is_on_warm_transfer: false });
+  const headerScrollRef = React.useRef<HTMLDivElement | null>(null);
+
+  const scrollHeaderToolbar = (direction: 'left' | 'right') => {
+    if (!headerScrollRef.current) return;
+    headerScrollRef.current.scrollBy({
+      left: direction === 'left' ? -260 : 260,
+      behavior: 'smooth',
+    });
+  };
 
   React.useEffect(() => {
     const refreshBland = () => {
@@ -141,6 +150,38 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         </div>
 
         <nav className="sidebar-nav">
+          <button
+            type="button"
+            onClick={() => {
+              setIsMobileMenuOpen(false);
+              window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }));
+            }}
+            style={{
+              margin: '0.25rem 0.5rem 0.5rem 0.5rem',
+              padding: '0.65rem 0.85rem',
+              borderRadius: '10px',
+              border: '1.5px solid #34d399',
+              background: 'linear-gradient(135deg, #059669 0%, #0284c7 100%)',
+              color: '#ffffff',
+              fontWeight: 800,
+              fontSize: '0.84rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.55rem',
+              cursor: 'pointer',
+              boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+              textAlign: 'left',
+            }}
+            title="Activate Sarah Voice AI on (480) 331-9455 to Call Leads & Schedule Appointments"
+          >
+            <span style={{ fontSize: '1.1rem' }}>🎙️</span>
+            <span style={{ lineHeight: 1.2 }}>
+              Sarah Voice AI
+              <span style={{ display: 'block', fontSize: '0.68rem', color: '#a7f3d0', fontWeight: 700 }}>
+                🚀 Activate & Call (480) 331-9455
+              </span>
+            </span>
+          </button>
           {navItems.map((item) => {
             const isActive = location.pathname.startsWith(item.path);
             return (
@@ -229,7 +270,75 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             <span className="kbd-shortcut">Ctrl K</span>
           </div>
 
-          <div className="header-actions">
+          {/* Left Scroll Button for Top Toolbar */}
+          <button
+            type="button"
+            className="toolbar-scroll-btn"
+            onClick={() => scrollHeaderToolbar('left')}
+            title="Scroll toolbar left"
+            aria-label="Scroll toolbar left"
+          >
+            ◀
+          </button>
+
+          <div
+            ref={headerScrollRef}
+            className="header-actions"
+            onWheel={(e) => {
+              if (e.deltaY !== 0 && headerScrollRef.current) {
+                headerScrollRef.current.scrollLeft += e.deltaY;
+              }
+            }}
+          >
+            {/* 1. Talk to Sarah Voice AI Receptionist & Outbound Caller (480) 331-9455 — FIRST BUTTON IN TOP BAR */}
+            <button
+              type="button"
+              className="btn header-tool-btn"
+              onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }))}
+              title="Sarah Voice AI — (480) 331-9455 Virtual Receptionist & Outbound Caller (100% Free Spoken Audio, $0.00 Carrier Bills)"
+              style={{
+                background: 'linear-gradient(135deg, #059669 0%, #0284c7 100%)',
+                borderColor: '#34d399',
+                color: '#ffffff',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                boxShadow: '0 0 15px rgba(16, 185, 129, 0.45)',
+              }}
+            >
+              <span style={{ fontSize: '1.05rem' }}>🎙️</span>
+              <span className="btn-text">Sarah (480) 331-9455</span>
+            </button>
+
+            {/* 2. Activate Sarah AI Outbound Campaign & Warm-Transfer Control */}
+            <button
+              type="button"
+              className="btn header-tool-btn"
+              onClick={() => setIsBlandControlOpen(true)}
+              title="Activate Sarah Voice AI to begin calling leads & scheduling Telephone (30m), In-Person (60m), or Video (30m) appointments"
+              style={{
+                background: blandStatus.is_on_warm_transfer
+                  ? 'linear-gradient(135deg, #f59e0b, #7c3aed)'
+                  : blandStatus.is_campaign_active
+                  ? 'linear-gradient(135deg, #059669, #7c3aed)'
+                  : 'linear-gradient(135deg, #7c3aed, #9333ea)',
+                borderColor: blandStatus.is_on_warm_transfer ? '#fbbf24' : '#a855f7',
+                color: '#ffffff',
+                fontWeight: 800,
+                boxShadow: '0 0 14px rgba(139, 92, 246, 0.45)',
+              }}
+            >
+              <span>{blandStatus.is_on_warm_transfer ? '🔥🎙️' : '🚀'}</span>
+              <span className="btn-text">
+                {blandStatus.is_on_warm_transfer
+                  ? 'Sarah AI (Warm Transfer: Appt Only)'
+                  : blandStatus.is_campaign_active
+                  ? 'Sarah AI (Calling Active)'
+                  : 'Activate Sarah AI'}
+              </span>
+            </button>
+
             {/* Quoting Portals Dropdown */}
             <div className="quoting-tools-dropdown-container" onClick={(e) => e.stopPropagation()}>
               <button
@@ -410,55 +519,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               </button>
             )}
 
-            {/* Talk to Sarah Voice AI Receptionist & Outbound Caller (480) 331-9455 */}
-            <button
-              type="button"
-              className="btn header-tool-btn"
-              onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }))}
-              title="Sarah Voice AI — (480) 331-9455 Virtual Receptionist & Outbound Caller (100% Free Spoken Audio, $0.00 Carrier Bills)"
-              style={{
-                background: 'linear-gradient(135deg, #c8963e 0%, #0284c7 100%)',
-                borderColor: '#f3cf7a',
-                color: '#ffffff',
-                fontWeight: 800,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                boxShadow: '0 0 15px rgba(200, 150, 62, 0.45)',
-              }}
-            >
-              <span style={{ fontSize: '1.05rem' }}>🎙️</span>
-              <span className="btn-text">Sarah (480) 331-9455</span>
-            </button>
-
-            {/* Activate Bland Agent AI button */}
-            <button
-              type="button"
-              className="btn header-tool-btn"
-              onClick={() => setIsBlandControlOpen(true)}
-              title="Activate Bland Agent AI to begin making calls & manage Warm Transfer Appointment-Only mode (Telephone, In-Person, Video)"
-              style={{
-                background: blandStatus.is_on_warm_transfer
-                  ? 'linear-gradient(135deg, #f59e0b, #7c3aed)'
-                  : blandStatus.is_campaign_active
-                  ? 'linear-gradient(135deg, #059669, #7c3aed)'
-                  : 'linear-gradient(135deg, #7c3aed, #9333ea)',
-                borderColor: blandStatus.is_on_warm_transfer ? '#fbbf24' : '#a855f7',
-                color: '#ffffff',
-                fontWeight: 800,
-                boxShadow: '0 0 14px rgba(139, 92, 246, 0.45)',
-              }}
-            >
-              <span>{blandStatus.is_on_warm_transfer ? '🔥🤖' : '🤖'}</span>
-              <span className="btn-text">
-                {blandStatus.is_on_warm_transfer
-                  ? 'Bland AI (Warm Transfer: Appt Only)'
-                  : blandStatus.is_campaign_active
-                  ? 'Bland AI (Calling Active)'
-                  : 'Activate Bland AI'}
-              </span>
-            </button>
-
             {/* Copilot button */}
             {isCopilotOpen ? (
               <button
@@ -520,6 +580,17 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               </select>
             </div>
           </div>
+
+          {/* Right Scroll Button for Top Toolbar */}
+          <button
+            type="button"
+            className="toolbar-scroll-btn"
+            onClick={() => scrollHeaderToolbar('right')}
+            title="Scroll toolbar right"
+            aria-label="Scroll toolbar right"
+          >
+            ▶
+          </button>
         </header>
 
         {/* Page Content */}

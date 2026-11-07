@@ -175,12 +175,12 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
                 boxShadow: '0 4px 14px rgba(139, 92, 246, 0.4)',
               }}
             >
-              🤖
+              🎙️
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0, color: '#f8fafc' }}>
-                  Bland Agent AI Command Center
+                  Sarah Voice AI Command Center (480) 331-9455
                 </h2>
                 <span
                   style={{
@@ -332,7 +332,7 @@ export const BlandAgentControlModal: React.FC<BlandAgentControlModalProps> = ({ 
         >
           <div style={{ fontWeight: 800, fontSize: '1rem', color: '#e9d5ff', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span>🚀</span>
-            <span>Activate Bland Agent AI to Begin Making Calls</span>
+            <span>Activate Sarah Voice AI to Call Leads & Schedule Appointments</span>
           </div>
 
           <div style={{ fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.5, background: 'rgba(5, 16, 57, 0.55)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '8px', padding: '0.6rem 0.8rem', marginBottom: '0.9rem' }}>
