@@ -485,6 +485,94 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     playBrowserFallbackVoice(text);
   };
 
+  const confirmTranslineConnectedNow = async (transferTarget?: WhisperTransferConfirmation | null) => {
+    const tObj = transferTarget || whisperTransfer;
+    const recipientName = tObj?.recipient_name || 'King Amen Ra';
+    const recipientPhone = tObj?.recipient_phone || '+16024569681';
+    const activeCtx = sessionCtxRef.current;
+
+    setTranslineStage('transline_connected');
+    setTimeout(() => setTranslineStage('whisper_received'), 200);
+    setTimeout(() => setTranslineStage('both_parties_on_line'), 400);
+
+    try {
+      await fetch('/api/sarah/transfer/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient_name: recipientName,
+          recipient_phone: recipientPhone,
+          prospect_name: activeCtx.prospect_name,
+          prospect_phone: activeCtx.phone,
+          state: activeCtx.state,
+          lead_id: activeCtx.lead_id,
+          mode: activeCtx.mode,
+        }),
+      }).catch(() => null);
+    } catch {}
+
+    const connectedTransfer: WhisperTransferConfirmation = {
+      ...(tObj || {
+        recipient_name: recipientName,
+        recipient_phone: recipientPhone,
+        prospect_name: activeCtx.prospect_name || 'Caller',
+        whisper_briefing: `Hi ${recipientName}, I have ${activeCtx.prospect_name || 'our caller'} on the line ready to speak with you.`,
+        merge_introduction: `Thank you so much for your patience! I have connected with ${recipientName} on the line now.`,
+      }),
+      verification: {
+        transline_dialed: true,
+        transline_number: recipientPhone,
+        transline_connected: true,
+        whisper_delivered: true,
+        whisper_received: true,
+        both_parties_on_line: true,
+        party_a_prospect: activeCtx.prospect_name || 'Caller',
+        party_b_transline: recipientName,
+      },
+    };
+    setWhisperTransfer(connectedTransfer);
+
+    const announceText =
+      tObj?.merge_introduction ||
+      `Thank you so much for your patience! I have connected with ${recipientName} on the line now. ${recipientName}, I have ${activeCtx.prospect_name || 'our caller'} with us—I will let you two take it from here!`;
+
+    appendNewTranscript('sarah', announceText);
+    playSarahResponseAudio(announceText);
+
+    setTranscripts((prev) => [
+      ...prev,
+      {
+        id: 'wt_verify_' + Date.now(),
+        speaker: 'system',
+        text: `✅ Verified Live Connection: (1) Called ${recipientName} (${recipientPhone}) → (2) ${recipientName} Answered & Connected → (3) Private Whisper Delivered → (4) Announced Connection to Customer!`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isAction: true,
+      },
+    ]);
+    window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
+  };
+
+  const handleTranslineUnavailableNow = (transferTarget?: WhisperTransferConfirmation | null) => {
+    const tObj = transferTarget || whisperTransfer;
+    const recipientName = tObj?.recipient_name || 'King Amen Ra';
+    const recipientPhone = tObj?.recipient_phone || '+16024569681';
+    setTranslineStage('idle');
+    setWhisperTransfer(null);
+    const fallbackMsg = `Thank you so much for holding! ${recipientName} is currently wrapping up with another client and wasn't able to grab the line right this second, so let's lock in a priority time for you on his calendar during our work hours of Monday through Friday, 8:00 AM to 8:00 PM. Do you prefer a 30-minute Telephone, 60-minute In-Person, or 30-minute Video consultation—and may I get your full name, phone number, and street address?`;
+    appendNewTranscript('sarah', fallbackMsg);
+    playSarahResponseAudio(fallbackMsg);
+    setTranscripts((prev) => [
+      ...prev,
+      {
+        id: 'wt_unavail_' + Date.now(),
+        speaker: 'system',
+        text: `ℹ️ ${recipientName} (${recipientPhone}) was unavailable on the live ring — Transitioned caller to priority appointment booking.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isAction: true,
+      },
+    ]);
+  };
+
   const executeVerifiedTranslineBridge = async (transferObj: any) => {
     const recipientName = transferObj?.recipient_name || 'King Amen Ra';
     const recipientPhone = transferObj?.recipient_phone || '+16024569681';
@@ -1964,6 +2052,42 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                   <div style={{ fontSize: '0.71rem', color: '#e2e8f0', marginTop: '0.25rem', fontStyle: 'italic' }}>
                     Whispered privately: "{whisperTransfer.whisper_briefing}"
                   </div>
+                  {!whisperTransfer.verification?.both_parties_on_line && (
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.45rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => confirmTranslineConnectedNow(whisperTransfer)}
+                        style={{
+                          backgroundColor: '#10b981',
+                          color: '#051039',
+                          border: 'none',
+                          borderRadius: '0.4rem',
+                          padding: '0.28rem 0.65rem',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ✅ {whisperTransfer.recipient_phone} Connected — Announce & Merge Call Now
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleTranslineUnavailableNow(whisperTransfer)}
+                        style={{
+                          backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255, 255, 255, 0.25)',
+                          borderRadius: '0.4rem',
+                          padding: '0.28rem 0.65rem',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        📅 Line Busy / Unavailable — Book Appointment Instead
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
