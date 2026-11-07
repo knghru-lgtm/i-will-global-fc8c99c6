@@ -1865,31 +1865,33 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
 
   const runPromise = (async () => {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    const baseModels = ['gemini-2.5-flash-preview-tts', config.gemini.ttsModel || 'gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
-    const ttsModels = workingTtsModel ? [workingTtsModel, ...baseModels] : baseModels;
+    const ttsModels = [workingTtsModel || 'gemini-2.5-flash-preview-tts'];
 
     for (const modelName of [...new Set(ttsModels)]) {
       try {
-        const r = await ai.models.generateContent({
-          model: modelName,
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: cleanText }],
-            },
-          ],
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: SARAH_VOICE_NAME,
+        const r: any = await Promise.race([
+          ai.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                role: 'user',
+                parts: [{ text: cleanText }],
+              },
+            ],
+            config: {
+              responseModalities: [Modality.AUDIO],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: SARAH_VOICE_NAME,
+                  },
                 },
               },
             },
-          },
-        });
-        const inline = r.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('TTS timeout')), 1400)),
+        ]);
+        const inline = r?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
         if (inline?.data) {
           workingTtsModel = modelName;
           const wavBase64 = ensureRiffWavBase64(inline.data, 24000);
@@ -1906,7 +1908,7 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
           return entry;
         }
       } catch {
-        // try next TTS model
+        // fast fallback to browser neural voice if TTS times out
       }
     }
     return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };

@@ -224,7 +224,7 @@ export const DashboardPage: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-bland-ai-control'))}
+              onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }))}
               style={{
                 padding: '0.6rem 0.85rem',
                 borderRadius: '8px',
@@ -236,7 +236,7 @@ export const DashboardPage: React.FC = () => {
                 cursor: 'pointer',
               }}
             >
-              ⚙️ AI Command Center
+              🎙️ Open Receptionist & Caller
             </button>
           </div>
         </div>

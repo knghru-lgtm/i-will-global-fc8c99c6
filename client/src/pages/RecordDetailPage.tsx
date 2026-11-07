@@ -6,7 +6,6 @@ import { CallPanel } from '../components/CallPanel';
 import { BookAppointmentModal } from '../components/BookAppointmentModal';
 import { InboundSMSSimulatorModal } from '../components/InboundSMSSimulatorModal';
 import { WarmTransferModal } from '../components/WarmTransferModal';
-import { BlandCallModal } from '../components/BlandCallModal';
 
 export const RecordDetailPage: React.FC<{ type: 'lead' | 'client' | 'opportunity' }> = ({ type }) => {
   const { id } = useParams<{ id: string }>();
@@ -19,7 +18,6 @@ export const RecordDetailPage: React.FC<{ type: 'lead' | 'client' | 'opportunity
   const [activeCallLead, setActiveCallLead] = useState<any>(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState<boolean>(false);
   const [showWarmTransferModal, setShowWarmTransferModal] = useState<boolean>(false);
-  const [showBlandModal, setShowBlandModal] = useState<boolean>(false);
   const [showSmsSimulator, setShowSmsSimulator] = useState<boolean>(false);
   const [aiBrief, setAiBrief] = useState<string>('');
   const [loadingBrief, setLoadingBrief] = useState(false);
@@ -498,15 +496,6 @@ export const RecordDetailPage: React.FC<{ type: 'lead' | 'client' | 'opportunity
           contact={activeCallLead}
           onClose={() => setActiveCallLead(null)}
           onCallCompleted={() => loadRecord()}
-        />
-      )}
-
-      {showBlandModal && (
-        <BlandCallModal
-          isOpen={showBlandModal}
-          lead={record}
-          onClose={() => setShowBlandModal(false)}
-          onCallDispatched={() => loadRecord()}
         />
       )}
     </div>

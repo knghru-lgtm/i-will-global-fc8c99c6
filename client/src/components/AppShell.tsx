@@ -9,7 +9,6 @@ import { RunningLateModal } from './RunningLateModal';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { CallPanel } from './CallPanel';
 import { WarmTransferModal } from './WarmTransferModal';
-import { BlandAgentControlModal } from './BlandAgentControlModal';
 import { api } from '../lib/api';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -26,7 +25,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const [isQuotingMenuOpen, setIsQuotingMenuOpen] = useState(false);
   const [copilotDispositionContact, setCopilotDispositionContact] = useState<any>(null);
   const [isWarmTransferOpen, setIsWarmTransferOpen] = useState(false);
-  const [isBlandControlOpen, setIsBlandControlOpen] = useState(false);
   const [blandStatus, setBlandStatus] = useState<{ is_campaign_active: boolean; is_on_warm_transfer: boolean }>({ is_campaign_active: false, is_on_warm_transfer: false });
   const headerScrollRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -52,10 +50,47 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         .catch(() => {});
     };
     refreshBland();
+    const openSarahOutbound = () => {
+      window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }));
+    };
     window.addEventListener('iwg-bland-status-changed', refreshBland);
-    window.addEventListener('open-bland-ai-control', () => setIsBlandControlOpen(true));
+    window.addEventListener('open-bland-ai-control', openSarahOutbound);
+
+    // Subscribe to real-time inbound call events on (480) 331-9455 so Receptionist answers immediately
+    let es: EventSource | null = null;
+    try {
+      const token = localStorage.getItem('iwg_token');
+      if (token && typeof EventSource !== 'undefined') {
+        es = new EventSource(`/api/stream?token=${encodeURIComponent(token)}`);
+        es.addEventListener('inbound_call_ringing', (ev: any) => {
+          try {
+            const payload = JSON.parse(ev.data || '{}');
+            window.dispatchEvent(
+              new CustomEvent('iwg-open-sarah-voice', {
+                detail: {
+                  mode: 'inbound',
+                  lead_id: payload?.lead_id || undefined,
+                  prospect_name: payload?.caller_name || undefined,
+                  phone: payload?.caller_phone || undefined,
+                  address: payload?.caller_address || undefined,
+                  initialTopic: payload?.user_speech || undefined,
+                },
+              })
+            );
+            window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
+          } catch {}
+        });
+      }
+    } catch {}
+
     return () => {
       window.removeEventListener('iwg-bland-status-changed', refreshBland);
+      window.removeEventListener('open-bland-ai-control', openSarahOutbound);
+      if (es) {
+        try {
+          es.close();
+        } catch {}
+      }
     };
   }, []);
 
@@ -334,8 +369,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               <button
                 type="button"
                 className="btn header-tool-btn"
-                onClick={() => setIsBlandControlOpen(true)}
-                title="Admin Only: Activate Sarah Voice AI to start her scheduling workday & call all assigned leads"
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }))
+                }
+                title="Admin Only: Launch Receptionist & Outbound Caller on (480) 331-9455"
                 style={{
                   background: blandStatus.is_on_warm_transfer
                     ? 'linear-gradient(135deg, #f59e0b, #7c3aed)'
@@ -714,7 +751,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <PowerDialer isOpen={isDialerOpen} onClose={() => setIsDialerOpen(false)} />
       <OutboundScriptModal isOpen={isScriptOpen} onClose={() => setIsScriptOpen(false)} />
       <WarmTransferModal isOpen={isWarmTransferOpen} onClose={() => setIsWarmTransferOpen(false)} />
-      <BlandAgentControlModal isOpen={isBlandControlOpen} onClose={() => setIsBlandControlOpen(false)} />
       {isAgentOrAdmin && (
         <RunningLateModal isOpen={isRunningLateOpen} onClose={() => setIsRunningLateOpen(false)} />
       )}

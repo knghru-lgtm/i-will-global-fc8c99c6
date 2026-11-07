@@ -29,6 +29,7 @@ export function createApp() {
   app.set('trust proxy', true);
   app.use(cors());
   app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, ai: isAIEnabled() ? 'gemini' : 'demo', google: isGoogleEnabled() }));
 
@@ -147,11 +148,13 @@ export function createApp() {
     res.json({ ok: true, ...wh });
   });
 
-  // Public: website chat widget, SOA e-sign, appointment web confirmation, OAuth callback, Bland AI webhook
+  // Public: website chat widget, SOA e-sign, appointment web confirmation, OAuth callback, Inbound Receptionist & Webhook
   app.use('/api/public', publicApi);
   app.use('/api/public', publicAppointments);
   app.use('/api/google', googleCallback);
   app.use('/api/bland', blandPublic);
+  app.use('/api/sarah', blandPublic);
+  app.use('/api/telephony/twiml', blandPublic);
   app.use('/widget', express.static(fileURLToPath(new URL('../public', import.meta.url))));
 
   // Authenticated API

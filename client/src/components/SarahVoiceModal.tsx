@@ -988,11 +988,17 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?`;
 
     appendNewTranscript('sarah', immediateGreetingText);
-    await sendHttpTurn('', { ...ctx, is_initial: true, skip_transcript_append: true });
     const topicToUse = initialPayload?.initialTopic || initialTopic;
     if (topicToUse) {
       appendNewTranscript('user', topicToUse);
       await sendHttpTurn(topicToUse, ctx);
+    } else {
+      // Speak greeting immediately on Frame 0 while user click gesture is active (0ms lag, never blocked by network!)
+      lastSarahReplyRef.current = immediateGreetingText;
+      isSpeakingRef.current = true;
+      setIsSpeaking(true);
+      setSarahVolume(0.75);
+      playBrowserFallbackVoice(immediateGreetingText);
     }
   };
 

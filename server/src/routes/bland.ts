@@ -20,12 +20,35 @@ import {
   BLAND_AI_USER_ID,
 } from '../services/bland.ts';
 import { one, q, insert } from '../db/index.ts';
+import { publish } from '../realtime.ts';
 import {
   executeSarahTool,
   upsertReceptionistLeadFromContext,
   checkReceptionistWorkHours,
   RECEPTIONIST_WORK_HOURS_LABEL,
+  handleSarahHttpTurn,
 } from '../services/sarahVoiceService.ts';
+
+function escapeXml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+const inboundCallHistoryMap = new Map<
+  string,
+  {
+    history: Array<{ speaker: string; text: string }>;
+    lead_id?: string | null;
+    prospect_name?: string;
+    prospect_phone?: string;
+    address?: string;
+    product_interest?: string;
+  }
+>();
 
 export const blandPublic = Router();
 export const blandAuth = Router();
@@ -78,20 +101,72 @@ blandPublic.all('/inbound', async (req, res) => {
   try {
     const dir = await getInboundDirectory();
     const cfg = await getBlandConfig();
-    const callerPhone = String(req.body?.from || req.query?.from || req.body?.caller_phone || '');
-    const callerName = String(req.body?.caller_name || req.query?.caller_name || '');
-    const callerAddress = String(req.body?.address || req.query?.address || '');
+    const callSessionKey = String(
+      req.body?.CallSid ||
+        req.query?.CallSid ||
+        req.body?.call_id ||
+        req.query?.call_id ||
+        req.body?.From ||
+        req.body?.from ||
+        req.query?.From ||
+        req.query?.from ||
+        req.body?.caller_phone ||
+        req.query?.caller_phone ||
+        'inbound-default'
+    );
+    const prevSession = inboundCallHistoryMap.get(callSessionKey) || { history: [] };
+
+    const callerPhone = String(
+      req.body?.From ||
+        req.body?.from ||
+        req.query?.From ||
+        req.query?.from ||
+        req.body?.caller_phone ||
+        req.query?.caller_phone ||
+        prevSession.prospect_phone ||
+        ''
+    );
+    const callerName = String(
+      req.body?.caller_name || req.query?.caller_name || req.body?.CallerName || prevSession.prospect_name || ''
+    );
+    const callerAddress = String(
+      req.body?.address || req.query?.address || prevSession.address || ''
+    );
     const requestedPerson = req.body?.requested_person || req.body?.transfer_to || req.query?.transfer_to;
     const appointmentType = req.body?.appointment_type || req.query?.appointment_type;
     const preferredDatetime = req.body?.preferred_datetime || req.query?.preferred_datetime;
-    const productLine = req.body?.product_line || req.query?.product_line;
+    const productLine = req.body?.product_line || req.query?.product_line || prevSession.product_interest;
+    const userSpeech = String(
+      req.body?.SpeechResult ||
+        req.body?.message ||
+        req.body?.transcript ||
+        req.body?.text ||
+        req.query?.SpeechResult ||
+        req.query?.message ||
+        req.query?.transcript ||
+        ''
+    ).trim();
+
+    const isTwimlRequest = Boolean(
+      req.body?.CallSid ||
+        req.query?.CallSid ||
+        req.query?.format === 'twiml' ||
+        String(req.headers.accept || '').includes('xml')
+    );
 
     let transferResult: any = null;
     let appointmentResult: any = null;
     let activityId: string | null = null;
-    let inboundLeadId: string | null = req.body?.lead_id || req.query?.lead_id || null;
+    let inboundLeadId: string | null =
+      req.body?.lead_id || req.query?.lead_id || prevSession.lead_id || null;
 
-    if (req.method === 'POST') {
+    const defaultOpeningSentence =
+      'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?';
+    let spokenReply = defaultOpeningSentence;
+    let turnAudioBase64: string | null = null;
+    let turnAudioMime = 'audio/wav';
+
+    if (req.method === 'POST' || userSpeech || isTwimlRequest) {
       // Automatically create or update the Call-In Lead in CRM when caller details are available
       if (callerPhone || callerName || callerAddress) {
         const upsertedId = await upsertReceptionistLeadFromContext(
@@ -101,7 +176,7 @@ blandPublic.all('/inbound', async (req, res) => {
             prospect_name: callerName,
             prospect_phone: callerPhone,
             address: callerAddress,
-            state: req.body?.state || 'AZ',
+            state: req.body?.state || req.body?.FromState || 'AZ',
             product_interest: productLine,
             source_channel: 'call_in_lead',
           },
@@ -112,11 +187,64 @@ blandPublic.all('/inbound', async (req, res) => {
 
       const workHoursStatus = checkReceptionistWorkHours({
         mode: 'inbound',
-        force_work_hours: Boolean(req.body?.force_work_hours),
-        simulated_now_iso: req.body?.simulated_now_iso,
+        force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
+        simulated_now_iso: String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined,
       });
 
-      if (requestedPerson && !cfg.is_on_warm_transfer) {
+      // If caller spoke (via carrier SpeechResult or JSON message/transcript), run full Receptionist conversational brain!
+      if (userSpeech) {
+        const turnResult = await handleSarahHttpTurn({
+          message: userSpeech,
+          history: prevSession.history,
+          skip_inline_tts: isTwimlRequest || Boolean(req.body?.skip_inline_tts),
+          context: {
+            mode: 'inbound',
+            source_channel: 'call_in_lead',
+            lead_id: inboundLeadId || undefined,
+            prospect_name: callerName,
+            prospect_phone: callerPhone,
+            address: callerAddress,
+            state: req.body?.state || req.body?.FromState || 'AZ',
+            product_interest: productLine,
+            on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
+            force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
+            simulated_now_iso: String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined,
+          },
+        });
+        if (turnResult?.reply) {
+          spokenReply = turnResult.reply;
+        }
+        turnAudioBase64 = turnResult?.audio_base64 || null;
+        turnAudioMime = turnResult?.audio_mime || 'audio/wav';
+        if (turnResult?.lead_id) inboundLeadId = turnResult.lead_id;
+        if (turnResult?.transfer) transferResult = turnResult.transfer;
+        if (turnResult?.appointment) appointmentResult = turnResult.appointment;
+
+        const nextHistory = [
+          ...prevSession.history.slice(-14),
+          { speaker: 'user', text: userSpeech },
+          { speaker: 'sarah', text: spokenReply },
+        ];
+        inboundCallHistoryMap.set(callSessionKey, {
+          history: nextHistory,
+          lead_id: inboundLeadId,
+          prospect_name: turnResult?.prospect_name || callerName,
+          prospect_phone: turnResult?.prospect_phone || callerPhone,
+          address: turnResult?.prospect_address || callerAddress,
+          product_interest: turnResult?.product_interest || productLine,
+        });
+      } else {
+        inboundCallHistoryMap.set(callSessionKey, {
+          history: [{ speaker: 'sarah', text: spokenReply }],
+          lead_id: inboundLeadId,
+          prospect_name: callerName,
+          prospect_phone: callerPhone,
+          address: callerAddress,
+          product_interest: productLine,
+        });
+      }
+
+      if (requestedPerson && !cfg.is_on_warm_transfer && !transferResult) {
         transferResult = await executeSarahTool(
           'whisper_warm_transfer',
           {
@@ -136,13 +264,13 @@ blandPublic.all('/inbound', async (req, res) => {
             address: callerAddress,
             state: req.body?.state || 'AZ',
             product_interest: productLine,
-            force_work_hours: Boolean(req.body?.force_work_hours),
-            simulated_now_iso: req.body?.simulated_now_iso,
+            force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
+            simulated_now_iso: String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined,
           }
         );
       }
 
-      if (appointmentType || (requestedPerson && cfg.is_on_warm_transfer)) {
+      if ((appointmentType || (requestedPerson && cfg.is_on_warm_transfer)) && !appointmentResult) {
         appointmentResult = await executeSarahTool(
           'book_appointment',
           {
@@ -173,7 +301,7 @@ blandPublic.all('/inbound', async (req, res) => {
       const inboundAct = await insert('activities', {
         type: 'call',
         subject: `🎧 Receptionist Inbound Call on (480) 331-9455 — ${callerName || callerPhone || 'Call-In Lead'}`,
-        body: `Inbound call answered immediately by Receptionist on (480) 331-9455 (+14803319455).\nOfficial Work Hours: ${RECEPTIONIST_WORK_HOURS_LABEL} (Open Now: ${workHoursStatus.isOpen ? 'YES' : 'NO — No Warm Transfers Outside Work Hours'})\nLead Source Tag: Call-In Lead\nCaller: ${callerName || 'Pending Name'} (${callerPhone || 'Pending Phone'})${callerAddress ? `\nAddress: ${callerAddress}` : ''}${transferResult?.success ? `\nLive Outbound Call to ${transferResult.recipient_name} (${transferResult.recipient_phone}) Initiated (Call ID: ${transferResult.bland_call_id || 'Pending'}): "${transferResult.private_whisper_delivered}"` : transferResult?.outside_work_hours ? `\nWarm Transfer Blocked Outside Work Hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Transitioned to Appointment Booking` : ''}${appointmentResult?.success ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
+        body: `Inbound call answered immediately by Receptionist on (480) 331-9455 (+14803319455).\nOfficial Work Hours: ${RECEPTIONIST_WORK_HOURS_LABEL} (Open Now: ${workHoursStatus.isOpen ? 'YES' : 'NO — No Warm Transfers Outside Work Hours'})\nLead Source Tag: Call-In Lead\nCaller: ${callerName || 'Pending Name'} (${callerPhone || 'Pending Phone'})${callerAddress ? `\nAddress: ${callerAddress}` : ''}${userSpeech ? `\nCaller Said: "${userSpeech}"\nReceptionist Replied: "${spokenReply}"` : ''}${transferResult?.success ? `\nLive Outbound Call to ${transferResult.recipient_name} (${transferResult.recipient_phone}) Initiated (Call ID: ${transferResult.bland_call_id || 'Pending'}): "${transferResult.private_whisper_delivered}"` : transferResult?.outside_work_hours ? `\nWarm Transfer Blocked Outside Work Hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Transitioned to Appointment Booking` : ''}${appointmentResult?.success ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
         related_type: 'lead',
         related_id: appointmentResult?.lead_id || inboundLeadId || null,
         user_id: BLAND_AI_USER_ID,
@@ -204,11 +332,52 @@ blandPublic.all('/inbound', async (req, res) => {
           caller_name: callerName,
           caller_address: callerAddress,
           lead_id: inboundLeadId,
+          user_speech: userSpeech || null,
+          receptionist_reply: spokenReply,
           transfer_result: transferResult,
           appointment_result: appointmentResult,
         },
       });
       activityId = inboundAct?.id || null;
+
+      // Broadcast real-time SSE notification so any open CRM browser window pops open & answers immediately!
+      try {
+        publish('inbox', 'inbound_call_ringing', {
+          call_id: callSessionKey,
+          line: '(480) 331-9455',
+          line_e164: '+14803319455',
+          caller_phone: callerPhone,
+          caller_name: callerName,
+          caller_address: callerAddress,
+          lead_id: inboundLeadId,
+          user_speech: userSpeech || null,
+          reply: spokenReply,
+          answered_immediately: true,
+        });
+      } catch {
+        // ignore SSE error
+      }
+    }
+
+    // If called by a PSTN/SIP/Twilio/Telnyx/Google Voice forwarding trunk expecting TwiML/TeXML voice XML,
+    // return interactive <Gather input="speech"> voice instructions (and <Dial>+16024569681</Dial> on warm transfer)!
+    if (isTwimlRequest) {
+      res.setHeader('Content-Type', 'text/xml; charset=utf-8');
+      if (transferResult?.success) {
+        const targetPhone = transferResult.recipient_phone || '+16024569681';
+        const holdXml = escapeXml(
+          transferResult.hold_message ||
+            spokenReply ||
+            'Please hold for just a moment while I call King Amen Ra on 602-456-9681 and connect you.'
+        );
+        return res.status(200).send(
+          `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Say voice="Polly.Joanna">${holdXml}</Say>\n  <Dial callerId="+14803319455" timeout="25">${escapeXml(targetPhone)}</Dial>\n</Response>`
+        );
+      }
+      const actionUrl = `/api/bland/inbound?format=twiml${inboundLeadId ? `&lead_id=${encodeURIComponent(inboundLeadId)}` : ''}`;
+      return res.status(200).send(
+        `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Gather input="speech dtmf" speechTimeout="auto" language="en-US" action="${escapeXml(actionUrl)}" method="POST">\n    <Say voice="Polly.Joanna">${escapeXml(spokenReply)}</Say>\n  </Gather>\n  <Redirect method="POST">${escapeXml(actionUrl)}</Redirect>\n</Response>`
+      );
     }
 
     const currentWorkHours = checkReceptionistWorkHours({
@@ -238,8 +407,10 @@ blandPublic.all('/inbound', async (req, res) => {
       caller_phone: callerPhone,
       caller_name: callerName,
       caller_address: callerAddress,
-      first_sentence:
-        'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?',
+      first_sentence: defaultOpeningSentence,
+      reply: spokenReply,
+      audio_base64: turnAudioBase64,
+      audio_mime: turnAudioMime,
       transfer_phone_number: '+16024569681',
       directory_count: dir.directory.length,
       transfer_list: dir.transfer_list,

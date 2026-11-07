@@ -5,7 +5,6 @@ import { useAuth } from '../lib/auth';
 import { CallPanel } from './CallPanel';
 import { OutboundScriptModal } from './OutboundScriptModal';
 import { WarmTransferModal } from './WarmTransferModal';
-import { BlandCallModal } from './BlandCallModal';
 
 export const PowerDialer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
   const { user } = useAuth();
@@ -18,7 +17,6 @@ export const PowerDialer: React.FC<{ isOpen: boolean; onClose: () => void }> = (
   const [activeCallContact, setActiveCallContact] = useState<any>(null);
   const [isScriptOpen, setIsScriptOpen] = useState<boolean>(false);
   const [isWarmTransferOpen, setIsWarmTransferOpen] = useState<boolean>(false);
-  const [isBlandModalOpen, setIsBlandModalOpen] = useState<boolean>(false);
   const [popupBlocked, setPopupBlocked] = useState<boolean>(false);
   const [gvSlot, setGvSlot] = useState<GvAccountSlot>(getStoredGvSlot());
   const [copiedPhone, setCopiedPhone] = useState<boolean>(false);
@@ -716,7 +714,20 @@ export const PowerDialer: React.FC<{ isOpen: boolean; onClose: () => void }> = (
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => setIsBlandModalOpen(true)}
+                    onClick={() => {
+                      window.dispatchEvent(
+                        new CustomEvent('iwg-open-sarah-voice', {
+                          detail: {
+                            mode: 'outbound',
+                            lead_id: currentLead.id,
+                            prospect_name: `${currentLead.first_name || ''} ${currentLead.last_name || ''}`.trim() || 'Valued Client',
+                            phone: currentLead.phone,
+                            state: currentLead.state || 'AZ',
+                            address: [currentLead.address, currentLead.city, currentLead.state, currentLead.zip].filter(Boolean).join(', '),
+                          },
+                        })
+                      );
+                    }}
                     style={{
                       padding: '0.65rem 0.85rem',
                       fontWeight: 700,
@@ -982,20 +993,6 @@ export const PowerDialer: React.FC<{ isOpen: boolean; onClose: () => void }> = (
             setUndispositionedLeadId(null);
             setDispositionError('');
             // Auto advance to next in queue
-            if (currentIndex < queue.length - 1) {
-              setCurrentIndex((i) => i + 1);
-            }
-          }}
-        />
-      )}
-
-      {isBlandModalOpen && currentLead && (
-        <BlandCallModal
-          isOpen={isBlandModalOpen}
-          lead={currentLead}
-          onClose={() => setIsBlandModalOpen(false)}
-          onCallDispatched={() => {
-            setUndispositionedLeadId(currentLead.id);
             if (currentIndex < queue.length - 1) {
               setCurrentIndex((i) => i + 1);
             }

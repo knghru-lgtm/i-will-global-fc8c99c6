@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom';
 import { CallPanel } from '../components/CallPanel';
 import { BookAppointmentModal } from '../components/BookAppointmentModal';
 import { WarmTransferModal } from '../components/WarmTransferModal';
-import { BlandCallModal } from '../components/BlandCallModal';
 import * as XLSX from 'xlsx';
 import { 
   Upload, 
@@ -51,7 +50,6 @@ export const LeadsPage: React.FC = () => {
   // Schedule appointment modal state
   const [activeScheduleLead, setActiveScheduleLead] = useState<any>(null);
   const [activeWarmTransferLead, setActiveWarmTransferLead] = useState<any>(null);
-  const [activeBlandLead, setActiveBlandLead] = useState<any>(null);
 
   // Create lead modal state
   const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false);
@@ -1986,16 +1984,6 @@ export const LeadsPage: React.FC = () => {
           contact={activeWarmTransferLead}
           onClose={() => setActiveWarmTransferLead(null)}
           onTransferComplete={() => loadLeads()}
-        />
-      )}
-
-      {/* Bland AI Outbound Call Modal */}
-      {activeBlandLead && (
-        <BlandCallModal
-          isOpen={Boolean(activeBlandLead)}
-          lead={activeBlandLead}
-          onClose={() => setActiveBlandLead(null)}
-          onCallDispatched={() => loadLeads()}
         />
       )}
 
