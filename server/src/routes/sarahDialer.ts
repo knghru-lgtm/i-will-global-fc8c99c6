@@ -161,7 +161,7 @@ sarahPublic.all('/inbound', async (req, res) => {
       req.body?.lead_id || req.query?.lead_id || prevSession.lead_id || null;
 
     const defaultOpeningSentence =
-      'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?';
+      'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
     let spokenReply = defaultOpeningSentence;
     let turnAudioBase64: string | null = null;
     let turnAudioMime = 'audio/wav';

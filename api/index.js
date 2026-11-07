@@ -9689,7 +9689,7 @@ function buildSarahSystemInstruction(ctx) {
   const hasValidAddress = !isPlaceholderProspectAddress(ctx?.address);
   const workHours = checkReceptionistWorkHours(ctx);
   return `You are Sarah, the Receptionist, 6-Division Insurance Specialist, and Outbound Caller on line ${SARAH_MAIN_LINE_DISPLAY} (${SARAH_MAIN_LINE_E164}) for IWG Insurance and Financial Services (iwillglobal.com).
-NEVER refer to yourself as "AI", "AI Receptionist", "Virtual Receptionist", or "Voice AI" to any caller\u2014simply refer to yourself as the Receptionist (or Sarah, the Receptionist).
+NEVER refer to yourself as "AI", "AI Receptionist", "Virtual Receptionist", "Voice AI", or "your Receptionist" to any caller\u2014always introduce yourself by your name, "Sarah" (e.g., "This is Sarah speaking. How may I direct your call today?").
 You represent a 100% free fiduciary advisory comparing over 104 premier carriers with zero broker fees, led by Principal Broker and Licensed Senior Advisor King Amen Ra (NPN: 16094432, Direct Transfer Line: ${KING_DIRECT_LINE_E164}) and Chief Operating Officer Aneesha Sullivan, PA (Physician Assistant & Principal Governance).
 Every interaction must reflect our four core pillars: World-Class Excellence, Uncompromising Integrity, Radical Service Orientation, and Genuine Care & Empathy.
 
@@ -9765,9 +9765,9 @@ Whenever a prospect or caller wants to schedule/book an appointment, you MUST fo
 ================================================================================
 MODE 1: RECEPTIONIST WHEN PEOPLE CALL ${SARAH_MAIN_LINE_DISPLAY} (INBOUND)
 ================================================================================
-1. REQUIRED INBOUND RECEPTIONIST GREETING (ANSWER RIGHT AWAY):
+1. REQUIRED INBOUND GREETING (ANSWER RIGHT AWAY):
    When greeting an inbound caller on ${SARAH_MAIN_LINE_DISPLAY}, answer immediately right away:
-   "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?"
+   "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"
 
 2. 42-MEMBER TEAM DIRECTORY ROUTING & AUTOMATIC WHISPER TRANSFER (TRANSFER UPON REQUEST):
    If the caller asks to be transferred, asks to speak with an advisor right now, or asks for any specific person on the I Will Global Team Directory (such as King Amen Ra, Aneesha Sullivan PA, Sarah Jenkins, Marcus Vance, JaKeeta Sullivan, Shakira Granger, Kamille Martinez, Regina McCullough, Robert Chen, etc.):
@@ -11127,7 +11127,8 @@ async function synthesizeSarahNeuralAudio(text) {
   }
   const runPromise = (async () => {
     const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    const ttsModels = [workingTtsModel || "gemini-2.5-flash-preview-tts"];
+    const baseModels = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview"];
+    const ttsModels = workingTtsModel ? [workingTtsModel, ...baseModels] : baseModels;
     for (const modelName of [...new Set(ttsModels)]) {
       try {
         const r = await Promise.race([
@@ -11150,7 +11151,7 @@ async function synthesizeSarahNeuralAudio(text) {
               }
             }
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("TTS timeout")), 1400))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("TTS timeout")), 5500))
         ]);
         const inline = r?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
         if (inline?.data) {
@@ -11179,6 +11180,14 @@ async function synthesizeSarahNeuralAudio(text) {
   } finally {
     SARAH_TTS_INFLIGHT.delete(cleanText);
   }
+}
+if (config.gemini.apiKey) {
+  const defaultGreeting = "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?";
+  const { firstChunk, restChunk } = splitIntoFastSpeechChunks(defaultGreeting);
+  if (firstChunk) synthesizeSarahNeuralAudio(firstChunk).catch(() => {
+  });
+  if (restChunk) synthesizeSarahNeuralAudio(restChunk).catch(() => {
+  });
 }
 var NON_NAME_WORDS_RE = /^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|telephone|phone|video|in-person|person|appointment|schedule|book|confirm|yes|yeah|yep|okay|ok|please|thank|thanks|hello|hi|hey|my|the|and|for|with|about|want|need|would|like|can|you|help|me|set|up|an|at|on|in|to|from|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale|peoria|tucson)$/i;
 function toTitleCaseWords(input) {
@@ -11575,7 +11584,7 @@ async function handleSarahHttpTurn(params) {
   const workHoursNow = checkReceptionistWorkHours(sessionContext);
   const firstName = isGenericLeadName ? "there" : (sessionContext.prospect_name || "there").split(/\s+/)[0] || "there";
   if (params.is_initial || !rawMessage) {
-    const openingReply = sessionContext.mode === "outbound" ? `Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?` : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?`;
+    const openingReply = sessionContext.mode === "outbound" ? `Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?` : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
     const tts2 = await resolveTts(openingReply);
     return {
       ok: true,
@@ -11911,7 +11920,7 @@ function getSarahDirectLiveSessionConfig(params = {}) {
     source_channel: params.source_channel || (mode === "outbound" ? "outbound" : "website_traffic")
   };
   const firstName = isGenericName ? "there" : (sessionContext.prospect_name || "there").split(/\s+/)[0] || "there";
-  const initialGreetingPrompt = mode === "outbound" ? `[OUTBOUND CALL CONNECTED ON ${SARAH_MAIN_LINE_DISPLAY} TO PROSPECT: ${sessionContext.prospect_name} (Phone: ${sessionContext.prospect_phone}, State: ${sessionContext.state})]. Begin Step 1 of the Outbound Script immediately by greeting them warmly: "Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?"` : `[INBOUND CALL CONNECTED ON ${SARAH_MAIN_LINE_DISPLAY}]. Answer right away as the Receptionist with your opening greeting: "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?"`;
+  const initialGreetingPrompt = mode === "outbound" ? `[OUTBOUND CALL CONNECTED ON ${SARAH_MAIN_LINE_DISPLAY} TO PROSPECT: ${sessionContext.prospect_name} (Phone: ${sessionContext.prospect_phone}, State: ${sessionContext.state})]. Begin Step 1 of the Outbound Script immediately by greeting them warmly: "Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?"` : `[INBOUND CALL CONNECTED ON ${SARAH_MAIN_LINE_DISPLAY}]. Answer right away as Sarah with your opening greeting: "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"`;
   const wsUrl = config.gemini.apiKey ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(
     config.gemini.apiKey
   )}` : "";
@@ -12034,7 +12043,7 @@ sarahPublic.all("/inbound", async (req, res) => {
     let appointmentResult = null;
     let activityId = null;
     let inboundLeadId = req.body?.lead_id || req.query?.lead_id || prevSession.lead_id || null;
-    const defaultOpeningSentence = "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?";
+    const defaultOpeningSentence = "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?";
     let spokenReply = defaultOpeningSentence;
     let turnAudioBase64 = null;
     let turnAudioMime = "audio/wav";

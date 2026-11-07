@@ -294,10 +294,14 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
+      const nonMaleVoices = voices.filter(
+        (v) => /en/i.test(v.lang) && !/\b(david|mark|guy|james|richard|george|daniel|christopher|eric|roger|steffan|ryan|male)\b/i.test(v.name)
+      );
       const naturalVoice =
-        voices.find((v) => /natural|aria|jenny|ana|ava|samantha|google us english/i.test(v.name) && /en/i.test(v.lang)) ||
-        voices.find((v) => /en-US/i.test(v.lang) && !/zira/i.test(v.name)) ||
-        voices.find((v) => /en/i.test(v.lang));
+        nonMaleVoices.find((v) => /natural|aria|jenny|ana|ava|samantha|sonia|michelle|google us english/i.test(v.name)) ||
+        nonMaleVoices.find((v) => /zira|victoria|karen|moira|tessa|female/i.test(v.name)) ||
+        nonMaleVoices[0] ||
+        voices[0];
       if (naturalVoice) utter.voice = naturalVoice;
       utter.rate = 0.96; // Calm and relaxed cadence
       utter.pitch = 0.98;
@@ -985,20 +989,14 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const immediateGreetingText =
       ctx.mode === 'outbound'
         ? `Hello ${greetFirst}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?`
-        : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?`;
+        : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
 
     appendNewTranscript('sarah', immediateGreetingText);
+    await sendHttpTurn('', { ...ctx, is_initial: true, skip_transcript_append: true });
     const topicToUse = initialPayload?.initialTopic || initialTopic;
     if (topicToUse) {
       appendNewTranscript('user', topicToUse);
       await sendHttpTurn(topicToUse, ctx);
-    } else {
-      // Speak greeting immediately on Frame 0 while user click gesture is active (0ms lag, never blocked by network!)
-      lastSarahReplyRef.current = immediateGreetingText;
-      isSpeakingRef.current = true;
-      setIsSpeaking(true);
-      setSarahVolume(0.75);
-      playBrowserFallbackVoice(immediateGreetingText);
     }
   };
 

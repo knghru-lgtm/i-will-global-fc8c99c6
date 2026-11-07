@@ -1,6 +1,13 @@
 (function () {
-  if (window.__IWG_GV_RECEPTIONIST_ACTIVE__) return;
+  if (typeof window.__IWG_GV_RECEPTIONIST_CLEANUP__ === 'function') {
+    try {
+      window.__IWG_GV_RECEPTIONIST_CLEANUP__();
+    } catch {}
+  }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
+
+  const OPENING_GREETING =
+    'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
 
   let autoAnswerEnabled = true;
   let callActive = false;
@@ -9,6 +16,8 @@
   let lastAnswerClickTs = 0;
   let lastAutoDialTs = 0;
   let callHistory = [];
+  let activeAudio = null;
+  let preloadedGreeting = null;
   let sessionContext = {
     mode: 'inbound',
     lead_id: '',
@@ -38,9 +47,9 @@
     if (!el) return;
     try {
       el.focus?.();
-      [' pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((evtName) => {
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((evtName) => {
         el.dispatchEvent(
-          new MouseEvent(evtName.trim(), {
+          new MouseEvent(evtName, {
             bubbles: true,
             cancelable: true,
             view: window,
@@ -92,30 +101,84 @@
     });
   }
 
-  function speakOutLoud(text, onDone) {
+  // Pre-fetch Sarah's natural Vindemiatrix neural voice for the opening greeting so it plays in 0ms on answer!
+  async function preloadSarahNaturalGreeting() {
+    try {
+      const turn = await callSarahBackend('/api/sarah/turn', {
+        is_initial: true,
+        context: { mode: 'inbound' },
+      });
+      if (turn && turn.audio_base64) {
+        let restAudio = null;
+        if (turn.rest_text) {
+          const r2 = await callSarahBackend('/api/sarah/tts', { text: turn.rest_text });
+          restAudio = r2?.audio_base64 || null;
+        }
+        preloadedGreeting = {
+          audio_base64: turn.audio_base64,
+          audio_mime: turn.audio_mime || 'audio/wav',
+          rest_audio_base64: restAudio,
+        };
+      }
+    } catch {}
+  }
+  preloadSarahNaturalGreeting();
+
+  function playSingleWavBase64(base64, mime = 'audio/wav', maxMs = 15000) {
+    return new Promise((resolve) => {
+      if (!base64) return resolve(false);
+      try {
+        if (activeAudio) {
+          try {
+            activeAudio.pause();
+          } catch {}
+          activeAudio = null;
+        }
+        const audio = new Audio(`data:${mime};base64,${base64}`);
+        activeAudio = audio;
+        let settled = false;
+        const done = (ok) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (activeAudio === audio) activeAudio = null;
+          resolve(ok);
+        };
+        const timer = setTimeout(() => done(true), maxMs);
+        audio.onended = () => done(true);
+        audio.onerror = () => done(false);
+        const p = audio.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => done(false));
+        }
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  function speakEmergencyFemaleFallback(text, onDone) {
     if (!text || !('speechSynthesis' in window)) {
       isSpeaking = false;
+      startListening();
       onDone?.();
       return;
-    }
-    isSpeaking = true;
-    if (recognition && recRunning) {
-      try {
-        recognition.stop();
-        recRunning = false;
-      } catch {}
     }
     try {
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
-      const preferred =
-        voices.find((v) => /natural|aria|jenny|ana|ava|samantha|google us english/i.test(v.name) && /en/i.test(v.lang)) ||
-        voices.find((v) => /en-US/i.test(v.lang)) ||
+      const nonMaleVoices = voices.filter(
+        (v) => /en/i.test(v.lang) && !/\b(david|mark|guy|james|richard|george|daniel|christopher|eric|roger|steffan|ryan|male)\b/i.test(v.name)
+      );
+      const femaleVoice =
+        nonMaleVoices.find((v) => /natural|aria|jenny|ana|ava|samantha|sonia|michelle|google us english/i.test(v.name)) ||
+        nonMaleVoices.find((v) => /zira|victoria|karen|moira|tessa|female/i.test(v.name)) ||
+        nonMaleVoices[0] ||
         voices[0];
-      if (preferred) utter.voice = preferred;
-      utter.rate = 0.97;
-      utter.pitch = 0.99;
+      if (femaleVoice) utter.voice = femaleVoice;
+      utter.rate = 0.96;
+      utter.pitch = 1.02;
 
       let finished = false;
       const finish = () => {
@@ -142,6 +205,49 @@
     }
   }
 
+  async function speakSarahNaturalVoice(text, audioBase64, audioMime, restText, preloadedRestBase64, onDone) {
+    isSpeaking = true;
+    if (recognition && recRunning) {
+      try {
+        recognition.stop();
+        recRunning = false;
+      } catch {}
+    }
+
+    let primaryBase64 = audioBase64;
+    let primaryMime = audioMime || 'audio/wav';
+    if (!primaryBase64 && text) {
+      const ttsRes = await callSarahBackend('/api/sarah/tts', { text });
+      if (ttsRes?.audio_base64) {
+        primaryBase64 = ttsRes.audio_base64;
+        primaryMime = ttsRes.audio_mime || 'audio/wav';
+      }
+    }
+
+    if (primaryBase64) {
+      const restPromise =
+        preloadedRestBase64
+          ? Promise.resolve({ audio_base64: preloadedRestBase64, audio_mime: 'audio/wav' })
+          : restText
+          ? callSarahBackend('/api/sarah/tts', { text: restText })
+          : Promise.resolve(null);
+
+      const ok1 = await playSingleWavBase64(primaryBase64, primaryMime);
+      if (ok1) {
+        const restTts = await restPromise;
+        if (restTts?.audio_base64) {
+          await playSingleWavBase64(restTts.audio_base64, restTts.audio_mime || 'audio/wav');
+        }
+        isSpeaking = false;
+        startListening();
+        onDone?.();
+        return;
+      }
+    }
+
+    speakEmergencyFemaleFallback(text, onDone);
+  }
+
   function startListening() {
     if (!callActive || isSpeaking || recRunning) return;
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -166,12 +272,12 @@
         if (!clean || clean.length < 2) return;
 
         turnInFlight = true;
-        updateStatusBanner(`🎧 Caller: "${clean.slice(0, 42)}..." — Receptionist Replying`, '#38bdf8');
+        updateStatusBanner(`🎧 Caller: "${clean.slice(0, 42)}..." — Sarah Replying`, '#38bdf8');
         callHistory.push({ speaker: 'user', text: clean });
 
         const res = await callSarahBackend('/api/sarah/turn', {
           message: clean,
-          skip_inline_tts: true,
+          skip_inline_tts: false,
           history: callHistory.slice(-12),
           context: sessionContext,
         });
@@ -186,14 +292,21 @@
           res?.reply ||
           'I would be happy to help you schedule an appointment with Principal Broker King Amen Ra. May I get your full name, phone number, and street address?';
         callHistory.push({ speaker: 'sarah', text: reply });
-        updateStatusBanner(`🎙️ Receptionist Speaking on (480) 331-9455`, '#10b981');
-        speakOutLoud(reply, () => {
-          if (res?.transfer?.success && res?.transfer?.recipient_phone) {
-            const cleanDigits = String(res.transfer.recipient_phone).replace(/\D/g, '');
-            const e164 = cleanDigits.length === 10 ? `+1${cleanDigits}` : `+${cleanDigits}`;
-            window.open(`https://voice.google.com/u/0/calls?a=nc,${encodeURIComponent(e164)}`, '_blank');
+        updateStatusBanner(`🎙️ Sarah Speaking (Vindemiatrix Natural Voice) • (480) 331-9455`, '#10b981');
+        await speakSarahNaturalVoice(
+          reply,
+          res?.audio_base64 || null,
+          res?.audio_mime || 'audio/wav',
+          res?.rest_text || '',
+          null,
+          () => {
+            if (res?.transfer?.success && res?.transfer?.recipient_phone) {
+              const cleanDigits = String(res.transfer.recipient_phone).replace(/\D/g, '');
+              const e164 = cleanDigits.length === 10 ? `+1${cleanDigits}` : `+${cleanDigits}`;
+              window.open(`https://voice.google.com/u/0/calls?a=nc,${encodeURIComponent(e164)}`, '_blank');
+            }
           }
-        });
+        );
       };
       rec.onend = () => {
         recRunning = false;
@@ -247,11 +360,9 @@
       state: 'AZ',
     };
 
-    const greeting =
-      'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?';
-    callHistory.push({ speaker: 'sarah', text: greeting });
+    callHistory.push({ speaker: 'sarah', text: OPENING_GREETING });
 
-    updateStatusBanner('🟢 Call Answered Immediately on (480) 331-9455 — Receptionist Speaking', '#10b981');
+    updateStatusBanner('🟢 Call Answered Immediately on (480) 331-9455 — Sarah Speaking', '#10b981');
 
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       chrome.runtime.sendMessage({
@@ -267,8 +378,14 @@
     }
 
     setTimeout(() => {
-      speakOutLoud(greeting);
-    }, 350);
+      speakSarahNaturalVoice(
+        OPENING_GREETING,
+        preloadedGreeting?.audio_base64 || null,
+        preloadedGreeting?.audio_mime || 'audio/wav',
+        '',
+        preloadedGreeting?.rest_audio_base64 || null
+      );
+    }, 300);
   }
 
   function scanGoogleVoiceDom() {
@@ -320,13 +437,19 @@
       });
       if (!hasHangupBtn) {
         callActive = false;
+        if (activeAudio) {
+          try {
+            activeAudio.pause();
+          } catch {}
+          activeAudio = null;
+        }
         if (recognition && recRunning) {
           try {
             recognition.stop();
           } catch {}
           recRunning = false;
         }
-        updateStatusBanner('🟢 IWG Receptionist Auto-Answer ON • (480) 331-9455', '#10b981');
+        updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
       }
     }
   }
@@ -341,8 +464,8 @@
     });
   }
 
-  updateStatusBanner('🟢 IWG Receptionist Auto-Answer ON • (480) 331-9455', '#10b981');
-  setInterval(scanGoogleVoiceDom, 150);
+  updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
+  const intervalId = setInterval(scanGoogleVoiceDom, 150);
 
   const observer = new MutationObserver(() => {
     scanGoogleVoiceDom();
@@ -350,4 +473,23 @@
   if (document.body) {
     observer.observe(document.body, { childList: true, subtree: true });
   }
+
+  window.__IWG_GV_RECEPTIONIST_CLEANUP__ = () => {
+    clearInterval(intervalId);
+    try {
+      observer.disconnect();
+    } catch {}
+    if (activeAudio) {
+      try {
+        activeAudio.pause();
+      } catch {}
+      activeAudio = null;
+    }
+    if (recognition && recRunning) {
+      try {
+        recognition.stop();
+      } catch {}
+      recRunning = false;
+    }
+  };
 })();
