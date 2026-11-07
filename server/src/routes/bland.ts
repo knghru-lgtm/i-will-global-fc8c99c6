@@ -782,7 +782,10 @@ blandAuth.post('/test-call', async (req, res) => {
       requested_person,
       transfer_to,
     } = req.body;
-    const phoneToCall = test_phone || '+16232230165';
+    const phoneToCall = String(test_phone || '').trim();
+    if (!phoneToCall) {
+      return res.status(400).json({ error: 'Please enter a phone number to place a test call.' });
+    }
     const requestedAdvisor = requested_person || transfer_to;
 
     const result = await sendBlandCall({

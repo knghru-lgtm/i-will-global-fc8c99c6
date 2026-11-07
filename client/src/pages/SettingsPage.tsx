@@ -100,7 +100,7 @@ export const SettingsPage: React.FC = () => {
   const [blandSaving, setBlandSaving] = useState<boolean>(false);
   const [blandSuccess, setBlandSuccess] = useState<string>('');
   const [blandError, setBlandError] = useState<string>('');
-  const [blandTestPhone, setBlandTestPhone] = useState<string>('+16232230165');
+  const [blandTestPhone, setBlandTestPhone] = useState<string>('');
   const [blandTesting, setBlandTesting] = useState<boolean>(false);
   const [blandTestResult, setBlandTestResult] = useState<string>('');
 

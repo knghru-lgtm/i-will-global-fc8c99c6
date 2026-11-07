@@ -35,7 +35,7 @@ export function openSarahVoiceModal(opts?: {
     new CustomEvent('iwg-open-sarah-voice', {
       detail: {
         mode: opts?.mode || 'outbound',
-        phone: opts?.leadPhone || '6232230165',
+        phone: opts?.leadPhone || '',
         prospect_name: opts?.leadName || 'Valued Beneficiary',
         state: opts?.leadState || 'AZ',
         autoStart: opts?.autoStart ?? false,
@@ -765,7 +765,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         sessionCtxRef.current.prospect_name = res.prospect_name;
         leadCapturedChange = true;
       }
-      if (res?.prospect_phone && res.prospect_phone !== '+16232230165' && res.prospect_phone !== sessionCtxRef.current.phone) {
+      if (res?.prospect_phone && res.prospect_phone !== sessionCtxRef.current.phone) {
         setProspectPhone(res.prospect_phone);
         sessionCtxRef.current.phone = res.prospect_phone;
         leadCapturedChange = true;
@@ -1034,8 +1034,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawInitName);
       const nextName = nextMode === 'outbound' ? (isPlaceholderInitName ? 'Valued Client' : rawInitName) : isPlaceholderInitName ? '' : rawInitName;
       const rawInitPhone = (initialPayload?.phone || '').trim();
-      const isPlaceholderInitPhone = !rawInitPhone || rawInitPhone.replace(/\D/g, '').endsWith('6232230165');
-      const nextPhone = nextMode === 'outbound' ? (rawInitPhone || '(623) 223-0165') : isPlaceholderInitPhone ? '' : rawInitPhone;
+      const isPlaceholderInitPhone = !rawInitPhone;
+      const nextPhone = nextMode === 'outbound' ? rawInitPhone : isPlaceholderInitPhone ? '' : rawInitPhone;
       const nextState = initialPayload?.state || 'AZ';
       const nextAddr = initialPayload?.address || '';
       const nextWT = Boolean(initialPayload?.on_warm_transfer);
@@ -1111,8 +1111,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       if (leadQueue.length > 0) {
         selectQueueLead(queueIndex, true);
       } else {
-        const dialPhone = res?.first_call?.phone || prospectPhone || '(623) 223-0165';
-        openGoogleVoiceWindow(dialPhone);
+        const dialPhone = res?.first_call?.phone || res?.dispatched?.[0]?.phone || prospectPhone || '';
+        if (dialPhone) openGoogleVoiceWindow(dialPhone);
         startSession({
           mode: 'outbound',
           lead_id: leadId,
@@ -1162,9 +1162,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const rawActivePhone = overrideParams?.phone !== undefined ? overrideParams.phone : prospectPhone;
     const activePhone =
       activeMode === 'outbound'
-        ? rawActivePhone || '(623) 223-0165'
-        : String(rawActivePhone || '').replace(/\D/g, '').endsWith('6232230165')
-        ? ''
+        ? String(rawActivePhone || '').trim()
         : String(rawActivePhone || '').trim();
     const activeState = overrideParams?.state || prospectState || 'AZ';
     const activeAddress = overrideParams?.address !== undefined ? overrideParams.address : prospectAddress;

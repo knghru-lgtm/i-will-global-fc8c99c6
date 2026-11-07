@@ -121,10 +121,9 @@ export function isPlaceholderProspectName(name?: string): boolean {
   );
 }
 
-export function isPlaceholderProspectPhone(phone?: string, mode: 'inbound' | 'outbound' = 'inbound'): boolean {
+export function isPlaceholderProspectPhone(phone?: string, _mode: 'inbound' | 'outbound' = 'inbound'): boolean {
   const digits = String(phone || '').replace(/\D/g, '');
   if (digits.length < 10) return true;
-  if (mode === 'inbound' && digits.endsWith('6232230165')) return true;
   return false;
 }
 
@@ -587,7 +586,7 @@ export async function executeSarahTool(
     const nameParts = customerName.split(/\s+/);
     const firstName = nameParts[0] || 'Valued';
     const lastName = nameParts.slice(1).join(' ') || 'Client';
-    const phone = hasValidPhone ? rawPhone : rawPhone || '+16232230165';
+    const phone = hasValidPhone ? rawPhone : rawPhone || '';
     const address = hasValidAddress ? rawAddress : '';
     const leadSource = resolveInboundLeadSource(ctx);
     const notes =
@@ -1344,7 +1343,7 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
     mode: initMode,
     lead_id: initialCtx?.lead_id,
     prospect_name: isGenericInitName ? (initMode === 'outbound' ? 'Valued Client' : '') : rawInitName,
-    prospect_phone: isGenericInitPhone ? (initMode === 'outbound' ? '+16232230165' : '') : rawInitPhone,
+    prospect_phone: isGenericInitPhone ? '' : rawInitPhone,
     state: initialCtx?.state || 'Arizona',
     address: isPlaceholderProspectAddress(initialCtx?.address) ? '' : String(initialCtx?.address || '').trim(),
     caller_name: initialCtx?.caller_name || 'Sarah',
@@ -1978,8 +1977,7 @@ export function extractCustomerContactDetails(
     if (
       digits.length >= 10 &&
       !digits.endsWith('4803319455') &&
-      !digits.endsWith('6024569681') &&
-      !digits.endsWith('6232230165')
+      !digits.endsWith('6024569681')
     ) {
       phone = pm[0].trim();
     }
@@ -2493,7 +2491,7 @@ export async function handleSarahHttpTurn(params: {
     mode: resolvedMode,
     lead_id: params.context?.lead_id,
     prospect_name: isGenericLeadName ? (resolvedMode === 'outbound' ? 'Valued Client' : '') : rawLeadName,
-    prospect_phone: isGenericLeadPhone ? (resolvedMode === 'outbound' ? '+16232230165' : '') : rawLeadPhone,
+    prospect_phone: isGenericLeadPhone ? '' : rawLeadPhone,
     state: params.context?.state || params.leadState || 'Arizona',
     address: isGenericLeadAddress ? '' : rawLeadAddress,
     caller_name: params.context?.caller_name || 'Sarah',
@@ -2894,7 +2892,7 @@ export function getSarahDirectLiveSessionConfig(params: Partial<SarahSessionCont
     mode,
     lead_id: params.lead_id,
     prospect_name: isGenericName ? (mode === 'outbound' ? 'Valued Client' : '') : rawName,
-    prospect_phone: isGenericPhone ? (mode === 'outbound' ? '+16232230165' : '') : rawPhone,
+    prospect_phone: isGenericPhone ? '' : rawPhone,
     state: params.state || 'Arizona',
     address: isPlaceholderProspectAddress(params.address) ? '' : String(params.address || '').trim(),
     caller_name: params.caller_name || 'Sarah',

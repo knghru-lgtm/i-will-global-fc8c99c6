@@ -9,7 +9,7 @@ export const TeamPage: React.FC = () => {
   const { isManager, activeRole, user } = useAuth();
   const [team, setTeam] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sarahPhone, setSarahPhone] = useState('6232230165');
+  const [sarahPhone, setSarahPhone] = useState('');
   const [activatingSarah, setActivatingSarah] = useState(false);
   const [sarahBannerMsg, setSarahBannerMsg] = useState('');
 
@@ -67,9 +67,11 @@ export const TeamPage: React.FC = () => {
       const res = await api.post('/bland/activate', {
         phone_number: targetPhone || undefined,
       });
-      const dialDigits = (targetPhone || res?.call?.to || '').replace(/\D/g, '');
+      const firstDispatched = res?.dispatched?.[0];
+      const dialDigits = (targetPhone || firstDispatched?.phone || res?.call?.to || '').replace(/\D/g, '');
       const gvUrl =
         res?.call?.google_voice_url ||
+        firstDispatched?.google_voice_url ||
         (dialDigits
           ? `https://voice.google.com/u/0/calls?a=nc,%2B${dialDigits.length === 10 ? '1' + dialDigits : dialDigits}`
           : 'https://voice.google.com/u/0/calls');
@@ -78,8 +80,10 @@ export const TeamPage: React.FC = () => {
       } catch {}
       openSarahVoiceModal({
         mode: 'outbound',
-        leadPhone: targetPhone || res?.call?.to || '(623) 223-0165',
-        leadName: res?.lead ? `${res.lead.first_name || ''} ${res.lead.last_name || ''}`.trim() : 'Valued Beneficiary',
+        leadPhone: targetPhone || firstDispatched?.phone || res?.call?.to || '',
+        leadName:
+          firstDispatched?.prospect_name ||
+          (res?.lead ? `${res.lead.first_name || ''} ${res.lead.last_name || ''}`.trim() : 'Valued Beneficiary'),
         leadState: res?.lead?.state || 'AZ',
         autoStart: true,
       });
@@ -91,7 +95,7 @@ export const TeamPage: React.FC = () => {
     } catch (err: any) {
       openSarahVoiceModal({
         mode: 'outbound',
-        leadPhone: targetPhone || '(623) 223-0165',
+        leadPhone: targetPhone || '',
         leadName: 'Valued Beneficiary',
         leadState: 'AZ',
         autoStart: true,
@@ -281,7 +285,7 @@ export const TeamPage: React.FC = () => {
                   type="tel"
                   value={sarahPhone}
                   onChange={(e) => setSarahPhone(e.target.value)}
-                  placeholder="Phone (e.g. 6232230165) or blank for Queue"
+                  placeholder="Phone or blank for Queue"
                   style={{
                     padding: '0.5rem 0.75rem',
                     borderRadius: '8px',
@@ -317,7 +321,7 @@ export const TeamPage: React.FC = () => {
               onClick={() =>
                 openSarahVoiceModal({
                   mode: isAdmin ? 'outbound' : 'inbound',
-                  leadPhone: sarahPhone || '(623) 223-0165',
+                  leadPhone: sarahPhone || '',
                   leadName: 'Valued Beneficiary',
                   leadState: 'AZ',
                 })

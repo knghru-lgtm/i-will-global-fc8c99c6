@@ -9627,10 +9627,9 @@ function isPlaceholderProspectName(name) {
     clean
   );
 }
-function isPlaceholderProspectPhone(phone, mode = "inbound") {
+function isPlaceholderProspectPhone(phone, _mode = "inbound") {
   const digits = String(phone || "").replace(/\D/g, "");
   if (digits.length < 10) return true;
-  if (mode === "inbound" && digits.endsWith("6232230165")) return true;
   return false;
 }
 function isPlaceholderProspectAddress(address) {
@@ -10037,7 +10036,7 @@ async function executeSarahTool(name, args, ctx) {
     const nameParts = customerName.split(/\s+/);
     const firstName = nameParts[0] || "Valued";
     const lastName = nameParts.slice(1).join(" ") || "Client";
-    const phone = hasValidPhone ? rawPhone : rawPhone || "+16232230165";
+    const phone = hasValidPhone ? rawPhone : rawPhone || "";
     const address = hasValidAddress ? rawAddress : "";
     const leadSource = resolveInboundLeadSource(ctx);
     const notes = args.notes || `[${leadSource}] ${productLine} consultation booked via Receptionist (${SARAH_MAIN_LINE_DISPLAY}) for ${customerName}${address ? `, Address: ${address}` : ""}, Phone: ${phone}`;
@@ -10684,7 +10683,7 @@ async function handleSarahVoiceSession(clientWs, initialCtx) {
     mode: initMode,
     lead_id: initialCtx?.lead_id,
     prospect_name: isGenericInitName ? initMode === "outbound" ? "Valued Client" : "" : rawInitName,
-    prospect_phone: isGenericInitPhone ? initMode === "outbound" ? "+16232230165" : "" : rawInitPhone,
+    prospect_phone: isGenericInitPhone ? "" : rawInitPhone,
     state: initialCtx?.state || "Arizona",
     address: isPlaceholderProspectAddress(initialCtx?.address) ? "" : String(initialCtx?.address || "").trim(),
     caller_name: initialCtx?.caller_name || "Sarah",
@@ -11211,7 +11210,7 @@ function extractCustomerContactDetails(text, history) {
   let pm;
   while ((pm = phoneRegex.exec(s)) !== null) {
     const digits = pm[0].replace(/\D/g, "");
-    if (digits.length >= 10 && !digits.endsWith("4803319455") && !digits.endsWith("6024569681") && !digits.endsWith("6232230165")) {
+    if (digits.length >= 10 && !digits.endsWith("4803319455") && !digits.endsWith("6024569681")) {
       phone = pm[0].trim();
     }
   }
@@ -11559,7 +11558,7 @@ async function handleSarahHttpTurn(params) {
     mode: resolvedMode,
     lead_id: params.context?.lead_id,
     prospect_name: isGenericLeadName ? resolvedMode === "outbound" ? "Valued Client" : "" : rawLeadName,
-    prospect_phone: isGenericLeadPhone ? resolvedMode === "outbound" ? "+16232230165" : "" : rawLeadPhone,
+    prospect_phone: isGenericLeadPhone ? "" : rawLeadPhone,
     state: params.context?.state || params.leadState || "Arizona",
     address: isGenericLeadAddress ? "" : rawLeadAddress,
     caller_name: params.context?.caller_name || "Sarah",
@@ -11900,7 +11899,7 @@ function getSarahDirectLiveSessionConfig(params = {}) {
     mode,
     lead_id: params.lead_id,
     prospect_name: isGenericName ? mode === "outbound" ? "Valued Client" : "" : rawName,
-    prospect_phone: isGenericPhone ? mode === "outbound" ? "+16232230165" : "" : rawPhone,
+    prospect_phone: isGenericPhone ? "" : rawPhone,
     state: params.state || "Arizona",
     address: isPlaceholderProspectAddress(params.address) ? "" : String(params.address || "").trim(),
     caller_name: params.caller_name || "Sarah",
@@ -12633,7 +12632,10 @@ blandAuth.post("/test-call", async (req, res) => {
       requested_person,
       transfer_to
     } = req.body;
-    const phoneToCall = test_phone || "+16232230165";
+    const phoneToCall = String(test_phone || "").trim();
+    if (!phoneToCall) {
+      return res.status(400).json({ error: "Please enter a phone number to place a test call." });
+    }
     const requestedAdvisor = requested_person || transfer_to;
     const result = await sendBlandCall({
       phone: phoneToCall,
@@ -12776,7 +12778,7 @@ function createApp() {
         {
           recipient_name: recipient_name || "King Amen Ra",
           prospect_name: prospect_name || "Valued Client",
-          prospect_phone: prospect_phone || "+16232230165",
+          prospect_phone: prospect_phone || "",
           state: state || "AZ",
           reason: "Automatic Transline Connection, Private Whisper Receipt, and Both-Parties-on-Line Verification",
           force_live_connect
@@ -12785,7 +12787,7 @@ function createApp() {
           mode: mode === "outbound" ? "outbound" : "inbound",
           lead_id,
           prospect_name: prospect_name || "Valued Client",
-          prospect_phone: prospect_phone || "+16232230165",
+          prospect_phone: prospect_phone || "",
           state: state || "AZ",
           force_work_hours,
           simulated_now_iso,

@@ -286,7 +286,7 @@ export const App: React.FC = () => {
     };
     window.addEventListener('iwg-open-sarah-voice', handleOpenSarah);
 
-    // Support direct URL launch for outbound test calls (e.g. ?sarah_call=6232230165&mode=outbound)
+    // Support direct URL launch for outbound calls (e.g. ?sarah_call=4805550100&mode=outbound)
     try {
       const params = new URLSearchParams(window.location.search);
       const sarahCallPhone = params.get('sarah_call') || params.get('call_phone');
@@ -294,7 +294,7 @@ export const App: React.FC = () => {
       if (sarahCallPhone || params.get('sarah') === 'outbound') {
         setSarahPayload({
           mode: sarahMode,
-          phone: sarahCallPhone || '(623) 223-0165',
+          phone: sarahCallPhone || '',
           prospect_name: params.get('prospect_name') || 'Medicare Beneficiary',
           state: params.get('state') || 'AZ',
         });

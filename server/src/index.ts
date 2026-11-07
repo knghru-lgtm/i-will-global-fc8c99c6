@@ -103,7 +103,7 @@ export function createApp() {
         {
           recipient_name: recipient_name || 'King Amen Ra',
           prospect_name: prospect_name || 'Valued Client',
-          prospect_phone: prospect_phone || '+16232230165',
+          prospect_phone: prospect_phone || '',
           state: state || 'AZ',
           reason: 'Automatic Transline Connection, Private Whisper Receipt, and Both-Parties-on-Line Verification',
           force_live_connect,
@@ -112,7 +112,7 @@ export function createApp() {
           mode: mode === 'outbound' ? 'outbound' : 'inbound',
           lead_id,
           prospect_name: prospect_name || 'Valued Client',
-          prospect_phone: prospect_phone || '+16232230165',
+          prospect_phone: prospect_phone || '',
           state: state || 'AZ',
           force_work_hours,
           simulated_now_iso,

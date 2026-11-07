@@ -9,7 +9,7 @@ export const DashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [blandConfig, setBlandConfig] = useState<any>(null);
   const [activatingBland, setActivatingBland] = useState(false);
-  const [blandQuickPhone, setBlandQuickPhone] = useState('6232230165');
+  const [blandQuickPhone, setBlandQuickPhone] = useState('');
   const [blandBannerMsg, setBlandBannerMsg] = useState('');
 
   useEffect(() => {
@@ -17,7 +17,7 @@ export const DashboardPage: React.FC = () => {
       .then((res) => setData(res))
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
-    const loadBland = () => api.get('/bland/config').then((c) => setBlandConfig(c)).catch(() => {});
+    const loadBland = () => api.get('/bland/config').then((c) => setBlandConfig(c)).catch(() => { });
     loadBland();
     window.addEventListener('iwg-bland-status-changed', loadBland);
     return () => window.removeEventListener('iwg-bland-status-changed', loadBland);
@@ -115,8 +115,8 @@ export const DashboardPage: React.FC = () => {
                   {blandConfig?.is_on_warm_transfer
                     ? '🔥 ON WARM TRANSFER: BOOKING TELEPHONE / IN-PERSON / VIDEO APPTS ONLY & CONTINUING CALLS'
                     : blandConfig?.is_campaign_active
-                    ? '● ACTIVE & MAKING CALLS'
-                    : '● READY TO CALL'}
+                      ? '● ACTIVE & MAKING CALLS'
+                      : '● READY TO CALL'}
                 </span>
               </div>
               <div style={{ fontSize: '0.83rem', color: '#cbd5e1', marginTop: '0.25rem' }}>
@@ -151,29 +151,33 @@ export const DashboardPage: React.FC = () => {
               onClick={async () => {
                 setActivatingBland(true);
                 setBlandBannerMsg('');
-                const dialPhone = blandQuickPhone.trim() || '6232230165';
-                openGoogleVoiceWindow(dialPhone);
-                window.dispatchEvent(
-                  new CustomEvent('iwg-open-sarah-voice', {
-                    detail: {
-                      mode: 'outbound',
-                      prospect_name: 'Medicare Beneficiary',
-                      phone: dialPhone,
-                      state: 'AZ',
-                      on_warm_transfer: Boolean(blandConfig?.is_on_warm_transfer),
-                    },
-                  })
-                );
+                const manualPhone = blandQuickPhone.trim();
                 try {
                   const res = await api.post('/bland/activate', {
-                    phone: dialPhone,
+                    phone: manualPhone || undefined,
                     on_warm_transfer: Boolean(blandConfig?.is_on_warm_transfer),
                     continue_queue: true,
                   });
-                  setBlandBannerMsg(res.message || 'Sarah Voice AI + Google Voice (480) 331-9455 activated!');
+                  const firstDispatched = res.dispatched?.[0];
+                  const dialPhone = manualPhone || firstDispatched?.phone || '';
+                  const dialName = firstDispatched?.prospect_name || 'Medicare Beneficiary';
+                  if (dialPhone) openGoogleVoiceWindow(dialPhone);
+                  window.dispatchEvent(
+                    new CustomEvent('iwg-open-sarah-voice', {
+                      detail: {
+                        mode: 'outbound',
+                        lead_id: firstDispatched?.lead_id,
+                        prospect_name: dialName,
+                        phone: dialPhone,
+                        state: 'AZ',
+                        on_warm_transfer: Boolean(blandConfig?.is_on_warm_transfer),
+                      },
+                    })
+                  );
+                  setBlandBannerMsg(res.message || 'Sarah Outbound Caller + Google Voice (480) 331-9455 activated!');
                   window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
                 } catch (err: any) {
-                  setBlandBannerMsg('⚠️ ' + (err.message || 'Failed to activate Sarah Voice AI'));
+                  setBlandBannerMsg('⚠️ ' + (err.message || 'Failed to activate Sarah Outbound Caller'));
                 } finally {
                   setActivatingBland(false);
                 }

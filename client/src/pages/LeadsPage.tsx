@@ -140,9 +140,9 @@ export const LeadsPage: React.FC = () => {
       setBlandBannerMsg(res.message || '📞 Sarah Outbound Caller + Google Voice (480) 331-9455 activated! Outbound calls have started.');
       const firstDispatched = res.dispatched?.[0];
       const firstLead = idsToCall?.length ? leads.find((l) => l.id === idsToCall[0]) : leads[0];
-      const dialPhone = firstDispatched?.phone || firstLead?.phone || '6232230165';
+      const dialPhone = firstDispatched?.phone || firstLead?.phone || '';
       const dialName = firstDispatched?.prospect_name || (firstLead ? `${firstLead.first_name || ''} ${firstLead.last_name || ''}`.trim() : 'Medicare Beneficiary');
-      openGoogleVoiceWindow(dialPhone);
+      if (dialPhone) openGoogleVoiceWindow(dialPhone);
       window.dispatchEvent(
         new CustomEvent('iwg-open-sarah-voice', {
           detail: {
@@ -886,7 +886,14 @@ export const LeadsPage: React.FC = () => {
               onClick={() =>
                 window.dispatchEvent(
                   new CustomEvent('iwg-open-sarah-voice', {
-                    detail: { mode: 'outbound', prospect_name: 'Valued Beneficiary', phone: '6232230165', state: 'AZ' },
+                    detail: {
+                      mode: 'outbound',
+                      lead_id: leads[0]?.id,
+                      prospect_name: leads[0] ? `${leads[0].first_name || ''} ${leads[0].last_name || ''}`.trim() : 'Valued Beneficiary',
+                      phone: leads[0]?.phone || '',
+                      state: leads[0]?.state || 'AZ',
+                      address: leads[0]?.address || '',
+                    },
                   })
                 )
               }
@@ -1300,7 +1307,7 @@ export const LeadsPage: React.FC = () => {
                                   mode: 'outbound',
                                   lead_id: l.id,
                                   prospect_name: `${l.first_name || ''} ${l.last_name || ''}`.trim() || 'Medicare Beneficiary',
-                                  phone: l.phone || '6232230165',
+                                  phone: l.phone || '',
                                   state: l.state || 'AZ',
                                   address: l.address || '',
                                 },
