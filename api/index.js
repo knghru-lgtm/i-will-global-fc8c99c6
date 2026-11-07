@@ -2269,7 +2269,7 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
       { id: "tina", name: "Tina (Friendly & Patient Receptionist)", gender: "Female", accent: "American", is_recommended: false }
     ];
     BLAND_AI_USER_ID = "u_bland_ai";
-    BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: "Sarah \u2014 Bland AI Voice Agent", email: "bland-ai@iwillglobal.com", role: "scheduler" };
+    BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: "Sarah \u2014 Voice AI Receptionist & Outbound Caller", email: "sarah@iwillglobal.com", role: "scheduler", phone: "(480) 331-9455" };
     PHOENIX_OFFSET_MS = 7 * 3600 * 1e3;
     DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     STATE_TIMEZONES = {
@@ -2778,20 +2778,30 @@ async function ensureSeeded(force = false) {
     { id: "u_agent12", name: "Nicole Foster", email: "nfoster@iwillglobal.com", role: "licensed_agent", title: "Medicare Counselor", phone: "(480) 331-9431", npn: "21948302", states: ["AZ", "FL"] },
     { id: "u_agent13", name: "Timothy Hays", email: "thays@iwillglobal.com", role: "licensed_agent", title: "Insurance Specialist", phone: "(480) 331-9432", npn: "19503928", states: ["AZ"] }
   ];
-  const blandAiUser = await one("SELECT id FROM users WHERE id=$1 OR lower(email)=lower($2)", ["u_bland_ai", "bland-ai@iwillglobal.com"]);
+  const blandAiUser = await one("SELECT id FROM users WHERE id=$1 OR lower(email) IN (lower($2), lower($3), lower($4))", ["u_bland_ai", "sarah@iwillglobal.com", "bland-ai@iwillglobal.com", "bland@iwillglobal.com"]);
   if (!blandAiUser) {
     await insert("users", {
       id: "u_bland_ai",
-      name: "Sarah \u2014 Bland AI Voice Agent",
-      email: "bland-ai@iwillglobal.com",
+      name: "Sarah \u2014 Voice AI Receptionist & Outbound Caller",
+      email: "sarah@iwillglobal.com",
       password_hash: hashPassword(randomUUID() + randomUUID()),
       role: "scheduler",
-      title: "Autonomous AI Outbound Caller (Bland AI)",
-      phone: null,
+      title: "Autonomous Voice AI Outbound Caller & Receptionist (480) 331-9455",
+      phone: "(480) 331-9455",
       states: ["AZ", "CA", "NV", "TX", "FL", "NM", "CO"],
       active: true,
       daily_call_goal: 1e3
     });
+  } else {
+    await q(
+      `UPDATE users SET name=$1, title=$2, phone=$3, active=true WHERE id=$4`,
+      [
+        "Sarah \u2014 Voice AI Receptionist & Outbound Caller",
+        "Autonomous Voice AI Outbound Caller & Receptionist (480) 331-9455",
+        "(480) 331-9455",
+        blandAiUser.id
+      ]
+    );
   }
   for (const u of usersList) {
     const userPwd = u.email === "king@iwillglobal.com" ? hashPassword("Heru5464") : u.email === "kmartinez@iwillglobal.com" ? hashPassword("Today#01") : pwd;
@@ -8261,7 +8271,28 @@ api.get("/team", async (req, res) => {
   if (req.user?.role !== "admin") {
     return res.status(403).json({ error: "Access denied: Team Directory is only available to Admins" });
   }
-  const users = await q(`SELECT id, name, email, role, title, phone, npn, states, avatar_color, active, google_meet_url FROM users ORDER BY role, name`);
+  await q(
+    `UPDATE users
+        SET name = 'Sarah \u2014 Voice AI Receptionist & Outbound Caller',
+            title = 'Autonomous Voice AI Outbound Caller & Receptionist (480) 331-9455',
+            phone = '(480) 331-9455',
+            active = true
+      WHERE id = 'u_bland_ai'
+         OR lower(email) IN ('bland@iwillglobal.com', 'bland-ai@iwillglobal.com', 'sarah@iwillglobal.com')`
+  );
+  const users = await q(`
+    SELECT id, name, email, role, title, phone, npn, states, avatar_color, active, google_meet_url
+      FROM users
+     ORDER BY
+       CASE
+         WHEN id = 'u_bland_ai' OR lower(email) IN ('sarah@iwillglobal.com', 'bland@iwillglobal.com', 'bland-ai@iwillglobal.com') THEN 0
+         WHEN id = 'u_principal' OR lower(email) = 'king@iwillglobal.com' THEN 1
+         WHEN id = 'u_coo' OR lower(email) = 'aneesha@iwillglobal.com' THEN 2
+         ELSE 3
+       END,
+       role,
+       name
+  `);
   const creds = await q(`SELECT * FROM agent_credentials ORDER BY kind, name`);
   const stats = await q(
     `SELECT a.user_id, count(*)::int AS calls_today FROM activities a WHERE a.type='call' AND a.created_at >= date_trunc('day', now()) GROUP BY a.user_id`

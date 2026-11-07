@@ -98,22 +98,32 @@ export async function ensureSeeded(force = false) {
     { id: 'u_agent13', name: 'Timothy Hays', email: 'thays@iwillglobal.com', role: 'licensed_agent', title: 'Insurance Specialist', phone: '(480) 331-9432', npn: '19503928', states: ['AZ'] },
   ];
 
-  // Bland AI autonomous outbound caller — every prospect assigned to this user is dialed automatically
+  // Sarah Voice AI autonomous outbound caller & 24/7 receptionist on (480) 331-9455 — every prospect assigned to this user is dialed automatically
   // Mon–Fri 9 AM–7 PM and Sat–Sun 9 AM–6 PM (Arizona time). Login is disabled via an unguessable password.
-  const blandAiUser = await one('SELECT id FROM users WHERE id=$1 OR lower(email)=lower($2)', ['u_bland_ai', 'bland-ai@iwillglobal.com']);
+  const blandAiUser = await one('SELECT id FROM users WHERE id=$1 OR lower(email) IN (lower($2), lower($3), lower($4))', ['u_bland_ai', 'sarah@iwillglobal.com', 'bland-ai@iwillglobal.com', 'bland@iwillglobal.com']);
   if (!blandAiUser) {
     await insert('users', {
       id: 'u_bland_ai',
-      name: 'Sarah — Bland AI Voice Agent',
-      email: 'bland-ai@iwillglobal.com',
+      name: 'Sarah — Voice AI Receptionist & Outbound Caller',
+      email: 'sarah@iwillglobal.com',
       password_hash: hashPassword(randomUUID() + randomUUID()),
       role: 'scheduler',
-      title: 'Autonomous AI Outbound Caller (Bland AI)',
-      phone: null,
+      title: 'Autonomous Voice AI Outbound Caller & Receptionist (480) 331-9455',
+      phone: '(480) 331-9455',
       states: ['AZ', 'CA', 'NV', 'TX', 'FL', 'NM', 'CO'],
       active: true,
       daily_call_goal: 1000,
     });
+  } else {
+    await q(
+      `UPDATE users SET name=$1, title=$2, phone=$3, active=true WHERE id=$4`,
+      [
+        'Sarah — Voice AI Receptionist & Outbound Caller',
+        'Autonomous Voice AI Outbound Caller & Receptionist (480) 331-9455',
+        '(480) 331-9455',
+        blandAiUser.id,
+      ]
+    );
   }
 
   for (const u of usersList) {

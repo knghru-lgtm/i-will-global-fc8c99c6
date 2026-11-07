@@ -338,9 +338,9 @@ export async function saveBlandConfig(partial: Partial<BlandConfig>): Promise<Bl
   return merged;
 }
 
-/** Virtual CRM caller that owns every prospect assigned to the Bland AI autonomous dialer. */
+/** Virtual CRM caller that owns every prospect assigned to the Sarah Voice AI autonomous dialer. */
 export const BLAND_AI_USER_ID = 'u_bland_ai';
-export const BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: 'Sarah — Bland AI Voice Agent', email: 'bland-ai@iwillglobal.com', role: 'scheduler' };
+export const BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: 'Sarah — Voice AI Receptionist & Outbound Caller', email: 'sarah@iwillglobal.com', role: 'scheduler', phone: '(480) 331-9455' };
 
 // America/Phoenix is UTC-7 year-round (Arizona does not observe daylight saving time).
 const PHOENIX_OFFSET_MS = 7 * 3600 * 1000;

@@ -23,6 +23,26 @@ import { AudioRecorder } from '../lib/audioRecorder';
 import { AudioPlayer } from '../lib/audioPlayer';
 import { api, openGoogleVoiceWindow } from '../lib/api';
 
+export function openSarahVoiceModal(opts?: {
+  mode?: 'inbound' | 'outbound';
+  leadPhone?: string;
+  leadName?: string;
+  leadState?: string;
+  autoStart?: boolean;
+}) {
+  window.dispatchEvent(
+    new CustomEvent('iwg-open-sarah-voice', {
+      detail: {
+        mode: opts?.mode || 'outbound',
+        phone: opts?.leadPhone || '6232230165',
+        prospect_name: opts?.leadName || 'Valued Beneficiary',
+        state: opts?.leadState || 'AZ',
+        autoStart: opts?.autoStart ?? false,
+      },
+    })
+  );
+}
+
 interface TranscriptItem {
   id: string;
   speaker: 'sarah' | 'user' | 'system';

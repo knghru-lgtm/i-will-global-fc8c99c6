@@ -99,7 +99,7 @@ export const DashboardPage: React.FC = () => {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', margin: 0 }}>
-                  Bland Agent AI Outbound Dialer (Sarah)
+                  Sarah Voice AI Outbound Dialer & Receptionist (480) 331-9455
                 </h3>
                 <span
                   style={{
@@ -121,8 +121,8 @@ export const DashboardPage: React.FC = () => {
               </div>
               <div style={{ fontSize: '0.83rem', color: '#cbd5e1', marginTop: '0.25rem' }}>
                 {blandConfig?.is_on_warm_transfer
-                  ? 'Agent knows you are on a warm transfer call — she will ONLY select Telephone, In-Person, or Video appointments and continue dialing.'
-                  : 'Activate Bland Agent AI to begin making calls, warm-transferring to +1 (602) 456-9681, or booking Telephone, In-Person, or Video appointments.'}
+                  ? 'Sarah knows you are on a warm transfer call — she will ONLY select Telephone (30m), In-Person (60m), or Video (30m) appointments and continue dialing.'
+                  : 'Activate Sarah Voice AI on (480) 331-9455 to begin making calls, warm-transferring to +1 (602) 456-9681, or booking Telephone, In-Person, or Video appointments.'}
               </div>
             </div>
           </div>
@@ -190,7 +190,7 @@ export const DashboardPage: React.FC = () => {
                 boxShadow: '0 4px 14px rgba(139, 92, 246, 0.45)',
               }}
             >
-              {activatingBland ? 'Dialing...' : `🚀 Activate Bland AI & Call ${blandQuickPhone || 'Queue'}`}
+              {activatingBland ? 'Dialing...' : `🚀 Activate Sarah AI & Call ${blandQuickPhone || 'Queue'}`}
             </button>
             <button
               type="button"

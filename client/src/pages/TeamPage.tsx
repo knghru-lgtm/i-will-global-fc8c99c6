@@ -3,11 +3,15 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth, type Role } from '../lib/auth';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { openSarahVoiceModal } from '../components/SarahVoiceModal';
 
 export const TeamPage: React.FC = () => {
   const { isManager, activeRole, user } = useAuth();
   const [team, setTeam] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sarahPhone, setSarahPhone] = useState('6232230165');
+  const [activatingSarah, setActivatingSarah] = useState(false);
+  const [sarahBannerMsg, setSarahBannerMsg] = useState('');
 
   // Add / Edit Modal State
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -25,14 +29,78 @@ export const TeamPage: React.FC = () => {
   const [formPassword, setFormPassword] = useState('Welcome123!');
   const [formActive, setFormActive] = useState(true);
 
+  const isSarahRow = (u: any) =>
+    u?.id === 'u_bland_ai' ||
+    /sarah.*voice ai|bland/i.test(`${u?.name || ''} ${u?.email || ''} ${u?.title || ''}`);
+
   const fetchTeam = async () => {
     try {
       const res = await api.get('/team');
-      setTeam(res || []);
+      const list = Array.isArray(res) ? res : [];
+      // Ensure Sarah Voice AI is always displayed with her live (480) 331-9455 identity and pinned at the top
+      const normalized = list.map((u: any) =>
+        isSarahRow(u)
+          ? {
+              ...u,
+              name: 'Sarah — Voice AI Receptionist & Outbound Caller',
+              email: 'sarah@iwillglobal.com',
+              title: 'Autonomous Voice AI Outbound Caller & Receptionist (480) 331-9455',
+              phone: '(480) 331-9455',
+              active: true,
+            }
+          : u
+      );
+      normalized.sort((a: any, b: any) => (isSarahRow(b) ? 1 : 0) - (isSarahRow(a) ? 1 : 0));
+      setTeam(normalized);
     } catch (err) {
       console.error('Failed to load team roster:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleActivateSarah = async (phoneOverride?: string) => {
+    const targetPhone = (phoneOverride ?? sarahPhone).trim();
+    setActivatingSarah(true);
+    setSarahBannerMsg('');
+    try {
+      const res = await api.post('/bland/activate', {
+        phone_number: targetPhone || undefined,
+      });
+      const dialDigits = (targetPhone || res?.call?.to || '').replace(/\D/g, '');
+      const gvUrl =
+        res?.call?.google_voice_url ||
+        (dialDigits
+          ? `https://voice.google.com/u/0/calls?a=nc,%2B${dialDigits.length === 10 ? '1' + dialDigits : dialDigits}`
+          : 'https://voice.google.com/u/0/calls');
+      try {
+        window.open(gvUrl, '_blank', 'noopener,noreferrer');
+      } catch {}
+      openSarahVoiceModal({
+        mode: 'outbound',
+        leadPhone: targetPhone || res?.call?.to || '(623) 223-0165',
+        leadName: res?.lead ? `${res.lead.first_name || ''} ${res.lead.last_name || ''}`.trim() : 'Valued Beneficiary',
+        leadState: res?.lead?.state || 'AZ',
+        autoStart: true,
+      });
+      setSarahBannerMsg(
+        res?.message ||
+          `✅ Sarah Voice AI activated on (480) 331-9455! Outbound calling & appointment scheduling (Telephone 30m, In-Person 60m, Video 30m) is LIVE.`
+      );
+      fetchTeam();
+    } catch (err: any) {
+      openSarahVoiceModal({
+        mode: 'outbound',
+        leadPhone: targetPhone || '(623) 223-0165',
+        leadName: 'Valued Beneficiary',
+        leadState: 'AZ',
+        autoStart: true,
+      });
+      setSarahBannerMsg(
+        `🎙️ Sarah Live Voice Console opened on (480) 331-9455! (${err?.message || 'Ready to dial via Google Voice'})`
+      );
+    } finally {
+      setActivatingSarah(false);
     }
   };
 
@@ -158,6 +226,142 @@ export const TeamPage: React.FC = () => {
         )}
       </div>
 
+      {/* Sarah Voice AI (480) 331-9455 Outbound Caller & Appointment Scheduler Command Bar */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(30, 58, 138, 0.35))',
+          border: '1.5px solid rgba(16, 185, 129, 0.55)',
+          borderRadius: '14px',
+          padding: '1.1rem 1.35rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.75rem',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div
+              style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '1.45rem',
+                boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+              }}
+            >
+              🎙️
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#ffffff' }}>
+                  Sarah — Voice AI Receptionist & Outbound Caller
+                </span>
+                <span className="badge badge-success" style={{ fontSize: '0.72rem' }}>
+                  🟢 100% FREE · (480) 331-9455
+                </span>
+                <span className="badge badge-gold" style={{ fontSize: '0.72rem' }}>
+                  📞 Telephone (30m) · 🏛️ In-Person (60m) · 💻 Video (30m)
+                </span>
+              </div>
+              <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: '0.2rem' }}>
+                Answers all inbound calls 24/7 on <strong>(480) 331-9455</strong>, calls assigned leads via Google Voice, warm-transfers to{' '}
+                <strong>King Amen Ra (+1 602-456-9681)</strong> with private whisper, and schedules appointments on the Master Calendar.
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
+            <input
+              type="tel"
+              value={sarahPhone}
+              onChange={(e) => setSarahPhone(e.target.value)}
+              placeholder="Phone (e.g. 6232230165) or blank for Queue"
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(16, 185, 129, 0.5)',
+                background: 'rgba(15, 23, 42, 0.85)',
+                color: '#fff',
+                fontSize: '0.85rem',
+                width: '185px',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => handleActivateSarah()}
+              disabled={activatingSarah}
+              style={{
+                padding: '0.55rem 1rem',
+                borderRadius: '8px',
+                border: '1px solid #34d399',
+                background: 'linear-gradient(135deg, #10b981, #059669)',
+                color: '#ffffff',
+                fontWeight: 800,
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+              }}
+            >
+              {activatingSarah ? 'Dialing...' : `🚀 Activate Sarah & Call ${sarahPhone || 'Queue'}`}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                openSarahVoiceModal({
+                  mode: 'outbound',
+                  leadPhone: sarahPhone || '(623) 223-0165',
+                  leadName: 'Valued Beneficiary',
+                  leadState: 'AZ',
+                })
+              }
+              className="btn btn-secondary"
+              style={{
+                padding: '0.55rem 0.9rem',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                borderColor: '#f59e0b',
+                color: '#fde68a',
+              }}
+            >
+              🎙️ Sarah Voice & Script Console
+            </button>
+            <Link
+              to="/leads"
+              className="btn btn-secondary"
+              style={{ padding: '0.55rem 0.85rem', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'none' }}
+            >
+              📋 Assign Leads & Queue
+            </Link>
+            <Link
+              to="/calendar"
+              className="btn btn-secondary"
+              style={{ padding: '0.55rem 0.85rem', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'none' }}
+            >
+              📅 Master Calendar
+            </Link>
+          </div>
+        </div>
+        {sarahBannerMsg && (
+          <div
+            style={{
+              padding: '0.55rem 0.85rem',
+              borderRadius: '8px',
+              background: 'rgba(16, 185, 129, 0.18)',
+              border: '1px solid rgba(16, 185, 129, 0.45)',
+              color: '#a7f3d0',
+              fontSize: '0.83rem',
+              fontWeight: 600,
+            }}
+          >
+            {sarahBannerMsg}
+          </div>
+        )}
+      </div>
+
       {/* Roster Table */}
       <div className="table-container">
         <table className="data-table">
@@ -178,13 +382,27 @@ export const TeamPage: React.FC = () => {
             {team.map((u) => {
               const ahip = (u.credentials || []).find((c: any) => c.kind === 'certification' && c.name === 'AHIP');
               const appointments = (u.credentials || []).filter((c: any) => c.kind === 'appointment');
+              const isSarah = isSarahRow(u);
 
               return (
-                <tr key={u.id} style={{ opacity: u.active === false ? 0.5 : 1 }}>
+                <tr
+                  key={u.id}
+                  style={{
+                    opacity: u.active === false ? 0.5 : 1,
+                    background: isSarah ? 'rgba(16, 185, 129, 0.08)' : undefined,
+                  }}
+                >
                   <td>
-                    <div style={{ fontWeight: 600 }}>{u.name}</div>
+                    <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <span>{u.name}</span>
+                      {isSarah && (
+                        <span className="badge badge-success" style={{ fontSize: '0.68rem' }}>
+                          🎙️ LIVE AI CALLER & RECEPTIONIST
+                        </span>
+                      )}
+                    </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{u.email}</div>
-                    {u.phone && <div style={{ fontSize: '0.72rem', color: '#64748b' }}>📞 {u.phone}</div>}
+                    {u.phone && <div style={{ fontSize: '0.72rem', color: isSarah ? '#34d399' : '#64748b', fontWeight: isSarah ? 700 : 400 }}>📞 {u.phone}</div>}
                   </td>
 
                   <td>
@@ -252,7 +470,26 @@ export const TeamPage: React.FC = () => {
 
                   {isManager && (
                     <td>
-                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {isSarah && (
+                          <button
+                            type="button"
+                            onClick={() => handleActivateSarah()}
+                            style={{
+                              padding: '0.35rem 0.7rem',
+                              fontSize: '0.78rem',
+                              fontWeight: 800,
+                              background: 'linear-gradient(135deg, #10b981, #059669)',
+                              color: '#ffffff',
+                              border: '1px solid #34d399',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                            }}
+                            title="Activate Sarah Voice AI on (480) 331-9455 to call leads and schedule appointments"
+                          >
+                            🚀 Activate Sarah & Call
+                          </button>
+                        )}
                         <button
                           className="btn btn-secondary"
                           onClick={() => openEditModal(u)}

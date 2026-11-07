@@ -853,9 +853,9 @@ export const LeadsPage: React.FC = () => {
                 boxShadow: '0 3px 10px rgba(16, 185, 129, 0.35)',
                 cursor: blandBusy ? 'not-allowed' : 'pointer',
               }}
-              title="Start Bland AI autonomous outbound calls right now"
+              title="Start Sarah Voice AI autonomous outbound calls right now"
             >
-              <span>▶</span> {blandBusy ? 'Working...' : (selectedIds.length > 0 ? `Start Bland AI (${selectedIds.length})` : 'Start Bland AI Calls')}
+              <span>▶</span> {blandBusy ? 'Working...' : (selectedIds.length > 0 ? `Start Sarah AI (${selectedIds.length})` : 'Start Sarah AI Calls')}
             </button>
             <button
               type="button"
@@ -874,14 +874,20 @@ export const LeadsPage: React.FC = () => {
                 color: '#fca5a5',
                 cursor: blandBusy ? 'not-allowed' : 'pointer',
               }}
-              title="Stop all active Bland AI outbound calls and halt queue dialing"
+              title="Stop all active Sarah Voice AI outbound calls and halt queue dialing"
             >
               <span>⏹</span> Stop Calls
             </button>
             <button
               type="button"
               className="btn"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-bland-ai-control'))}
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('iwg-open-sarah-voice', {
+                    detail: { mode: 'outbound', prospect_name: 'Valued Beneficiary', phone: '6232230165', state: 'AZ' },
+                  })
+                )
+              }
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -894,9 +900,9 @@ export const LeadsPage: React.FC = () => {
                 color: '#fff',
                 cursor: 'pointer',
               }}
-              title="Open Bland Agent AI Command Center"
+              title="Open Sarah Voice AI Command Center"
             >
-              <span>🤖</span> Bland AI Hub
+              <span>🎙️</span> Sarah AI Hub
             </button>
           </div>
 
@@ -965,7 +971,7 @@ export const LeadsPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span>{isBlandActive ? '🟢' : '🛑'}</span>
             <span>
-              {blandBannerMsg || `🤖 Bland AI is ACTIVE — automatically calling every prospect assigned to Bland AI (${blandAssigned.remaining_today} of ${blandAssigned.assigned_total} still to call today).`}
+              {blandBannerMsg || `🎙️ Sarah Voice AI (480) 331-9455 is ACTIVE — automatically calling every prospect assigned to Sarah AI (${blandAssigned.remaining_today} of ${blandAssigned.assigned_total} still to call today).`}
               <span style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: '#cbd5e1', marginTop: '0.2rem' }}>
                 🕘 Outbound hours: Mon–Fri 9:00 AM–7:00 PM · Sat–Sun 9:00 AM–6:00 PM (Arizona time)
                 {blandWindow ? (blandWindow.open ? ` · Calling now (${blandWindow.today})` : ` · Closed now — ${blandWindow.next_open || ''}`) : ''}
@@ -1047,7 +1053,7 @@ export const LeadsPage: React.FC = () => {
               const isKing = c.id === 'u_principal' || c.email?.toLowerCase() === 'king@iwillglobal.com';
               return (
                 <option key={c.id} value={c.id}>
-                  {isKing ? `👑 King Amen Ra — Principal & Broker (${c.assigned_leads_count || 0} leads)` : c.id === 'u_bland_ai' ? `🤖 Bland AI — Auto-Dialer Queue (${c.assigned_leads_count || 0} leads)` : `👤 ${c.name} (${c.assigned_leads_count || 0} leads)`}
+                  {isKing ? `👑 King Amen Ra — Principal & Broker (${c.assigned_leads_count || 0} leads)` : c.id === 'u_bland_ai' ? `🎙️ Sarah Voice AI (480) 331-9455 — Auto-Dialer Queue (${c.assigned_leads_count || 0} leads)` : `👤 ${c.name} (${c.assigned_leads_count || 0} leads)`}
                 </option>
               );
             })}
@@ -1376,9 +1382,9 @@ export const LeadsPage: React.FC = () => {
                 gap: '0.35rem',
                 cursor: 'pointer',
               }}
-              title="Assign the selected prospects to Bland AI and start calling them now (inside calling hours)"
+              title="Assign the selected prospects to Sarah Voice AI and start calling them now (inside calling hours)"
             >
-              ▶ Assign & Start Bland AI ({selectedIds.length})
+              ▶ Assign & Start Sarah AI ({selectedIds.length})
             </button>
             <button
               type="button"
@@ -1397,9 +1403,9 @@ export const LeadsPage: React.FC = () => {
                 gap: '0.35rem',
                 cursor: 'pointer',
               }}
-              title="Assign the selected prospects to Bland AI — they are called automatically Mon–Fri 9–7 and Sat–Sun 9–6 (Arizona time)"
+              title="Assign the selected prospects to Sarah Voice AI — they are called automatically Mon–Fri 9–7 and Sat–Sun 9–6 (Arizona time)"
             >
-              🤖 Assign to Bland AI
+              🎙️ Assign to Sarah AI
             </button>
             <button
               type="button"
@@ -1418,9 +1424,9 @@ export const LeadsPage: React.FC = () => {
                 gap: '0.35rem',
                 cursor: 'pointer',
               }}
-              title="Stop all active Bland AI outbound calls"
+              title="Stop all active Sarah Voice AI outbound calls"
             >
-              ⏹ Stop Bland AI
+              ⏹ Stop Sarah AI
             </button>
             {isAdmin && (
               <button
