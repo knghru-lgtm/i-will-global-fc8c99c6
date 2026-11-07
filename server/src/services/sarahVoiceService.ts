@@ -1150,31 +1150,14 @@ async function runClonedBlandScenario(
     };
   }
 
-  // 3. Outbound Call Progression: Step 1 (How are you today?) -> Step 2 (2027 Value Hook) -> Step 3 (3-Point Summary)
+  // 3. Empathy-First Fiduciary Objection Handling (`bland.json` Section 4)
   if (
-    lastSarahMsg.includes('how are you today') &&
-    !/\b(not interested|stop|remove|do not call|busy|cost|catch|happy with my)\b/i.test(lower)
+    /\b(happy with my|keep my plan|don't want to change|already have a plan|already have an agent|already have a broker|satisfied with my)\b/i.test(
+      lower
+    )
   ) {
     return {
-      scenario: 'Outbound 2027 Value Hook',
-      reply: `I'm doing wonderful, thank you for asking, ${firstName}! We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?`,
-    };
-  }
-
-  if (
-    (lastSarahMsg.includes('upcoming changes for 2027') || lastSarahMsg.includes('changes for 2027')) &&
-    (isAffirmative || /\b(what changes|tell me|what are they|go ahead|sure|yes)\b/i.test(lower))
-  ) {
-    return {
-      scenario: '3-Point High-Impact 2027 Medicare Summary & Assumptive Close',
-      reply: `Absolutely, ${firstName}! First, under Original Medicare for 2027, Part A has a $1,788 hospital deductible and Part B is projected at $209.50 a month with a $292 deductible, leaving an uncapped 20% medical coinsurance with no annual limit. Second, Part D now caps annual out-of-pocket prescription costs at $2,400 with a $700 max deductible, a $35 insulin cap, and $0 adult vaccines—though carrier drug formularies change every January. Third, that is why we run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage plans—to ensure your exact doctors and medications are covered at the lowest possible cost. To make this completely effortless for you, ${firstName}, our Principal Broker King Amen Ra can verify your doctors and prescriptions in just a few minutes at zero cost. Would you like me to reach out and get him on the line for you right now?`,
-    };
-  }
-
-  // 4. Empathy-First Fiduciary Objection Handling (`bland.json` Section 4)
-  if (/\b(happy with my|keep my plan|don't want to change|already have a plan|satisfied with my)\b/i.test(lower)) {
-    return {
-      scenario: 'Objection: Happy With Current Plan',
+      scenario: 'Objection: Happy With Current Plan / Agent',
       reply: `I love hearing that, ${firstName}, and our goal is never to move you if your current plan is still the number one option for you. Because insurance carriers adjust their doctor networks, drug tiers, and copays for 2027, our free 5-minute fiduciary audit simply confirms that your current plan still gives you the highest benefits at the lowest cost—and if it does, we tell you to stay right where you are. Let’s have King Amen Ra verify that for your peace of mind, fair enough?`,
     };
   }
@@ -1190,6 +1173,28 @@ async function runClonedBlandScenario(
     return {
       scenario: 'Objection: Busy / Schedule Appointment',
       reply: `I completely respect your time, ${firstName}. Because there are over 104 carriers, mailing generic brochures wouldn't show which plan covers your specific doctors and prescriptions. Instead, let’s lock in a quick 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video appointment at a time that is convenient for you, and we’ll prepare your custom 1-page summary in advance. Which of those three do you prefer, and does tomorrow morning or afternoon work better?`,
+    };
+  }
+
+  // 4. Outbound Call Progression: Step 1 (How are you today?) -> Step 2 (2027 Value Hook) -> Step 3 (3-Point Summary)
+  if (
+    lastSarahMsg.includes('how are you today') &&
+    !/\b(not interested|stop|remove|do not call|part a|part b|part d|medigap|iul|long-term|group|aca)\b/i.test(lower)
+  ) {
+    const askedHowSarahIs = /\b(how are you|and you|how about you)\b/i.test(lower);
+    return {
+      scenario: 'Outbound 2027 Value Hook',
+      reply: `${askedHowSarahIs ? `I'm doing wonderful, thank you for asking, ${firstName}! ` : `Wonderful, ${firstName}! `}We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?`,
+    };
+  }
+
+  if (
+    (lastSarahMsg.includes('upcoming changes for 2027') || lastSarahMsg.includes('changes for 2027')) &&
+    (isAffirmative || /\b(what changes|tell me|what are they|go ahead|sure|yes)\b/i.test(lower))
+  ) {
+    return {
+      scenario: '3-Point High-Impact 2027 Medicare Summary & Assumptive Close',
+      reply: `Absolutely, ${firstName}! First, under Original Medicare for 2027, Part A has a $1,788 hospital deductible and Part B is projected at $209.50 a month with a $292 deductible, leaving an uncapped 20% medical coinsurance with no annual limit. Second, Part D now caps annual out-of-pocket prescription costs at $2,400 with a $700 max deductible, a $35 insulin cap, and $0 adult vaccines—though carrier drug formularies change every January. Third, that is why we run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage plans—to ensure your exact doctors and medications are covered at the lowest possible cost. To make this completely effortless for you, ${firstName}, our Principal Broker King Amen Ra can verify your doctors and prescriptions in just a few minutes at zero cost. Would you like me to reach out and get him on the line for you right now?`,
     };
   }
 
