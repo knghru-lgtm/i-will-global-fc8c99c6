@@ -255,8 +255,29 @@ export const BLAND_VOICES = [
   { id: 'tina', name: 'Tina (Friendly & Patient Receptionist)', gender: 'Female', accent: 'American', is_recommended: false },
 ];
 
+let settingsTableReady = false;
+async function ensureSettingsTable(): Promise<void> {
+  if (settingsTableReady) return;
+  try {
+    await q(`CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`);
+    settingsTableReady = true;
+  } catch {
+    // ignore
+  }
+}
+
 export async function getBlandConfig(): Promise<BlandConfig> {
-  const row = await one(`SELECT value FROM settings WHERE key='bland_ai_config'`);
+  await ensureSettingsTable();
+  let row: any = null;
+  try {
+    row = await one(`SELECT value FROM settings WHERE key='bland_ai_config'`);
+  } catch {
+    row = null;
+  }
   const val = row?.value || {};
   const envKey = process.env.BLAND_API_KEY || '';
 
@@ -317,6 +338,7 @@ export async function getBlandConfig(): Promise<BlandConfig> {
 }
 
 export async function saveBlandConfig(partial: Partial<BlandConfig>): Promise<BlandConfig> {
+  await ensureSettingsTable();
   const current = await getBlandConfig();
   const merged: BlandConfig = {
     ...current,

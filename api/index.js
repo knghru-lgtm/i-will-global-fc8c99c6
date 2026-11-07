@@ -1117,8 +1117,26 @@ async function getInboundDirectory() {
     transfer_list
   };
 }
+async function ensureSettingsTable() {
+  if (settingsTableReady) return;
+  try {
+    await q(`CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )`);
+    settingsTableReady = true;
+  } catch {
+  }
+}
 async function getBlandConfig() {
-  const row = await one(`SELECT value FROM settings WHERE key='bland_ai_config'`);
+  await ensureSettingsTable();
+  let row = null;
+  try {
+    row = await one(`SELECT value FROM settings WHERE key='bland_ai_config'`);
+  } catch {
+    row = null;
+  }
   const val = row?.value || {};
   const envKey = process.env.BLAND_API_KEY || "";
   let dbWarmTransferActive = false;
@@ -1173,6 +1191,7 @@ async function getBlandConfig() {
   };
 }
 async function saveBlandConfig(partial) {
+  await ensureSettingsTable();
   const current = await getBlandConfig();
   const merged = {
     ...current,
@@ -2155,7 +2174,7 @@ Summary: ${summary || "Qualified on outbound AI call"}`,
     next_call_dispatched: nextDispatched
   };
 }
-var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, AGENCY_MAIN_LINE_E164, TRANSFER_DESK_E164, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, IWG_TEAM_DIRECTORY, BLAND_VOICES, BLAND_AI_USER_ID, BLAND_AI_USER, PHOENIX_OFFSET_MS, DAY_NAMES, STATE_TIMEZONES, STATE_LATEST_LOCAL_HOUR, ALL_CALLABLE_LEADS_WHERE, BLAND_ASSIGNED_CALLABLE_SQL;
+var DEFAULT_BLAND_PATHWAY_ID, DEFAULT_BLAND_CALLER_ID, AGENCY_MAIN_LINE_E164, TRANSFER_DESK_E164, ALLOWED_APPOINTMENT_TYPES, ALLOWED_BLAND_APPOINTMENT_TYPES, DEFAULT_BLAND_PROMPT, IWG_TEAM_DIRECTORY, BLAND_VOICES, settingsTableReady, BLAND_AI_USER_ID, BLAND_AI_USER, PHOENIX_OFFSET_MS, DAY_NAMES, STATE_TIMEZONES, STATE_LATEST_LOCAL_HOUR, ALL_CALLABLE_LEADS_WHERE, BLAND_ASSIGNED_CALLABLE_SQL;
 var init_bland = __esm({
   "server/src/services/bland.ts"() {
     "use strict";
@@ -2268,6 +2287,7 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
       { id: "mason", name: "Mason (Clear & Articulate Male)", gender: "Male", accent: "American", is_recommended: false },
       { id: "tina", name: "Tina (Friendly & Patient Receptionist)", gender: "Female", accent: "American", is_recommended: false }
     ];
+    settingsTableReady = false;
     BLAND_AI_USER_ID = "u_bland_ai";
     BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: "Sarah \u2014 Voice AI Receptionist & Outbound Caller", email: "sarah@iwillglobal.com", role: "scheduler", phone: "(480) 331-9455" };
     PHOENIX_OFFSET_MS = 7 * 3600 * 1e3;
