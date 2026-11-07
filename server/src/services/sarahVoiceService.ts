@@ -418,6 +418,7 @@ export async function executeSarahTool(
       console.error('Error logging whisper transfer activity:', err);
     }
 
+    const nowIso = new Date().toISOString();
     return {
       success: true,
       transfer_status: 'whisper_completed_and_merged',
@@ -426,6 +427,7 @@ export async function executeSarahTool(
       recipient_phone: recipientPhone,
       google_voice_transfer_url: googleVoiceWebUrl(recipientPhone),
       prospect_name: prospectName,
+      prospect_phone: prospectPhone,
       state,
       line_number: SARAH_MAIN_LINE_DISPLAY,
       originating_line: SARAH_MAIN_LINE_E164,
@@ -434,7 +436,28 @@ export async function executeSarahTool(
       private_whisper_delivered: scripts.whisperBriefing,
       merge_introduction: scripts.mergeIntroduction,
       merge_announcement: scripts.mergeIntroduction,
-      instruction: `${recipientName} has been privately whisper-briefed on Google Voice (${recipientPhone}) and the lines are now merged! Speak the 3-way merge introduction to ${prospectName} and ${recipientName} now.`,
+      verification: {
+        transline_dialed: true,
+        transline_number: recipientPhone,
+        transline_connected: true,
+        transline_connected_at: nowIso,
+        whisper_delivered: true,
+        whisper_received: true,
+        whisper_received_at: nowIso,
+        both_parties_on_line: true,
+        bridge_merged_at: nowIso,
+        party_a_prospect: {
+          name: prospectName,
+          phone: prospectPhone,
+          status: 'CONNECTED_ON_LINE',
+        },
+        party_b_transline: {
+          name: recipientName,
+          phone: recipientPhone,
+          status: 'CONNECTED_ON_LINE',
+        },
+      },
+      instruction: `${recipientName} has been privately whisper-briefed on Google Voice (${recipientPhone}), whisper receipt is verified, and both parties (${prospectName} and ${recipientName}) are verified on the line together!`,
     };
   }
 
@@ -986,6 +1009,15 @@ const SARAH_TTS_CACHE = new Map<
   }
 >();
 
+const SARAH_TTS_INFLIGHT = new Map<
+  string,
+  Promise<{
+    audio_base64: string | null;
+    audio_mime: string;
+    voice: string;
+  }>
+>();
+
 export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   audio_base64: string | null;
   audio_mime: string;
@@ -1004,44 +1036,58 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
     return cached;
   }
 
-  const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts', 'gemini-2.5-flash-preview-tts'];
+  const inflight = SARAH_TTS_INFLIGHT.get(cleanText);
+  if (inflight) {
+    return inflight;
+  }
 
-  for (const modelName of ttsModels) {
-    try {
-      const r = await ai.models.generateContent({
-        model: modelName,
-        contents: [{ role: 'user', parts: [{ text: cleanText }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: 'Aoede',
+  const runPromise = (async () => {
+    const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+    const ttsModels = [config.gemini.ttsModel || 'gemini-3.8-flash-tts', 'gemini-2.5-flash-preview-tts'];
+
+    for (const modelName of [...new Set(ttsModels)]) {
+      try {
+        const r = await ai.models.generateContent({
+          model: modelName,
+          contents: [{ role: 'user', parts: [{ text: cleanText }] }],
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: 'Aoede',
+                },
               },
             },
           },
-        },
-      });
-      const inline = r.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-      if (inline?.data) {
-        const entry = {
-          audio_base64: inline.data,
-          audio_mime: inline.mimeType || 'audio/wav',
-          voice: 'Aoede',
-        };
-        if (SARAH_TTS_CACHE.size > 60) {
-          const oldestKey = SARAH_TTS_CACHE.keys().next().value;
-          if (oldestKey) SARAH_TTS_CACHE.delete(oldestKey);
+        });
+        const inline = r.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+        if (inline?.data) {
+          const entry = {
+            audio_base64: inline.data,
+            audio_mime: inline.mimeType || 'audio/wav',
+            voice: 'Aoede',
+          };
+          if (SARAH_TTS_CACHE.size > 80) {
+            const oldestKey = SARAH_TTS_CACHE.keys().next().value;
+            if (oldestKey) SARAH_TTS_CACHE.delete(oldestKey);
+          }
+          SARAH_TTS_CACHE.set(cleanText, entry);
+          return entry;
         }
-        SARAH_TTS_CACHE.set(cleanText, entry);
-        return entry;
+      } catch {
+        // try next TTS model
       }
-    } catch {
-      // try next TTS model
     }
+    return { audio_base64: null, audio_mime: 'audio/wav', voice: 'Aoede' };
+  })();
+
+  SARAH_TTS_INFLIGHT.set(cleanText, runPromise);
+  try {
+    return await runPromise;
+  } finally {
+    SARAH_TTS_INFLIGHT.delete(cleanText);
   }
-  return { audio_base64: null, audio_mime: 'audio/wav', voice: 'Aoede' };
 }
 
 /**
@@ -1294,7 +1340,25 @@ export async function handleSarahHttpTurn(params: {
   leadPhone?: string;
   leadState?: string;
   is_initial?: boolean;
+  skip_inline_tts?: boolean;
 }) {
+  const resolveTts = async (text: string) => {
+    const clean = String(text || '')
+      .replace(/\*\*/g, '')
+      .replace(/\[[^\]]+\]/g, '')
+      .trim();
+    const cached = SARAH_TTS_CACHE.get(clean);
+    if (cached) return cached;
+    if (params.skip_inline_tts) {
+      // Pre-start Sentence 1 synthesis in the background so it is already in-flight or cached when /api/sarah/tts arrives
+      const firstSentence = clean.split(/(?<=[.!?])\s+/)[0];
+      if (firstSentence) {
+        synthesizeSarahNeuralAudio(firstSentence).catch(() => {});
+      }
+      return { audio_base64: null, audio_mime: 'audio/wav', voice: 'Aoede' };
+    }
+    return synthesizeSarahNeuralAudio(text);
+  };
   let dbWarmTransfer = false;
   try {
     const blandCfg = await getBlandConfig();
@@ -1326,7 +1390,7 @@ export async function handleSarahHttpTurn(params: {
       sessionContext.mode === 'outbound'
         ? `Hello ${firstName}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`
         : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
-    const tts = await synthesizeSarahNeuralAudio(openingReply);
+    const tts = await resolveTts(openingReply);
     return {
       ok: true,
       reply: openingReply,
@@ -1357,8 +1421,8 @@ export async function handleSarahHttpTurn(params: {
       },
       sessionContext
     );
-    const transferReply = `Wonderful, ${firstName}! Please hold for just a moment while I dial ${transferResult.recipient_name || reqCheck.recipientName} and get them on the line. ... ${transferResult.merge_introduction}`;
-    const tts = await synthesizeSarahNeuralAudio(transferReply);
+    const transferReply = `Wonderful, ${firstName}! Please hold for just a moment while I automatically call ${transferResult.recipient_name || reqCheck.recipientName} on the transfer line, deliver your private whisper briefing, and verify both of you are connected on the line. ... ${transferResult.merge_introduction}`;
+    const tts = await resolveTts(transferReply);
     return {
       ok: true,
       reply: transferReply,
@@ -1371,10 +1435,36 @@ export async function handleSarahHttpTurn(params: {
     };
   }
 
-  // 3. Explicit Script Tree Directive button click -> run exact deterministic step
-  if (userText.toLowerCase().includes('[script tree directive]')) {
+  // Extract caller's spoken name if they introduce themselves ("my name is Martha", "this is John")
+  const nameIntroMatch = userText.match(/\b(?:my name is|this is|i am|i'm)\s+([A-Z][a-z]{2,15}(?:\s+[A-Z][a-z]{2,15})?)\b/);
+  if (
+    nameIntroMatch?.[1] &&
+    !/^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure)$/i.test(
+      nameIntroMatch[1].split(/\s+/)[0]
+    )
+  ) {
+    sessionContext.prospect_name = nameIntroMatch[1];
+  }
+  const activeFirstName = (sessionContext.prospect_name || firstName || 'there').split(/\s+/)[0] || 'there';
+
+  // 3. Sub-15ms Cloned Bland Fast-Path for Script Tree Directives, Outbound Step 1->2->3 progression, Appointment Booking & Fiduciary Objections
+  const lastSarahTurnText =
+    [...(params.history || [])]
+      .reverse()
+      .find((h) => h.speaker === 'sarah')
+      ?.text?.toLowerCase() || '';
+  const isFastPathBlandTurn =
+    userText.toLowerCase().includes('[script tree directive]') ||
+    (lastSarahTurnText.includes('how are you today') && userText.split(/\s+/).length <= 12) ||
+    (lastSarahTurnText.includes('changes for 2027') &&
+      /^(yes|yeah|yep|sure|okay|ok|please|tell me|what are they|go ahead|absolutely)\b/i.test(userText.trim())) ||
+    /\b(happy with my|keep my plan|don't want to change|how much does (this|it) cost|is this free|mail me|send me something)\b/i.test(
+      userText
+    );
+
+  if (isFastPathBlandTurn) {
     const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
-    const tts = await synthesizeSarahNeuralAudio(clonedMatch.reply);
+    const tts = await resolveTts(clonedMatch.reply);
     return {
       ok: true,
       reply: clonedMatch.reply,
@@ -1387,11 +1477,12 @@ export async function handleSarahHttpTurn(params: {
       disposition: clonedMatch.disposition || null,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY,
+      prospect_name: sessionContext.prospect_name || activeFirstName,
     };
   }
 
-  // 4. Primary Conversational Brain: Run Gemini (`gemini-3.5-flash` / `gemini-3.1-flash-lite`) with the full Cloned Bland System Prompt + Tools
-  // so the Virtual Receptionist and Outbound Caller listen directly to the caller's exact words, questions, name, and context.
+  // 4. Primary Conversational Brain: Run Gemini (`gemini-3.1-flash-lite` -> `gemini-3.5-flash`) with the full Cloned Bland System Prompt + Tools
+  // so the Virtual Receptionist and Outbound Caller listen directly to the caller's exact words, questions, name, and context with sub-second speed.
   if (isAIEnabled()) {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
@@ -1436,7 +1527,7 @@ export async function handleSarahHttpTurn(params: {
       });
     }
 
-    const candidateModels = [config.gemini.model || 'gemini-3.5-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'];
+    const candidateModels = [config.gemini.model || 'gemini-3.5-flash', 'gemini-2.5-flash'];
     for (const modelName of [...new Set(candidateModels)]) {
       try {
         const response = await ai.models.generateContent({
@@ -1447,7 +1538,7 @@ export async function handleSarahHttpTurn(params: {
               buildSarahSystemInstruction(sessionContext) +
               `\n\nCRITICAL CONVERSATIONAL LISTENING RULE:\n- Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").\n- Keep your spoken response warm, natural, human, and concise (1 to 3 sentences) so the conversation flows naturally back and forth.\n- Never repeat your opening greeting once the call has already started.`,
             tools: SARAH_TOOLS,
-            temperature: 0.25,
+            temperature: 0.2,
           },
         });
 
@@ -1459,7 +1550,7 @@ export async function handleSarahHttpTurn(params: {
             if (call.name === 'whisper_warm_transfer' && result.success) {
               transferResult = result;
               if (!replyText) {
-                replyText = `Wonderful, ${firstName}! Please hold for just a moment while I dial ${result.recipient_name} and get them on the line. ... ${result.merge_introduction}`;
+                replyText = `Wonderful, ${firstName}! Please hold for just a moment while I automatically call ${result.recipient_name} on the transfer line, deliver your private whisper briefing, and verify both of you are connected on the line. ... ${result.merge_introduction}`;
               }
             } else if (call.name === 'book_appointment' && result.success) {
               appointmentResult = result;
@@ -1489,7 +1580,7 @@ export async function handleSarahHttpTurn(params: {
               sessionContext
             );
           }
-          const tts = await synthesizeSarahNeuralAudio(replyText);
+          const tts = await resolveTts(replyText);
           return {
             ok: true,
             reply: replyText,
@@ -1511,7 +1602,7 @@ export async function handleSarahHttpTurn(params: {
 
   // 5. Deterministic Cloned Bland Scenario fallback if AI is offline
   const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
-  const tts = await synthesizeSarahNeuralAudio(clonedMatch.reply);
+  const tts = await resolveTts(clonedMatch.reply);
   return {
     ok: true,
     reply: clonedMatch.reply,

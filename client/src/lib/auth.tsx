@@ -34,6 +34,7 @@ interface AuthContextType {
   isManager: boolean;
   isLicensed: boolean;
   isScheduler: boolean;
+  isAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -80,7 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isExecutiveAdmin = user?.email?.toLowerCase() === 'king@iwillglobal.com' || user?.email?.toLowerCase() === 'aneesha@iwillglobal.com';
-  const effectiveRole: Role = isExecutiveAdmin ? 'admin' : (activeRoleOverride || user?.role || 'licensed_agent');
+  const effectiveRole: Role = activeRoleOverride || (isExecutiveAdmin ? 'admin' : (user?.role || 'licensed_agent'));
+  const isAdminRole = Boolean(user && effectiveRole === 'admin');
   const isManagerRole = effectiveRole === 'admin' || effectiveRole === 'manager';
   const isLicensedRole = effectiveRole === 'licensed_agent' || isManagerRole;
   const isSchedulerRole = effectiveRole === 'scheduler';
@@ -100,6 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isManager: isManagerRole,
         isLicensed: isLicensedRole,
         isScheduler: isSchedulerRole,
+        isAdmin: isAdminRole,
       }}
     >
       {children}

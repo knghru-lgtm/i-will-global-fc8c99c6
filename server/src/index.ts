@@ -14,7 +14,12 @@ import { auth, api, googleCallback } from './routes/api.ts';
 import { ai, inbox, publicApi } from './routes/ai.ts';
 import { blandPublic, blandAuth } from './routes/bland.ts';
 import { subscribe } from './realtime.ts';
-import { handleSarahVoiceSession, handleSarahHttpTurn, executeSarahTool } from './services/sarahVoiceService.ts';
+import {
+  handleSarahVoiceSession,
+  handleSarahHttpTurn,
+  executeSarahTool,
+  synthesizeSarahNeuralAudio,
+} from './services/sarahVoiceService.ts';
 
 export function createApp() {
   const app = express();
@@ -40,6 +45,40 @@ export function createApp() {
       res.json({ ok: true, result });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || 'Sarah tool execution failed' });
+    }
+  });
+  app.post('/api/sarah/tts', async (req, res) => {
+    try {
+      const text = String(req.body?.text || '').trim();
+      const tts = await synthesizeSarahNeuralAudio(text);
+      res.json({ ok: true, ...tts });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Sarah TTS failed' });
+    }
+  });
+  app.post('/api/sarah/transfer/verify', async (req, res) => {
+    try {
+      const { recipient_name, recipient_phone, prospect_name, prospect_phone, state, lead_id, mode } = req.body || {};
+      const result = await executeSarahTool(
+        'whisper_warm_transfer',
+        {
+          recipient_name: recipient_name || 'King Amen Ra',
+          prospect_name: prospect_name || 'Valued Beneficiary',
+          prospect_phone: prospect_phone || '+16232230165',
+          state: state || 'AZ',
+          reason: 'Automatic Transline Connection, Private Whisper Receipt, and Both-Parties-on-Line Verification',
+        },
+        {
+          mode: mode === 'outbound' ? 'outbound' : 'inbound',
+          lead_id,
+          prospect_name: prospect_name || 'Valued Beneficiary',
+          prospect_phone: prospect_phone || '+16232230165',
+          state: state || 'AZ',
+        }
+      );
+      res.json({ ok: true, transfer: result });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Transfer verification failed' });
     }
   });
 

@@ -154,7 +154,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             type="button"
             onClick={() => {
               setIsMobileMenuOpen(false);
-              window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }));
+              window.dispatchEvent(
+                new CustomEvent('iwg-open-sarah-voice', {
+                  detail: { mode: activeRole === 'admin' ? 'outbound' : 'inbound' },
+                })
+              );
             }}
             style={{
               margin: '0.25rem 0.5rem 0.5rem 0.5rem',
@@ -172,13 +176,17 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
               textAlign: 'left',
             }}
-            title="Activate Sarah Voice AI on (480) 331-9455 to Call Leads & Schedule Appointments"
+            title={
+              activeRole === 'admin'
+                ? 'Activate Sarah Voice AI on (480) 331-9455 to Call Assigned Leads & Schedule Appointments'
+                : 'Sarah Virtual Receptionist on (480) 331-9455'
+            }
           >
             <span style={{ fontSize: '1.1rem' }}>🎙️</span>
             <span style={{ lineHeight: 1.2 }}>
               Sarah Voice AI
               <span style={{ display: 'block', fontSize: '0.68rem', color: '#a7f3d0', fontWeight: 700 }}>
-                🚀 Activate & Call (480) 331-9455
+                {activeRole === 'admin' ? '🚀 Activate & Call (480) 331-9455' : '🏢 Receptionist (480) 331-9455'}
               </span>
             </span>
           </button>
@@ -290,12 +298,22 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               }
             }}
           >
-            {/* 1. Talk to Sarah Voice AI Receptionist & Outbound Caller (480) 331-9455 — FIRST BUTTON IN TOP BAR */}
+            {/* 1. Talk to Sarah Voice AI Receptionist & (Admin-Only) Outbound Caller (480) 331-9455 — FIRST BUTTON IN TOP BAR */}
             <button
               type="button"
               className="btn header-tool-btn"
-              onClick={() => window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }))}
-              title="Sarah Voice AI — (480) 331-9455 Virtual Receptionist & Outbound Caller (100% Free Spoken Audio, $0.00 Carrier Bills)"
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('iwg-open-sarah-voice', {
+                    detail: { mode: activeRole === 'admin' ? 'outbound' : 'inbound' },
+                  })
+                )
+              }
+              title={
+                activeRole === 'admin'
+                  ? 'Sarah Voice AI — (480) 331-9455 Virtual Receptionist & Admin Outbound Caller'
+                  : 'Sarah Voice AI — (480) 331-9455 Virtual Receptionist'
+              }
               style={{
                 background: 'linear-gradient(135deg, #059669 0%, #0284c7 100%)',
                 borderColor: '#34d399',
@@ -311,33 +329,35 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
               <span className="btn-text">Sarah (480) 331-9455</span>
             </button>
 
-            {/* 2. Activate Sarah AI Outbound Campaign & Warm-Transfer Control */}
-            <button
-              type="button"
-              className="btn header-tool-btn"
-              onClick={() => setIsBlandControlOpen(true)}
-              title="Activate Sarah Voice AI to begin calling leads & scheduling Telephone (30m), In-Person (60m), or Video (30m) appointments"
-              style={{
-                background: blandStatus.is_on_warm_transfer
-                  ? 'linear-gradient(135deg, #f59e0b, #7c3aed)'
-                  : blandStatus.is_campaign_active
-                  ? 'linear-gradient(135deg, #059669, #7c3aed)'
-                  : 'linear-gradient(135deg, #7c3aed, #9333ea)',
-                borderColor: blandStatus.is_on_warm_transfer ? '#fbbf24' : '#a855f7',
-                color: '#ffffff',
-                fontWeight: 800,
-                boxShadow: '0 0 14px rgba(139, 92, 246, 0.45)',
-              }}
-            >
-              <span>{blandStatus.is_on_warm_transfer ? '🔥🎙️' : '🚀'}</span>
-              <span className="btn-text">
-                {blandStatus.is_on_warm_transfer
-                  ? 'Sarah AI (Warm Transfer: Appt Only)'
-                  : blandStatus.is_campaign_active
-                  ? 'Sarah AI (Calling Active)'
-                  : 'Activate Sarah AI'}
-              </span>
-            </button>
+            {/* 2. Admin-Only: Activate Sarah AI Outbound Scheduling Workday & Warm-Transfer Control */}
+            {activeRole === 'admin' && (
+              <button
+                type="button"
+                className="btn header-tool-btn"
+                onClick={() => setIsBlandControlOpen(true)}
+                title="Admin Only: Activate Sarah Voice AI to start her scheduling workday & call all assigned leads"
+                style={{
+                  background: blandStatus.is_on_warm_transfer
+                    ? 'linear-gradient(135deg, #f59e0b, #7c3aed)'
+                    : blandStatus.is_campaign_active
+                    ? 'linear-gradient(135deg, #059669, #7c3aed)'
+                    : 'linear-gradient(135deg, #7c3aed, #9333ea)',
+                  borderColor: blandStatus.is_on_warm_transfer ? '#fbbf24' : '#a855f7',
+                  color: '#ffffff',
+                  fontWeight: 800,
+                  boxShadow: '0 0 14px rgba(139, 92, 246, 0.45)',
+                }}
+              >
+                <span>{blandStatus.is_on_warm_transfer ? '🔥🎙️' : '🚀'}</span>
+                <span className="btn-text">
+                  {blandStatus.is_on_warm_transfer
+                    ? 'Sarah AI (Warm Transfer: Appt Only)'
+                    : blandStatus.is_campaign_active
+                    ? 'Sarah Workday Active'
+                    : 'Activate Sarah AI'}
+                </span>
+              </button>
+            )}
 
             {/* Quoting Portals Dropdown */}
             <div className="quoting-tools-dropdown-container" onClick={(e) => e.stopPropagation()}>

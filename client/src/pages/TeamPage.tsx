@@ -275,44 +275,48 @@ export const TeamPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
-            <input
-              type="tel"
-              value={sarahPhone}
-              onChange={(e) => setSarahPhone(e.target.value)}
-              placeholder="Phone (e.g. 6232230165) or blank for Queue"
-              style={{
-                padding: '0.5rem 0.75rem',
-                borderRadius: '8px',
-                border: '1px solid rgba(16, 185, 129, 0.5)',
-                background: 'rgba(15, 23, 42, 0.85)',
-                color: '#fff',
-                fontSize: '0.85rem',
-                width: '185px',
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => handleActivateSarah()}
-              disabled={activatingSarah}
-              style={{
-                padding: '0.55rem 1rem',
-                borderRadius: '8px',
-                border: '1px solid #34d399',
-                background: 'linear-gradient(135deg, #10b981, #059669)',
-                color: '#ffffff',
-                fontWeight: 800,
-                fontSize: '0.84rem',
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-              }}
-            >
-              {activatingSarah ? 'Dialing...' : `🚀 Activate Sarah & Call ${sarahPhone || 'Queue'}`}
-            </button>
+            {isAdmin && (
+              <>
+                <input
+                  type="tel"
+                  value={sarahPhone}
+                  onChange={(e) => setSarahPhone(e.target.value)}
+                  placeholder="Phone (e.g. 6232230165) or blank for Queue"
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(16, 185, 129, 0.5)',
+                    background: 'rgba(15, 23, 42, 0.85)',
+                    color: '#fff',
+                    fontSize: '0.85rem',
+                    width: '185px',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleActivateSarah()}
+                  disabled={activatingSarah}
+                  style={{
+                    padding: '0.55rem 1rem',
+                    borderRadius: '8px',
+                    border: '1px solid #34d399',
+                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                    color: '#ffffff',
+                    fontWeight: 800,
+                    fontSize: '0.84rem',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                  }}
+                >
+                  {activatingSarah ? 'Starting Workday...' : `🚀 Activate Sarah Workday & Call ${sarahPhone || 'Assigned Leads'}`}
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() =>
                 openSarahVoiceModal({
-                  mode: 'outbound',
+                  mode: isAdmin ? 'outbound' : 'inbound',
                   leadPhone: sarahPhone || '(623) 223-0165',
                   leadName: 'Valued Beneficiary',
                   leadState: 'AZ',
@@ -327,7 +331,7 @@ export const TeamPage: React.FC = () => {
                 color: '#fde68a',
               }}
             >
-              🎙️ Sarah Voice & Script Console
+              {isAdmin ? '🎙️ Sarah Outbound & Receptionist Console' : '🎙️ Sarah Virtual Receptionist'}
             </button>
             <Link
               to="/leads"
@@ -471,7 +475,7 @@ export const TeamPage: React.FC = () => {
                   {isManager && (
                     <td>
                       <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                        {isSarah && (
+                        {isSarah && isAdmin && (
                           <button
                             type="button"
                             onClick={() => handleActivateSarah()}
@@ -485,9 +489,9 @@ export const TeamPage: React.FC = () => {
                               borderRadius: '6px',
                               cursor: 'pointer',
                             }}
-                            title="Activate Sarah Voice AI on (480) 331-9455 to call leads and schedule appointments"
+                            title="Admin Only: Activate Sarah Voice AI on (480) 331-9455 to start scheduling workday & call assigned leads"
                           >
-                            🚀 Activate Sarah & Call
+                            🚀 Activate Sarah Workday
                           </button>
                         )}
                         <button
