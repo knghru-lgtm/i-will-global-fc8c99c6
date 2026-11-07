@@ -738,14 +738,20 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: {
-              voiceName: 'Aoede', // Warm, clear, empathetic American female voice matching Sarah
+              voiceName: 'Vindemiatrix', // Calm, relaxed, warm, realistic human female voice
             },
           },
         },
         inputAudioTranscription: {},
         outputAudioTranscription: {},
         systemInstruction: {
-          parts: [{ text: buildSarahSystemInstruction(sessionContext) }],
+          parts: [
+            {
+              text:
+                buildSarahSystemInstruction(sessionContext) +
+                '\n\nVOICE DELIVERY STYLE: Speak in the calm, relaxed, warm, unhurried, and deeply human Vindemiatrix voice—just like our cloned Bland agent.',
+            },
+          ],
         },
         tools: SARAH_TOOLS,
       },
@@ -755,7 +761,7 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
             clientWs.send(
               JSON.stringify({
                 type: 'ready',
-                voice: 'Aoede',
+                voice: 'Vindemiatrix',
                 mode: sessionContext.mode,
                 line: SARAH_MAIN_LINE_DISPLAY,
                 line_number: SARAH_MAIN_LINE_DISPLAY,
@@ -998,8 +1004,10 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
 
 /**
  * Ultra-Realistic Human Neural Voice Synthesizer (Cloned Bland Voice Engine).
- * Uses Gemini 3.8 Flash TTS (`Aoede` warm human female voice) to produce natural 24kHz WAV audio.
+ * Uses Gemini TTS (`Vindemiatrix` calm, relaxed, warm human female voice) to produce standard 24kHz RIFF WAV audio.
  */
+const SARAH_VOICE_NAME = 'Vindemiatrix';
+
 const SARAH_TTS_CACHE = new Map<
   string,
   {
@@ -1018,6 +1026,72 @@ const SARAH_TTS_INFLIGHT = new Map<
   }>
 >();
 
+let workingTtsModel: string | null = null;
+let workingTextModel: string | null = null;
+
+/**
+ * Wraps raw 24kHz 16-bit mono little-endian PCM (`audio/L16;codec=pcm;rate=24000`)
+ * in a standard 44-byte RIFF WAV header so HTML5 `<audio>` plays it natively with zero errors.
+ */
+function ensureRiffWavBase64(rawBase64: string, sampleRate = 24000): string {
+  const pcmBuf = Buffer.from(rawBase64, 'base64');
+  if (pcmBuf.length >= 4 && pcmBuf.subarray(0, 4).toString('ascii') === 'RIFF') {
+    return rawBase64;
+  }
+  const header = Buffer.alloc(44);
+  const dataLen = pcmBuf.length;
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataLen, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16); // Subchunk1Size (16 for PCM)
+  header.writeUInt16LE(1, 20);  // AudioFormat (1 = PCM)
+  header.writeUInt16LE(1, 22);  // NumChannels (1 = mono)
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28); // ByteRate = SampleRate * NumChannels * BitsPerSample/8
+  header.writeUInt16LE(2, 32);  // BlockAlign = NumChannels * BitsPerSample/8
+  header.writeUInt16LE(16, 34); // BitsPerSample = 16
+  header.write('data', 36);
+  header.writeUInt32LE(dataLen, 40);
+  return Buffer.concat([header, pcmBuf]).toString('base64');
+}
+
+export function splitIntoFastSpeechChunks(text: string): { firstChunk: string; restChunk: string } {
+  const clean = String(text || '')
+    .replace(/\*\*/g, '')
+    .replace(/\[[^\]]+\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return { firstChunk: '', restChunk: '' };
+
+  // First try splitting at the first sentence boundary (. ! ?)
+  const sentenceMatch = clean.match(/^([^.!?]+[.!?]+)\s+([\s\S]+)$/);
+  if (sentenceMatch && sentenceMatch[1].length <= 135) {
+    return {
+      firstChunk: sentenceMatch[1].trim(),
+      restChunk: sentenceMatch[2].trim(),
+    };
+  }
+
+  // If the first sentence is long (> 135 chars), split at the first natural clause comma/dash after 32 chars
+  const clauseMatch = clean.match(/^(.{28,95}[,;—–-])\s+([\s\S]+)$/);
+  if (clauseMatch) {
+    return {
+      firstChunk: clauseMatch[1].trim(),
+      restChunk: clauseMatch[2].trim(),
+    };
+  }
+
+  if (sentenceMatch) {
+    return {
+      firstChunk: sentenceMatch[1].trim(),
+      restChunk: sentenceMatch[2].trim(),
+    };
+  }
+
+  return { firstChunk: clean, restChunk: '' };
+}
+
 export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   audio_base64: string | null;
   audio_mime: string;
@@ -1026,9 +1100,10 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   const cleanText = String(text || '')
     .replace(/\*\*/g, '')
     .replace(/\[[^\]]+\]/g, '')
+    .replace(/\s+/g, ' ')
     .trim();
   if (!cleanText || !isAIEnabled()) {
-    return { audio_base64: null, audio_mime: 'audio/wav', voice: 'Aoede' };
+    return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
   }
 
   const cached = SARAH_TTS_CACHE.get(cleanText);
@@ -1043,19 +1118,25 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
 
   const runPromise = (async () => {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    const ttsModels = [config.gemini.ttsModel || 'gemini-3.8-flash-tts', 'gemini-2.5-flash-preview-tts'];
+    const baseModels = ['gemini-2.5-flash-preview-tts', config.gemini.ttsModel || 'gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
+    const ttsModels = workingTtsModel ? [workingTtsModel, ...baseModels] : baseModels;
 
     for (const modelName of [...new Set(ttsModels)]) {
       try {
         const r = await ai.models.generateContent({
           model: modelName,
-          contents: [{ role: 'user', parts: [{ text: cleanText }] }],
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: cleanText }],
+            },
+          ],
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
               voiceConfig: {
                 prebuiltVoiceConfig: {
-                  voiceName: 'Aoede',
+                  voiceName: SARAH_VOICE_NAME,
                 },
               },
             },
@@ -1063,12 +1144,14 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
         });
         const inline = r.candidates?.[0]?.content?.parts?.[0]?.inlineData;
         if (inline?.data) {
+          workingTtsModel = modelName;
+          const wavBase64 = ensureRiffWavBase64(inline.data, 24000);
           const entry = {
-            audio_base64: inline.data,
-            audio_mime: inline.mimeType || 'audio/wav',
-            voice: 'Aoede',
+            audio_base64: wavBase64,
+            audio_mime: 'audio/wav',
+            voice: SARAH_VOICE_NAME,
           };
-          if (SARAH_TTS_CACHE.size > 80) {
+          if (SARAH_TTS_CACHE.size > 120) {
             const oldestKey = SARAH_TTS_CACHE.keys().next().value;
             if (oldestKey) SARAH_TTS_CACHE.delete(oldestKey);
           }
@@ -1079,7 +1162,7 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
         // try next TTS model
       }
     }
-    return { audio_base64: null, audio_mime: 'audio/wav', voice: 'Aoede' };
+    return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
   })();
 
   SARAH_TTS_INFLIGHT.set(cleanText, runPromise);
@@ -1328,7 +1411,7 @@ async function runClonedBlandScenario(
 
 /**
  * Serverless HTTP Voice Turn handler (`POST /api/sarah/turn`) for Vercel (`iwillglobal.com`) & local CRM.
- * Clones the complete Bland Agent Model (`bland.json`) and synthesizes realistic human neural audio (`Aoede`).
+ * Clones the complete Bland Agent Model (`bland.json`) and synthesizes realistic human neural audio (`Vindemiatrix`).
  */
 export async function handleSarahHttpTurn(params: {
   message?: string;
@@ -1343,28 +1426,51 @@ export async function handleSarahHttpTurn(params: {
   skip_inline_tts?: boolean;
 }) {
   const resolveTts = async (text: string) => {
-    const clean = String(text || '')
-      .replace(/\*\*/g, '')
-      .replace(/\[[^\]]+\]/g, '')
-      .trim();
-    const cached = SARAH_TTS_CACHE.get(clean);
-    if (cached) return cached;
-    if (params.skip_inline_tts) {
-      // Pre-start Sentence 1 synthesis in the background so it is already in-flight or cached when /api/sarah/tts arrives
-      const firstSentence = clean.split(/(?<=[.!?])\s+/)[0];
-      if (firstSentence) {
-        synthesizeSarahNeuralAudio(firstSentence).catch(() => {});
-      }
-      return { audio_base64: null, audio_mime: 'audio/wav', voice: 'Aoede' };
+    const { firstChunk, restChunk } = splitIntoFastSpeechChunks(text);
+    if (!firstChunk) {
+      return {
+        audio_base64: null,
+        audio_mime: 'audio/wav',
+        voice: SARAH_VOICE_NAME,
+        first_chunk_text: '',
+        rest_text: '',
+      };
     }
-    return synthesizeSarahNeuralAudio(text);
+
+    if (params.skip_inline_tts) {
+      synthesizeSarahNeuralAudio(firstChunk).catch(() => {});
+      if (restChunk) synthesizeSarahNeuralAudio(restChunk).catch(() => {});
+      return {
+        audio_base64: null,
+        audio_mime: 'audio/wav',
+        voice: SARAH_VOICE_NAME,
+        first_chunk_text: firstChunk,
+        rest_text: restChunk,
+      };
+    }
+
+    // Start synthesizing restChunk in parallel so it is already in-flight/cached while firstChunk plays
+    if (restChunk) {
+      synthesizeSarahNeuralAudio(restChunk).catch(() => {});
+    }
+    const firstTts = await synthesizeSarahNeuralAudio(firstChunk);
+    return {
+      audio_base64: firstTts.audio_base64,
+      audio_mime: firstTts.audio_mime || 'audio/wav',
+      voice: firstTts.voice || SARAH_VOICE_NAME,
+      first_chunk_text: firstChunk,
+      rest_text: restChunk,
+    };
   };
+
   let dbWarmTransfer = false;
-  try {
-    const blandCfg = await getBlandConfig();
-    dbWarmTransfer = Boolean(blandCfg.is_on_warm_transfer);
-  } catch {
-    // ignore
+  if (params.context?.on_warm_transfer === undefined) {
+    try {
+      const blandCfg = await getBlandConfig();
+      dbWarmTransfer = Boolean(blandCfg.is_on_warm_transfer);
+    } catch {
+      // ignore
+    }
   }
 
   const resolvedMode =
@@ -1396,6 +1502,8 @@ export async function handleSarahHttpTurn(params: {
       reply: openingReply,
       audio_base64: tts.audio_base64,
       audio_mime: tts.audio_mime,
+      first_chunk_text: tts.first_chunk_text,
+      rest_text: tts.rest_text,
       voice: tts.voice,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY,
@@ -1428,6 +1536,8 @@ export async function handleSarahHttpTurn(params: {
       reply: transferReply,
       audio_base64: tts.audio_base64,
       audio_mime: tts.audio_mime,
+      first_chunk_text: tts.first_chunk_text,
+      rest_text: tts.rest_text,
       voice: tts.voice,
       transfer: transferResult,
       mode: sessionContext.mode,
@@ -1447,7 +1557,7 @@ export async function handleSarahHttpTurn(params: {
   }
   const activeFirstName = (sessionContext.prospect_name || firstName || 'there').split(/\s+/)[0] || 'there';
 
-  // 3. Sub-15ms Cloned Bland Fast-Path for Script Tree Directives, Outbound Step 1->2->3 progression, Appointment Booking & Fiduciary Objections
+  // 3. Sub-5ms Cloned Bland Fast-Path for all 10 `bland.json` Scenarios, Script Tree Directives, Outbound Steps, Appointments & Objections
   const lastSarahTurnText =
     [...(params.history || [])]
       .reverse()
@@ -1455,10 +1565,10 @@ export async function handleSarahHttpTurn(params: {
       ?.text?.toLowerCase() || '';
   const isFastPathBlandTurn =
     userText.toLowerCase().includes('[script tree directive]') ||
-    (lastSarahTurnText.includes('how are you today') && userText.split(/\s+/).length <= 12) ||
+    (lastSarahTurnText.includes('how are you today') && userText.split(/\s+/).length <= 14) ||
     (lastSarahTurnText.includes('changes for 2027') &&
       /^(yes|yeah|yep|sure|okay|ok|please|tell me|what are they|go ahead|absolutely)\b/i.test(userText.trim())) ||
-    /\b(happy with my|keep my plan|don't want to change|how much does (this|it) cost|is this free|mail me|send me something)\b/i.test(
+    /\b(happy with my|keep my plan|don't want to change|how much does (this|it) cost|is this free|mail me|send me something|part a|part b|part c|part d|medigap|plan g|plan n|deductible|premium|coinsurance|2027|insulin|prescription|cap|medicare|individual|family|aca|marketplace|obamacare|ppo|subsidy|tax credit|group|business|employer|ichra|level-funded|life insurance|iul|indexed universal|7702|term life|living benefits|long-term care|long term care|ltc|nursing|home health|assisted living|who are you|what is i will global|fiduciary|carriers|telephone|in-person|in person|video|tomorrow|morning|afternoon)\b/i.test(
       userText
     );
 
@@ -1471,6 +1581,8 @@ export async function handleSarahHttpTurn(params: {
       scenario: clonedMatch.scenario,
       audio_base64: tts.audio_base64,
       audio_mime: tts.audio_mime,
+      first_chunk_text: tts.first_chunk_text,
+      rest_text: tts.rest_text,
       voice: tts.voice,
       transfer: clonedMatch.transfer || null,
       appointment: clonedMatch.appointment || null,
@@ -1481,14 +1593,13 @@ export async function handleSarahHttpTurn(params: {
     };
   }
 
-  // 4. Primary Conversational Brain: Run Gemini (`gemini-3.1-flash-lite` -> `gemini-3.5-flash`) with the full Cloned Bland System Prompt + Tools
-  // so the Virtual Receptionist and Outbound Caller listen directly to the caller's exact words, questions, name, and context with sub-second speed.
+  // 4. Primary Conversational Brain: Run Gemini (`workingTextModel` -> `gemini-3.5-flash` -> `gemini-2.5-flash`) for custom open-ended questions
   if (isAIEnabled()) {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
     // Normalize multi-turn history so it ALWAYS begins with role: 'user' and strictly alternates user <-> model
     const normalizedHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
-    const rawHistory = (params.history || []).slice(-12);
+    const rawHistory = (params.history || []).slice(-10);
 
     for (const h of rawHistory) {
       const text = String(h?.text || '').trim();
@@ -1527,7 +1638,8 @@ export async function handleSarahHttpTurn(params: {
       });
     }
 
-    const candidateModels = [config.gemini.model || 'gemini-3.5-flash', 'gemini-2.5-flash'];
+    const baseTextModels = ['gemini-2.5-flash', config.gemini.model || 'gemini-3.5-flash'];
+    const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
       try {
         const response = await ai.models.generateContent({
@@ -1536,12 +1648,14 @@ export async function handleSarahHttpTurn(params: {
           config: {
             systemInstruction:
               buildSarahSystemInstruction(sessionContext) +
-              `\n\nCRITICAL CONVERSATIONAL LISTENING RULE:\n- Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").\n- Keep your spoken response warm, natural, human, and concise (1 to 3 sentences) so the conversation flows naturally back and forth.\n- Never repeat your opening greeting once the call has already started.`,
+              `\n\nCRITICAL CONVERSATIONAL LISTENING RULE:\n- Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").\n- Keep your spoken response calm, relaxed, warm, human, and concise (1 to 2 short sentences) so the conversation flows naturally with zero lag.\n- Never repeat your opening greeting once the call has already started.`,
             tools: SARAH_TOOLS,
             temperature: 0.2,
+            maxOutputTokens: 130,
           },
         });
 
+        workingTextModel = modelName;
         let replyText = (response.text || '').trim();
 
         if (response.functionCalls && response.functionCalls.length > 0) {
@@ -1586,6 +1700,8 @@ export async function handleSarahHttpTurn(params: {
             reply: replyText,
             audio_base64: tts.audio_base64,
             audio_mime: tts.audio_mime,
+            first_chunk_text: tts.first_chunk_text,
+            rest_text: tts.rest_text,
             voice: tts.voice,
             transfer: transferResult,
             appointment: appointmentResult,
@@ -1609,6 +1725,8 @@ export async function handleSarahHttpTurn(params: {
     scenario: clonedMatch.scenario,
     audio_base64: tts.audio_base64,
     audio_mime: tts.audio_mime,
+    first_chunk_text: tts.first_chunk_text,
+    rest_text: tts.rest_text,
     voice: tts.voice,
     transfer: clonedMatch.transfer || null,
     appointment: clonedMatch.appointment || null,

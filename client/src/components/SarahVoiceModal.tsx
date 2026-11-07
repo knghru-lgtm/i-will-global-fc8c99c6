@@ -151,6 +151,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const recognitionRef = useRef<any>(null);
   const keepAliveIntervalRef = useRef<any>(null);
   const speechBufferRef = useRef<string>('');
+  const liveInterimRef = useRef<string>('');
   const speechBufferTimerRef = useRef<any>(null);
   const lastSarahReplyRef = useRef<string>('');
   const sessionCtxRef = useRef<{
@@ -272,8 +273,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         voices.find((v) => /en-US/i.test(v.lang) && !/zira/i.test(v.name)) ||
         voices.find((v) => /en/i.test(v.lang));
       if (naturalVoice) utter.voice = naturalVoice;
-      utter.rate = 1.0;
-      utter.pitch = 1.0;
+      utter.rate = 0.96; // Calm and relaxed cadence
+      utter.pitch = 0.98;
 
       let started = false;
       // If browser blocks speechSynthesis (e.g. no prior click), release mic lock after 1.1s so mic always listens!
@@ -356,7 +357,12 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     });
   };
 
-  const playSarahResponseAudio = async (text: string, audioBase64?: string | null, audioMime?: string) => {
+  const playSarahResponseAudio = async (
+    text: string,
+    audioBase64?: string | null,
+    audioMime?: string,
+    restText?: string
+  ) => {
     lastSarahReplyRef.current = text;
     stopAllSarahAudio();
     if (recognitionRef.current && recRunningRef.current) {
@@ -369,12 +375,35 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     setIsSpeaking(true);
     setSarahVolume(0.75);
 
+    const fetchTtsChunk = (chunkText: string) =>
+      fetch('/api/sarah/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: chunkText }),
+      })
+        .then((r) => r.json())
+        .catch(() => null);
+
     if (audioBase64 && typeof window !== 'undefined') {
+      // If there is remaining text, fetch its WAV in parallel while the first chunk plays out loud!
+      const cleanRest = String(restText || '').trim();
+      const restPromise = cleanRest ? fetchTtsChunk(cleanRest) : Promise.resolve(null);
+
       const ok = await playSingleWavBase64(
         audioBase64,
         audioMime || 'audio/wav',
-        Math.min(16000, Math.max(4000, text.length * 68))
+        Math.min(12000, Math.max(3000, text.length * 65))
       );
+      if (ok && cleanRest && isSpeakingRef.current) {
+        const restRes = await restPromise;
+        if (restRes?.audio_base64 && isSpeakingRef.current) {
+          await playSingleWavBase64(
+            restRes.audio_base64,
+            restRes.audio_mime || 'audio/wav',
+            Math.min(16000, Math.max(3500, cleanRest.length * 65))
+          );
+        }
+      }
       if (ok) {
         isSpeakingRef.current = false;
         setIsSpeaking(false);
@@ -386,22 +415,13 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       return;
     }
 
-    // Fast-Start Sentence-Chunked Neural TTS: Synthesize Sentence 1 immediately (~550ms) while prefetching the rest in parallel!
+    // Fast-Start Sentence-Chunked Neural TTS if inline audioBase64 wasn't included
     if (typeof window !== 'undefined' && text) {
       try {
         const clean = text.trim();
         const firstSplitMatch = clean.match(/^([^.!?]+[.!?]+)\s+([\s\S]+)$/);
         const firstChunk = firstSplitMatch && firstSplitMatch[1].length >= 18 ? firstSplitMatch[1].trim() : clean;
         const restChunk = firstSplitMatch && firstSplitMatch[1].length >= 18 ? firstSplitMatch[2].trim() : '';
-
-        const fetchTtsChunk = (chunkText: string) =>
-          fetch('/api/sarah/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: chunkText }),
-          })
-            .then((r) => r.json())
-            .catch(() => null);
 
         const firstPromise = fetchTtsChunk(firstChunk);
         const restPromise = restChunk ? fetchTtsChunk(restChunk) : Promise.resolve(null);
@@ -413,7 +433,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
             firstRes.audio_mime || 'audio/wav',
             Math.min(12000, Math.max(3500, firstChunk.length * 68))
           );
-          if (ok1 && restChunk) {
+          if (ok1 && restChunk && isSpeakingRef.current) {
             const restRes = await restPromise;
             if (restRes?.audio_base64 && isSpeakingRef.current) {
               await playSingleWavBase64(
@@ -541,7 +561,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         body: JSON.stringify({
           message: userText,
           is_initial: Boolean(ctxOverride?.is_initial),
-          skip_inline_tts: true,
+          skip_inline_tts: false,
           history: historyPayload,
           context: {
             mode: isAdmin ? ctxOverride?.mode || activeCtx.mode : 'inbound',
@@ -560,7 +580,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
       if (res?.reply) {
         appendNewTranscript('sarah', res.reply);
-        playSarahResponseAudio(res.reply, res.audio_base64, res.audio_mime);
+        playSarahResponseAudio(res.reply, res.audio_base64, res.audio_mime, res.rest_text);
         const lower = String(res.reply).toLowerCase();
         if (lower.includes('$1,788') || lower.includes('$2,400') || lower.includes('20%')) {
           setActiveScriptStep(2);
@@ -663,29 +683,35 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
             return;
           }
 
-          if (cleanInterim) {
-            setInterimSpeech((speechBufferRef.current ? speechBufferRef.current + ' ' : '') + cleanInterim);
-            setUserVolume(0.55);
-          }
-
           if (cleanFinal && !isEchoOfSarah(cleanFinal)) {
             speechBufferRef.current = (speechBufferRef.current ? speechBufferRef.current + ' ' : '') + cleanFinal;
-            setInterimSpeech(speechBufferRef.current);
-            setUserVolume(0.65);
+            liveInterimRef.current = '';
+          }
+          if (cleanInterim && !isEchoOfSarah(cleanInterim)) {
+            liveInterimRef.current = cleanInterim;
+          }
+
+          const combinedLive = [speechBufferRef.current, liveInterimRef.current].filter(Boolean).join(' ').trim();
+          if (combinedLive && !isEchoOfSarah(combinedLive)) {
+            setInterimSpeech(combinedLive);
+            setUserVolume(cleanFinal ? 0.65 : 0.55);
 
             if (speechBufferTimerRef.current) {
               clearTimeout(speechBufferTimerRef.current);
             }
+            // Instant silence detection: 75ms when Chrome marks final, or 460ms when user stops speaking during interim!
+            const waitMs = cleanFinal && !cleanInterim ? 75 : 460;
             speechBufferTimerRef.current = setTimeout(() => {
-              const fullSpoken = speechBufferRef.current.trim();
+              const fullSpoken = [speechBufferRef.current, liveInterimRef.current].filter(Boolean).join(' ').trim();
               speechBufferRef.current = '';
+              liveInterimRef.current = '';
               setInterimSpeech('');
               setUserVolume(0);
               if (fullSpoken && !isEchoOfSarah(fullSpoken)) {
                 appendNewTranscript('user', fullSpoken);
                 sendHttpTurn(fullSpoken);
               }
-            }, 180);
+            }, waitMs);
           }
         };
 
@@ -2189,7 +2215,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.75rem' }}>
                 <span style={{ color: isSpeaking ? '#fbbf24' : isMuted ? '#f87171' : '#4ade80', fontWeight: 700 }}>
                   {isSpeaking
-                    ? '🔊 Sarah Speaking (Aoede Human Neural Voice)...'
+                    ? '🔊 Sarah Speaking (Vindemiatrix — Calm & Relaxed Bland Voice)...'
                     : isMuted
                     ? '🔇 Microphone Muted — Click Unmute Mic or type below'
                     : isMicListening

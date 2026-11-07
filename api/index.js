@@ -10021,15 +10021,19 @@ async function handleSarahVoiceSession(clientWs, initialCtx) {
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: {
-              voiceName: "Aoede"
-              // Warm, clear, empathetic American female voice matching Sarah
+              voiceName: "Vindemiatrix"
+              // Calm, relaxed, warm, realistic human female voice
             }
           }
         },
         inputAudioTranscription: {},
         outputAudioTranscription: {},
         systemInstruction: {
-          parts: [{ text: buildSarahSystemInstruction(sessionContext) }]
+          parts: [
+            {
+              text: buildSarahSystemInstruction(sessionContext) + "\n\nVOICE DELIVERY STYLE: Speak in the calm, relaxed, warm, unhurried, and deeply human Vindemiatrix voice\u2014just like our cloned Bland agent."
+            }
+          ]
         },
         tools: SARAH_TOOLS
       },
@@ -10039,7 +10043,7 @@ async function handleSarahVoiceSession(clientWs, initialCtx) {
             clientWs.send(
               JSON.stringify({
                 type: "ready",
-                voice: "Aoede",
+                voice: "Vindemiatrix",
                 mode: sessionContext.mode,
                 line: SARAH_MAIN_LINE_DISPLAY,
                 line_number: SARAH_MAIN_LINE_DISPLAY,
@@ -10256,12 +10260,62 @@ async function handleSarahVoiceSession(clientWs, initialCtx) {
     }
   }
 }
+var SARAH_VOICE_NAME = "Vindemiatrix";
 var SARAH_TTS_CACHE = /* @__PURE__ */ new Map();
 var SARAH_TTS_INFLIGHT = /* @__PURE__ */ new Map();
+var workingTtsModel = null;
+var workingTextModel = null;
+function ensureRiffWavBase64(rawBase64, sampleRate = 24e3) {
+  const pcmBuf = Buffer.from(rawBase64, "base64");
+  if (pcmBuf.length >= 4 && pcmBuf.subarray(0, 4).toString("ascii") === "RIFF") {
+    return rawBase64;
+  }
+  const header = Buffer.alloc(44);
+  const dataLen = pcmBuf.length;
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataLen, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataLen, 40);
+  return Buffer.concat([header, pcmBuf]).toString("base64");
+}
+function splitIntoFastSpeechChunks(text) {
+  const clean = String(text || "").replace(/\*\*/g, "").replace(/\[[^\]]+\]/g, "").replace(/\s+/g, " ").trim();
+  if (!clean) return { firstChunk: "", restChunk: "" };
+  const sentenceMatch = clean.match(/^([^.!?]+[.!?]+)\s+([\s\S]+)$/);
+  if (sentenceMatch && sentenceMatch[1].length <= 135) {
+    return {
+      firstChunk: sentenceMatch[1].trim(),
+      restChunk: sentenceMatch[2].trim()
+    };
+  }
+  const clauseMatch = clean.match(/^(.{28,95}[,;—–-])\s+([\s\S]+)$/);
+  if (clauseMatch) {
+    return {
+      firstChunk: clauseMatch[1].trim(),
+      restChunk: clauseMatch[2].trim()
+    };
+  }
+  if (sentenceMatch) {
+    return {
+      firstChunk: sentenceMatch[1].trim(),
+      restChunk: sentenceMatch[2].trim()
+    };
+  }
+  return { firstChunk: clean, restChunk: "" };
+}
 async function synthesizeSarahNeuralAudio(text) {
-  const cleanText = String(text || "").replace(/\*\*/g, "").replace(/\[[^\]]+\]/g, "").trim();
+  const cleanText = String(text || "").replace(/\*\*/g, "").replace(/\[[^\]]+\]/g, "").replace(/\s+/g, " ").trim();
   if (!cleanText || !isAIEnabled()) {
-    return { audio_base64: null, audio_mime: "audio/wav", voice: "Aoede" };
+    return { audio_base64: null, audio_mime: "audio/wav", voice: SARAH_VOICE_NAME };
   }
   const cached = SARAH_TTS_CACHE.get(cleanText);
   if (cached) {
@@ -10273,18 +10327,24 @@ async function synthesizeSarahNeuralAudio(text) {
   }
   const runPromise = (async () => {
     const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    const ttsModels = [config.gemini.ttsModel || "gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
+    const baseModels = ["gemini-2.5-flash-preview-tts", config.gemini.ttsModel || "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"];
+    const ttsModels = workingTtsModel ? [workingTtsModel, ...baseModels] : baseModels;
     for (const modelName of [...new Set(ttsModels)]) {
       try {
         const r = await ai2.models.generateContent({
           model: modelName,
-          contents: [{ role: "user", parts: [{ text: cleanText }] }],
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: cleanText }]
+            }
+          ],
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
               voiceConfig: {
                 prebuiltVoiceConfig: {
-                  voiceName: "Aoede"
+                  voiceName: SARAH_VOICE_NAME
                 }
               }
             }
@@ -10292,12 +10352,14 @@ async function synthesizeSarahNeuralAudio(text) {
         });
         const inline = r.candidates?.[0]?.content?.parts?.[0]?.inlineData;
         if (inline?.data) {
+          workingTtsModel = modelName;
+          const wavBase64 = ensureRiffWavBase64(inline.data, 24e3);
           const entry = {
-            audio_base64: inline.data,
-            audio_mime: inline.mimeType || "audio/wav",
-            voice: "Aoede"
+            audio_base64: wavBase64,
+            audio_mime: "audio/wav",
+            voice: SARAH_VOICE_NAME
           };
-          if (SARAH_TTS_CACHE.size > 80) {
+          if (SARAH_TTS_CACHE.size > 120) {
             const oldestKey = SARAH_TTS_CACHE.keys().next().value;
             if (oldestKey) SARAH_TTS_CACHE.delete(oldestKey);
           }
@@ -10307,7 +10369,7 @@ async function synthesizeSarahNeuralAudio(text) {
       } catch {
       }
     }
-    return { audio_base64: null, audio_mime: "audio/wav", voice: "Aoede" };
+    return { audio_base64: null, audio_mime: "audio/wav", voice: SARAH_VOICE_NAME };
   })();
   SARAH_TTS_INFLIGHT.set(cleanText, runPromise);
   try {
@@ -10476,24 +10538,49 @@ async function runClonedBlandScenario(userText, history, sessionContext) {
 }
 async function handleSarahHttpTurn(params) {
   const resolveTts = async (text) => {
-    const clean = String(text || "").replace(/\*\*/g, "").replace(/\[[^\]]+\]/g, "").trim();
-    const cached = SARAH_TTS_CACHE.get(clean);
-    if (cached) return cached;
-    if (params.skip_inline_tts) {
-      const firstSentence = clean.split(/(?<=[.!?])\s+/)[0];
-      if (firstSentence) {
-        synthesizeSarahNeuralAudio(firstSentence).catch(() => {
-        });
-      }
-      return { audio_base64: null, audio_mime: "audio/wav", voice: "Aoede" };
+    const { firstChunk, restChunk } = splitIntoFastSpeechChunks(text);
+    if (!firstChunk) {
+      return {
+        audio_base64: null,
+        audio_mime: "audio/wav",
+        voice: SARAH_VOICE_NAME,
+        first_chunk_text: "",
+        rest_text: ""
+      };
     }
-    return synthesizeSarahNeuralAudio(text);
+    if (params.skip_inline_tts) {
+      synthesizeSarahNeuralAudio(firstChunk).catch(() => {
+      });
+      if (restChunk) synthesizeSarahNeuralAudio(restChunk).catch(() => {
+      });
+      return {
+        audio_base64: null,
+        audio_mime: "audio/wav",
+        voice: SARAH_VOICE_NAME,
+        first_chunk_text: firstChunk,
+        rest_text: restChunk
+      };
+    }
+    if (restChunk) {
+      synthesizeSarahNeuralAudio(restChunk).catch(() => {
+      });
+    }
+    const firstTts = await synthesizeSarahNeuralAudio(firstChunk);
+    return {
+      audio_base64: firstTts.audio_base64,
+      audio_mime: firstTts.audio_mime || "audio/wav",
+      voice: firstTts.voice || SARAH_VOICE_NAME,
+      first_chunk_text: firstChunk,
+      rest_text: restChunk
+    };
   };
   let dbWarmTransfer = false;
-  try {
-    const blandCfg = await getBlandConfig();
-    dbWarmTransfer = Boolean(blandCfg.is_on_warm_transfer);
-  } catch {
+  if (params.context?.on_warm_transfer === void 0) {
+    try {
+      const blandCfg = await getBlandConfig();
+      dbWarmTransfer = Boolean(blandCfg.is_on_warm_transfer);
+    } catch {
+    }
   }
   const resolvedMode = params.context?.mode === "outbound" || params.mode === "outbound" ? "outbound" : "inbound";
   const sessionContext = {
@@ -10516,6 +10603,8 @@ async function handleSarahHttpTurn(params) {
       reply: openingReply,
       audio_base64: tts2.audio_base64,
       audio_mime: tts2.audio_mime,
+      first_chunk_text: tts2.first_chunk_text,
+      rest_text: tts2.rest_text,
       voice: tts2.voice,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY,
@@ -10545,6 +10634,8 @@ async function handleSarahHttpTurn(params) {
       reply: transferReply,
       audio_base64: tts2.audio_base64,
       audio_mime: tts2.audio_mime,
+      first_chunk_text: tts2.first_chunk_text,
+      rest_text: tts2.rest_text,
       voice: tts2.voice,
       transfer: transferResult,
       mode: sessionContext.mode,
@@ -10559,7 +10650,7 @@ async function handleSarahHttpTurn(params) {
   }
   const activeFirstName = (sessionContext.prospect_name || firstName || "there").split(/\s+/)[0] || "there";
   const lastSarahTurnText = [...params.history || []].reverse().find((h) => h.speaker === "sarah")?.text?.toLowerCase() || "";
-  const isFastPathBlandTurn = userText.toLowerCase().includes("[script tree directive]") || lastSarahTurnText.includes("how are you today") && userText.split(/\s+/).length <= 12 || lastSarahTurnText.includes("changes for 2027") && /^(yes|yeah|yep|sure|okay|ok|please|tell me|what are they|go ahead|absolutely)\b/i.test(userText.trim()) || /\b(happy with my|keep my plan|don't want to change|how much does (this|it) cost|is this free|mail me|send me something)\b/i.test(
+  const isFastPathBlandTurn = userText.toLowerCase().includes("[script tree directive]") || lastSarahTurnText.includes("how are you today") && userText.split(/\s+/).length <= 14 || lastSarahTurnText.includes("changes for 2027") && /^(yes|yeah|yep|sure|okay|ok|please|tell me|what are they|go ahead|absolutely)\b/i.test(userText.trim()) || /\b(happy with my|keep my plan|don't want to change|how much does (this|it) cost|is this free|mail me|send me something|part a|part b|part c|part d|medigap|plan g|plan n|deductible|premium|coinsurance|2027|insulin|prescription|cap|medicare|individual|family|aca|marketplace|obamacare|ppo|subsidy|tax credit|group|business|employer|ichra|level-funded|life insurance|iul|indexed universal|7702|term life|living benefits|long-term care|long term care|ltc|nursing|home health|assisted living|who are you|what is i will global|fiduciary|carriers|telephone|in-person|in person|video|tomorrow|morning|afternoon)\b/i.test(
     userText
   );
   if (isFastPathBlandTurn) {
@@ -10571,6 +10662,8 @@ async function handleSarahHttpTurn(params) {
       scenario: clonedMatch2.scenario,
       audio_base64: tts2.audio_base64,
       audio_mime: tts2.audio_mime,
+      first_chunk_text: tts2.first_chunk_text,
+      rest_text: tts2.rest_text,
       voice: tts2.voice,
       transfer: clonedMatch2.transfer || null,
       appointment: clonedMatch2.appointment || null,
@@ -10583,7 +10676,7 @@ async function handleSarahHttpTurn(params) {
   if (isAIEnabled()) {
     const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
     const normalizedHistory = [];
-    const rawHistory = (params.history || []).slice(-12);
+    const rawHistory = (params.history || []).slice(-10);
     for (const h of rawHistory) {
       const text = String(h?.text || "").trim();
       if (!text) continue;
@@ -10616,7 +10709,8 @@ async function handleSarahHttpTurn(params) {
         parts: [{ text: userText }]
       });
     }
-    const candidateModels = [config.gemini.model || "gemini-3.5-flash", "gemini-2.5-flash"];
+    const baseTextModels = ["gemini-2.5-flash", config.gemini.model || "gemini-3.5-flash"];
+    const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
       try {
         const response = await ai2.models.generateContent({
@@ -10627,12 +10721,14 @@ async function handleSarahHttpTurn(params) {
 
 CRITICAL CONVERSATIONAL LISTENING RULE:
 - Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").
-- Keep your spoken response warm, natural, human, and concise (1 to 3 sentences) so the conversation flows naturally back and forth.
+- Keep your spoken response calm, relaxed, warm, human, and concise (1 to 2 short sentences) so the conversation flows naturally with zero lag.
 - Never repeat your opening greeting once the call has already started.`,
             tools: SARAH_TOOLS,
-            temperature: 0.2
+            temperature: 0.2,
+            maxOutputTokens: 130
           }
         });
+        workingTextModel = modelName;
         let replyText = (response.text || "").trim();
         if (response.functionCalls && response.functionCalls.length > 0) {
           for (const call of response.functionCalls) {
@@ -10675,6 +10771,8 @@ CRITICAL CONVERSATIONAL LISTENING RULE:
             reply: replyText,
             audio_base64: tts2.audio_base64,
             audio_mime: tts2.audio_mime,
+            first_chunk_text: tts2.first_chunk_text,
+            rest_text: tts2.rest_text,
             voice: tts2.voice,
             transfer: transferResult,
             appointment: appointmentResult,
@@ -10696,6 +10794,8 @@ CRITICAL CONVERSATIONAL LISTENING RULE:
     scenario: clonedMatch.scenario,
     audio_base64: tts.audio_base64,
     audio_mime: tts.audio_mime,
+    first_chunk_text: tts.first_chunk_text,
+    rest_text: tts.rest_text,
     voice: tts.voice,
     transfer: clonedMatch.transfer || null,
     appointment: clonedMatch.appointment || null,
