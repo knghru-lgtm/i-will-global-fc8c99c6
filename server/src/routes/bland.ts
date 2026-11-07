@@ -20,7 +20,7 @@ import {
   BLAND_AI_USER_ID,
 } from '../services/bland.ts';
 import { one, q, insert } from '../db/index.ts';
-import { executeSarahTool } from '../services/sarahVoiceService.ts';
+import { executeSarahTool, upsertReceptionistLeadFromContext } from '../services/sarahVoiceService.ts';
 
 export const blandPublic = Router();
 export const blandAuth = Router();
@@ -68,68 +68,125 @@ blandPublic.get('/public-directory', async (_req, res) => {
   }
 });
 
-// Inbound Virtual Receptionist handler when people call (480) 331-9455 (+14803319455)
+// Inbound Receptionist handler when people call (480) 331-9455 (+14803319455) — answers immediately
 blandPublic.all('/inbound', async (req, res) => {
   try {
     const dir = await getInboundDirectory();
     const cfg = await getBlandConfig();
-    const callerPhone = String(req.body?.from || req.query?.from || req.body?.caller_phone || '+14805550100');
-    const callerName = String(req.body?.caller_name || req.query?.caller_name || 'Valued Caller');
+    const callerPhone = String(req.body?.from || req.query?.from || req.body?.caller_phone || '');
+    const callerName = String(req.body?.caller_name || req.query?.caller_name || '');
+    const callerAddress = String(req.body?.address || req.query?.address || '');
     const requestedPerson = req.body?.requested_person || req.body?.transfer_to || req.query?.transfer_to;
     const appointmentType = req.body?.appointment_type || req.query?.appointment_type;
     const preferredDatetime = req.body?.preferred_datetime || req.query?.preferred_datetime;
+    const productLine = req.body?.product_line || req.query?.product_line;
 
     let transferResult: any = null;
     let appointmentResult: any = null;
     let activityId: string | null = null;
+    let inboundLeadId: string | null = req.body?.lead_id || req.query?.lead_id || null;
 
     if (req.method === 'POST') {
+      // Automatically create or update the Call-In Lead in CRM when caller details are available
+      if (callerPhone || callerName || callerAddress) {
+        const upsertedId = await upsertReceptionistLeadFromContext(
+          {
+            mode: 'inbound',
+            lead_id: inboundLeadId || undefined,
+            prospect_name: callerName,
+            prospect_phone: callerPhone,
+            address: callerAddress,
+            state: req.body?.state || 'AZ',
+            product_interest: productLine,
+            source_channel: 'call_in_lead',
+          },
+          req.body?.notes || 'Inbound call answered right away on (480) 331-9455 by Receptionist'
+        );
+        if (upsertedId) inboundLeadId = upsertedId;
+      }
+
       if (requestedPerson && !cfg.is_on_warm_transfer) {
-        transferResult = await executeSarahTool('whisper_warm_transfer', {
-          recipient_name: String(requestedPerson),
-          customer_name: callerName,
-          customer_phone: callerPhone,
-          customer_state: req.body?.state || 'AZ',
-          reason_for_call: req.body?.reason || 'Inbound call on (480) 331-9455 requesting advisor',
-        });
+        transferResult = await executeSarahTool(
+          'whisper_warm_transfer',
+          {
+            recipient_name: String(requestedPerson),
+            customer_name: callerName || 'Inbound Caller',
+            customer_phone: callerPhone,
+            customer_state: req.body?.state || 'AZ',
+            reason_for_call: req.body?.reason || 'Inbound call on (480) 331-9455 requesting advisor',
+            lead_id: inboundLeadId,
+          },
+          {
+            mode: 'inbound',
+            source_channel: 'call_in_lead',
+            lead_id: inboundLeadId || undefined,
+            prospect_name: callerName,
+            prospect_phone: callerPhone,
+            address: callerAddress,
+            state: req.body?.state || 'AZ',
+            product_interest: productLine,
+          }
+        );
       }
 
       if (appointmentType || (requestedPerson && cfg.is_on_warm_transfer)) {
-        appointmentResult = await executeSarahTool('book_appointment', {
-          customer_name: callerName,
-          phone: callerPhone,
-          appointment_type: String(appointmentType || 'Telephone'),
-          preferred_datetime: String(preferredDatetime || 'Tomorrow at 10:00 AM'),
-          state: req.body?.state || 'AZ',
-          notes: req.body?.notes || 'Booked by Sarah Virtual Receptionist on inbound call to (480) 331-9455',
-        });
+        appointmentResult = await executeSarahTool(
+          'book_appointment',
+          {
+            lead_id: inboundLeadId,
+            customer_name: callerName,
+            phone: callerPhone,
+            address: callerAddress,
+            product_interest: productLine,
+            appointment_type: String(appointmentType || 'Telephone'),
+            preferred_datetime: String(preferredDatetime || 'Tomorrow at 10:00 AM'),
+            state: req.body?.state || 'AZ',
+            notes: req.body?.notes || 'Booked by Receptionist on inbound call to (480) 331-9455',
+          },
+          {
+            mode: 'inbound',
+            source_channel: 'call_in_lead',
+            lead_id: inboundLeadId || undefined,
+            prospect_name: callerName,
+            prospect_phone: callerPhone,
+            address: callerAddress,
+            state: req.body?.state || 'AZ',
+            product_interest: productLine,
+          }
+        );
+        if (appointmentResult?.lead_id) inboundLeadId = appointmentResult.lead_id;
       }
 
       const inboundAct = await insert('activities', {
         type: 'call',
-        subject: `🎧 Sarah Virtual Receptionist Inbound Call on (480) 331-9455 — ${callerName}`,
-        body: `Inbound call answered 24/7 by Sarah on (480) 331-9455 (+14803319455).\nCaller: ${callerName} (${callerPhone})${transferResult ? `\nWhisper Transfer to ${transferResult.recipient_name} (${transferResult.recipient_phone}): "${transferResult.private_whisper_delivered}"` : ''}${appointmentResult ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
+        subject: `🎧 Receptionist Inbound Call on (480) 331-9455 — ${callerName || callerPhone || 'Call-In Lead'}`,
+        body: `Inbound call answered immediately 24/7 by Receptionist on (480) 331-9455 (+14803319455).\nLead Source Tag: Call-In Lead\nCaller: ${callerName || 'Pending Name'} (${callerPhone || 'Pending Phone'})${callerAddress ? `\nAddress: ${callerAddress}` : ''}${transferResult ? `\nWhisper Transfer to ${transferResult.recipient_name} (${transferResult.recipient_phone}): "${transferResult.private_whisper_delivered}"` : ''}${appointmentResult?.success ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
         related_type: 'lead',
-        related_id: appointmentResult?.lead_id || null,
+        related_id: appointmentResult?.lead_id || inboundLeadId || null,
         user_id: BLAND_AI_USER_ID,
         status: 'Completed',
         completed: true,
         direction: 'inbound',
-        phone: callerPhone,
+        phone: callerPhone || '+14803319455',
         provider: 'bland_ai',
-        disposition_id: appointmentResult ? 'appointment_set' : transferResult ? 'warm_transfer_success' : 'contacted_interested',
-        disposition: appointmentResult
-          ? `Sarah Inbound — ${appointmentResult.appointment_type} Appointment Booked`
+        disposition_id: appointmentResult?.success ? 'appointment_set' : transferResult ? 'warm_transfer_success' : 'contacted_interested',
+        disposition: appointmentResult?.success
+          ? `Receptionist Inbound — ${appointmentResult.appointment_type} Appointment Booked`
           : transferResult
-          ? `Sarah Inbound — Whisper Warm Transfer to ${transferResult.recipient_name}`
-          : 'Sarah Inbound — Answered on (480) 331-9455',
+          ? `Receptionist Inbound — Whisper Warm Transfer to ${transferResult.recipient_name}`
+          : 'Receptionist Inbound — Answered Immediately on (480) 331-9455',
         duration_sec: 45,
         meta: {
           mode: 'inbound_receptionist',
+          lead_source: 'Call-In Lead',
           line: '(480) 331-9455',
           line_e164: '+14803319455',
+          answered_immediately: true,
+          ring_delay_ms: 0,
           caller_phone: callerPhone,
           caller_name: callerName,
+          caller_address: callerAddress,
+          lead_id: inboundLeadId,
           transfer_result: transferResult,
           appointment_result: appointmentResult,
         },
@@ -141,14 +198,20 @@ blandPublic.all('/inbound', async (req, res) => {
       ok: true,
       success: true,
       status: 'answered',
-      receptionist: 'Sarah',
+      answered_immediately: true,
+      wait_for_greeting: false,
+      ring_delay_ms: 0,
+      receptionist: 'Receptionist',
       receptionist_name: 'Sarah',
+      lead_source: 'Call-In Lead',
+      lead_id: inboundLeadId,
       line: '(480) 331-9455',
       line_e164: '+14803319455',
       line_number: '+14803319455',
       display_number: '(480) 331-9455',
       caller_phone: callerPhone,
       caller_name: callerName,
+      caller_address: callerAddress,
       first_sentence:
         'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?',
       transfer_phone_number: '+16024569681',

@@ -36,6 +36,7 @@ export const LeadsPage: React.FC = () => {
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [sourceFilter, setSourceFilter] = useState<string>('');
   const [callerFilter, setCallerFilter] = useState<string>('');
   const [t65Filter, setT65Filter] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -55,7 +56,7 @@ export const LeadsPage: React.FC = () => {
   // Create lead modal state
   const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false);
   const [newLead, setNewLead] = useState<any>({
-    first_name: '', last_name: '', phone: '', email: '', dob: '', city: '', state: 'AZ', zip: '', county: 'Maricopa', source: 'Direct Lead', tcpa_consent: true
+    first_name: '', last_name: '', phone: '', address: '', email: '', dob: '', city: '', state: 'AZ', zip: '', county: 'Maricopa', source: 'Call-In Lead', tcpa_consent: true
   });
 
   // Bulk Assign Modal state (500 at a time)
@@ -200,6 +201,7 @@ export const LeadsPage: React.FC = () => {
     try {
       let url = `/records/leads?sort=score:desc&limit=100`;
       if (statusFilter) url += `&f_status=${encodeURIComponent(statusFilter)}`;
+      if (sourceFilter) url += `&f_source=${encodeURIComponent(sourceFilter)}`;
       if (t65Filter) url += `&f_dob__gte=1961-01-01`;
       if (searchQuery) url += `&q=${encodeURIComponent(searchQuery)}`;
       if (callerFilter === 'unassigned') {
@@ -234,7 +236,7 @@ export const LeadsPage: React.FC = () => {
       window.removeEventListener('iwg-lead-updated', handleLeadUpdated);
       window.removeEventListener('iwg-bland-status-changed', loadBlandStatus);
     };
-  }, [statusFilter, callerFilter, t65Filter, searchQuery]);
+  }, [statusFilter, sourceFilter, callerFilter, t65Filter, searchQuery]);
 
   // Clean and parse Excel / CSV file in browser
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1076,6 +1078,18 @@ export const LeadsPage: React.FC = () => {
           <option value="DNC">DNC</option>
         </select>
 
+        {/* Lead Tag / Source Filter (Call-In Lead / Website Traffic) */}
+        <select
+          value={sourceFilter}
+          onChange={(e) => setSourceFilter(e.target.value)}
+          style={{ padding: '0.55rem 0.85rem', borderRadius: '6px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: '0.88rem' }}
+        >
+          <option value="">All Lead Tags / Sources</option>
+          <option value="Call-In Lead">📞 Call-In Lead</option>
+          <option value="Website Traffic">🌐 Website Traffic</option>
+          <option value="Direct Lead">Direct Lead</option>
+        </select>
+
         {/* T-65 Focus Toggle */}
         <button
           type="button"
@@ -1146,7 +1160,45 @@ export const LeadsPage: React.FC = () => {
                       <Link to={`/leads/${l.id}`} style={{ color: 'var(--text-main)', fontWeight: 600, textDecoration: 'none' }}>
                         {l.first_name} {l.last_name}
                       </Link>
-                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{l.source || 'Direct Lead'}</div>
+                      <div style={{ marginTop: '0.2rem' }}>
+                        {/call-in|inbound/i.test(String(l.source || '')) ? (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              background: 'rgba(16, 185, 129, 0.18)',
+                              color: '#6ee7b7',
+                              border: '1px solid rgba(16, 185, 129, 0.45)',
+                              padding: '1px 7px',
+                              borderRadius: '999px',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                            }}
+                          >
+                            📞 Call-In Lead
+                          </span>
+                        ) : /website/i.test(String(l.source || '')) ? (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              background: 'rgba(56, 189, 248, 0.18)',
+                              color: '#7dd3fc',
+                              border: '1px solid rgba(56, 189, 248, 0.45)',
+                              padding: '1px 7px',
+                              borderRadius: '999px',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                            }}
+                          >
+                            🌐 Website Traffic
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{l.source || 'Direct Lead'}</span>
+                        )}
+                      </div>
                     </td>
 
                     <td>
@@ -1964,6 +2016,20 @@ export const LeadsPage: React.FC = () => {
               <div>
                 <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Phone Number *</label>
                 <input type="text" required placeholder="(480) 555-0123" value={newLead.phone} onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', color: '#fff' }} />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Street Address</label>
+                <input type="text" placeholder="4820 E Camelback Rd, Phoenix AZ 85018" value={newLead.address || ''} onChange={(e) => setNewLead({ ...newLead, address: e.target.value })} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', color: '#fff' }} />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Lead Tag / Source</label>
+                <select value={newLead.source || 'Call-In Lead'} onChange={(e) => setNewLead({ ...newLead, source: e.target.value })} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', color: '#fff' }}>
+                  <option value="Call-In Lead">📞 Call-In Lead</option>
+                  <option value="Website Traffic">🌐 Website Traffic</option>
+                  <option value="Direct Lead">Direct Lead</option>
+                </select>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>

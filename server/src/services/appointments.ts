@@ -602,6 +602,43 @@ Reschedule or questions? Call I Will Global at ${config.agency.phone}. - I Will 
 
     smsSent = true;
     actionsTaken.push(`Sent confirmation SMS to ${customer.phone} requesting "YES" or "Y" reply`);
+
+    // Internal-only automatic Day-Before & Same-Day SMS reminders (scheduled silently; never mentioned to customer upfront)
+    const dayBeforeAt = new Date(at.getTime() - 24 * 3600 * 1000);
+    const sameDayAt = new Date(at.getTime() - 2 * 3600 * 1000);
+    await insert('activities', {
+      type: 'call',
+      subject: `📅 [Internal Auto-Reminder: Day-Before] SMS to ${customer.phone}`,
+      body: `Hi ${customer.first_name}, friendly reminder from I Will Global: your ${appointment_type === 'video' ? 'Video' : appointment_type === 'telephone' ? 'Telephone' : 'In-Person'} appointment with ${assignedAgent.name} is tomorrow (${formattedTime}). Questions? Call ${config.agency.phone}.`,
+      related_type,
+      related_id,
+      user_id: booked_by.id,
+      direction: 'outbound',
+      phone: customer.phone,
+      due_at: dayBeforeAt,
+      status: 'Scheduled',
+      completed: false,
+      provider: 'google_voice',
+      disposition: 'Day-Before SMS Reminder Scheduled (Internal)',
+      meta: { sms: true, internal_auto_reminder: true, reminder_stage: '2_day_before', scheduled_for: dayBeforeAt.toISOString() },
+    }).catch(() => {});
+
+    await insert('activities', {
+      type: 'call',
+      subject: `⏰ [Internal Auto-Reminder: Same-Day] SMS to ${customer.phone}`,
+      body: `Hi ${customer.first_name}, your ${appointment_type === 'video' ? 'Video' : appointment_type === 'telephone' ? 'Telephone' : 'In-Person'} appointment with ${assignedAgent.name} at I Will Global is TODAY (${formattedTime}). We look forward to speaking with you soon!`,
+      related_type,
+      related_id,
+      user_id: booked_by.id,
+      direction: 'outbound',
+      phone: customer.phone,
+      due_at: sameDayAt,
+      status: 'Scheduled',
+      completed: false,
+      provider: 'google_voice',
+      disposition: 'Same-Day SMS Reminder Scheduled (Internal)',
+      meta: { sms: true, internal_auto_reminder: true, reminder_stage: '3_same_day', scheduled_for: sameDayAt.toISOString() },
+    }).catch(() => {});
   }
 
   // 2. Automated Confirmation Email

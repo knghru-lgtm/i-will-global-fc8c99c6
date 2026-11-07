@@ -68,10 +68,12 @@ interface AppointmentConfirmation {
   same_day_reminder_at?: string;
   sms_reminder_phone?: string;
   sms_reminder_text?: string;
+  lead_source?: string;
+  lead_id?: string;
   sms_cadence?: {
     immediate_confirmation_text: string;
-    day_before_reminder_text: string;
-    same_day_reminder_text: string;
+    day_before_reminder_text?: string;
+    same_day_reminder_text?: string;
   };
   message: string;
 }
@@ -126,8 +128,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
   const [callMode, setCallMode] = useState<'inbound' | 'outbound'>('inbound');
   const [leadId, setLeadId] = useState<string>('');
-  const [prospectName, setProspectName] = useState<string>('Valued Client');
-  const [prospectPhone, setProspectPhone] = useState<string>('(623) 223-0165');
+  const [prospectName, setProspectName] = useState<string>('');
+  const [prospectPhone, setProspectPhone] = useState<string>('');
   const [prospectState, setProspectState] = useState<string>('AZ');
   const [prospectAddress, setProspectAddress] = useState<string>('');
   const [onWarmTransfer, setOnWarmTransfer] = useState<boolean>(false);
@@ -184,8 +186,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     on_warm_transfer: boolean;
   }>({
     mode: 'inbound',
-    prospect_name: 'Valued Client',
-    phone: '(623) 223-0165',
+    prospect_name: '',
+    phone: '',
     state: 'AZ',
     address: '',
     on_warm_transfer: false,
@@ -209,7 +211,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     sessionCtxRef.current = {
       mode: callMode,
       lead_id: leadId,
-      prospect_name: prospectName || 'Valued Client',
+      prospect_name: prospectName,
       phone: prospectPhone,
       state: prospectState || 'AZ',
       address: prospectAddress,
@@ -580,6 +582,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         .slice(-12)
         .map((t) => ({ speaker: t.speaker as 'sarah' | 'user', text: t.text }));
 
+      const activeModeForTurn = isAdmin ? ctxOverride?.mode || activeCtx.mode : 'inbound';
       const res = await fetch('/api/sarah/turn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -589,9 +592,10 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
           skip_inline_tts: false,
           history: historyPayload,
           context: {
-            mode: isAdmin ? ctxOverride?.mode || activeCtx.mode : 'inbound',
+            mode: activeModeForTurn,
+            source_channel: activeModeForTurn === 'outbound' ? 'outbound' : 'website_traffic',
             lead_id: ctxOverride?.lead_id !== undefined ? ctxOverride.lead_id : activeCtx.lead_id,
-            prospect_name: ctxOverride?.prospect_name || activeCtx.prospect_name,
+            prospect_name: ctxOverride?.prospect_name !== undefined ? ctxOverride.prospect_name : activeCtx.prospect_name,
             prospect_phone: ctxOverride?.phone !== undefined ? ctxOverride.phone : activeCtx.phone,
             state: ctxOverride?.state || activeCtx.state,
             address: ctxOverride?.address !== undefined ? ctxOverride.address : activeCtx.address,
@@ -603,17 +607,29 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
       isTurnInFlightRef.current = false;
 
-      if (res?.prospect_name && res.prospect_name !== 'Valued Client') {
+      let leadCapturedChange = false;
+      if (res?.lead_id && res.lead_id !== sessionCtxRef.current.lead_id) {
+        setLeadId(res.lead_id);
+        sessionCtxRef.current.lead_id = res.lead_id;
+        leadCapturedChange = true;
+      }
+      if (res?.prospect_name && res.prospect_name !== 'Valued Client' && res.prospect_name !== sessionCtxRef.current.prospect_name) {
         setProspectName(res.prospect_name);
         sessionCtxRef.current.prospect_name = res.prospect_name;
+        leadCapturedChange = true;
       }
-      if (res?.prospect_phone) {
+      if (res?.prospect_phone && res.prospect_phone !== '+16232230165' && res.prospect_phone !== sessionCtxRef.current.phone) {
         setProspectPhone(res.prospect_phone);
         sessionCtxRef.current.phone = res.prospect_phone;
+        leadCapturedChange = true;
       }
-      if (res?.prospect_address) {
+      if (res?.prospect_address && res.prospect_address !== sessionCtxRef.current.address) {
         setProspectAddress(res.prospect_address);
         sessionCtxRef.current.address = res.prospect_address;
+        leadCapturedChange = true;
+      }
+      if (leadCapturedChange) {
+        window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
       }
 
       if (res?.reply) {
@@ -641,28 +657,22 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         setConfirmedAppt(res.appointment);
         setActiveScriptStep(3);
         const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const smsPhone = res.appointment.sms_reminder_phone || activeCtx.phone || '(623) 223-0165';
-        const customerAddr = res.appointment.customer_address || activeCtx.address || 'Address Verified on File';
+        const smsPhone = res.appointment.sms_reminder_phone || sessionCtxRef.current.phone || '';
+        const customerAddr = res.appointment.customer_address || sessionCtxRef.current.address || 'Address Verified on File';
+        const leadTag = res.appointment.lead_source || 'Website Traffic';
         setTranscripts((prev) => [
           ...prev,
           {
             id: 'appt_' + Date.now(),
             speaker: 'system',
-            text: `📅 Official Appointment Confirmed: ${res.appointment.customer_name} • 📍 ${customerAddr} • 📞 ${smsPhone} (${res.appointment.appointment_type}${res.appointment.product_line ? ` • ${res.appointment.product_line}` : ''}) — ${res.appointment.confirmed_datetime}`,
+            text: `📅 Official Appointment Set (${leadTag}): ${res.appointment.customer_name} • 📍 ${customerAddr} • 📞 ${smsPhone} (${res.appointment.appointment_type}${res.appointment.product_line ? ` • ${res.appointment.product_line}` : ''}) — ${res.appointment.confirmed_datetime}`,
             timestamp: nowStamp,
             isAction: true,
           },
           {
             id: 'sms_conf_' + Date.now(),
             speaker: 'system',
-            text: `📲 [1/3] Immediate Confirmation Text Sent to ${smsPhone}: "${res.appointment.sms_reminder_text || `Your ${res.appointment.appointment_type} consultation with King Amen Ra is confirmed for ${res.appointment.confirmed_datetime}.`}"`,
-            timestamp: nowStamp,
-            isAction: true,
-          },
-          {
-            id: 'sms_day_before_' + Date.now(),
-            speaker: 'system',
-            text: `📅 [2/3] Day-Before Reminder Text Scheduled (24h prior) + ⏰ [3/3] Same-Day Reminder Text Scheduled (2h prior) for ${smsPhone}`,
+            text: `📲 Initial Confirmation Text Sent to ${smsPhone} (Reply YES to confirm): "${res.appointment.sms_reminder_text || `Your ${res.appointment.appointment_type} consultation with King Amen Ra is set for ${res.appointment.confirmed_datetime}. Please reply YES to confirm!`}"`,
             timestamp: nowStamp,
             isAction: true,
           },
@@ -871,18 +881,24 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       const requestedMode = initialPayload?.mode || 'inbound';
       const nextMode: 'inbound' | 'outbound' = isAdmin ? requestedMode : 'inbound';
       const nextLeadId = initialPayload?.lead_id || '';
-      const nextName = initialPayload?.prospect_name || 'Valued Client';
-      const nextPhone = initialPayload?.phone || '(623) 223-0165';
+      const rawInitName = (initialPayload?.prospect_name || '').trim();
+      const isPlaceholderInitName =
+        !rawInitName ||
+        /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawInitName);
+      const nextName = nextMode === 'outbound' ? (isPlaceholderInitName ? 'Valued Client' : rawInitName) : isPlaceholderInitName ? '' : rawInitName;
+      const rawInitPhone = (initialPayload?.phone || '').trim();
+      const isPlaceholderInitPhone = !rawInitPhone || rawInitPhone.replace(/\D/g, '').endsWith('6232230165');
+      const nextPhone = nextMode === 'outbound' ? (rawInitPhone || '(623) 223-0165') : isPlaceholderInitPhone ? '' : rawInitPhone;
       const nextState = initialPayload?.state || 'AZ';
       const nextAddr = initialPayload?.address || '';
       const nextWT = Boolean(initialPayload?.on_warm_transfer);
 
       setCallMode(nextMode);
-      if (initialPayload?.lead_id) setLeadId(nextLeadId);
-      if (initialPayload?.prospect_name) setProspectName(nextName);
+      setLeadId(nextLeadId);
+      setProspectName(nextName);
       setProspectPhone(nextPhone);
-      if (initialPayload?.state) setProspectState(nextState);
-      if (initialPayload?.address) setProspectAddress(nextAddr);
+      setProspectState(nextState);
+      setProspectAddress(nextAddr);
       if (initialPayload?.on_warm_transfer !== undefined) setOnWarmTransfer(nextWT);
 
       startSession({
@@ -987,8 +1003,22 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const requestedMode = overrideParams?.mode || callMode;
     const activeMode: 'inbound' | 'outbound' = isAdmin ? requestedMode : 'inbound';
     const activeLeadId = overrideParams?.lead_id !== undefined ? overrideParams.lead_id : leadId;
-    const activeName = overrideParams?.prospect_name || prospectName || 'Valued Client';
-    const activePhone = overrideParams?.phone !== undefined ? overrideParams.phone : prospectPhone;
+    const rawActiveName = overrideParams?.prospect_name !== undefined ? overrideParams.prospect_name : prospectName;
+    const activeName =
+      activeMode === 'outbound'
+        ? rawActiveName || 'Valued Client'
+        : /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(
+            String(rawActiveName || '').trim()
+          )
+        ? ''
+        : String(rawActiveName || '').trim();
+    const rawActivePhone = overrideParams?.phone !== undefined ? overrideParams.phone : prospectPhone;
+    const activePhone =
+      activeMode === 'outbound'
+        ? rawActivePhone || '(623) 223-0165'
+        : String(rawActivePhone || '').replace(/\D/g, '').endsWith('6232230165')
+        ? ''
+        : String(rawActivePhone || '').trim();
     const activeState = overrideParams?.state || prospectState || 'AZ';
     const activeAddress = overrideParams?.address !== undefined ? overrideParams.address : prospectAddress;
     const activeWT = overrideParams?.on_warm_transfer !== undefined ? overrideParams.on_warm_transfer : onWarmTransfer;
@@ -1304,7 +1334,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
               </div>
               <div style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.15rem' }}>
                 <Shield size={13} color="#c8963e" />
-                <span>IWG Insurance & Financial Services • 104+ Carriers • Auto-Confirmation & Reminder Texts</span>
+                <span>IWG Insurance & Financial Services • 104+ Carriers • Step-by-Step Appointment Intake & Confirmation Text</span>
               </div>
             </div>
           </div>
@@ -1440,9 +1470,60 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
               gap: '0.6rem',
             }}
           >
-            <div style={{ fontSize: '0.8rem', color: '#d1fae5', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <span>🎧 <strong>Receptionist:</strong></span>
-              <span>Answers inbound calls immediately, guides all 6 product lines to an appointment (Full Name, Address & Phone), and sends automatic Confirmation + Day-Before & Same-Day Reminder Texts.</span>
+            <div style={{ fontSize: '0.78rem', color: '#d1fae5', display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+              <span>🎧 <strong>Receptionist Appointment Steps:</strong></span>
+              <span
+                style={{
+                  background: prospectName.trim() ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid ' + (prospectName.trim() ? '#10b981' : 'rgba(255,255,255,0.2)'),
+                  color: prospectName.trim() ? '#6ee7b7' : '#cbd5e1',
+                  padding: '0.12rem 0.5rem',
+                  borderRadius: '999px',
+                  fontSize: '0.71rem',
+                  fontWeight: 700,
+                }}
+              >
+                {prospectName.trim() ? `✅ 1. Name: ${prospectName}` : '1. Ask Full Name'}
+              </span>
+              <span
+                style={{
+                  background: prospectPhone.trim() ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid ' + (prospectPhone.trim() ? '#10b981' : 'rgba(255,255,255,0.2)'),
+                  color: prospectPhone.trim() ? '#6ee7b7' : '#cbd5e1',
+                  padding: '0.12rem 0.5rem',
+                  borderRadius: '999px',
+                  fontSize: '0.71rem',
+                  fontWeight: 700,
+                }}
+              >
+                {prospectPhone.trim() ? `✅ 2. Phone: ${prospectPhone}` : '2. Ask Phone Number'}
+              </span>
+              <span
+                style={{
+                  background: prospectAddress.trim() ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid ' + (prospectAddress.trim() ? '#10b981' : 'rgba(255,255,255,0.2)'),
+                  color: prospectAddress.trim() ? '#6ee7b7' : '#cbd5e1',
+                  padding: '0.12rem 0.5rem',
+                  borderRadius: '999px',
+                  fontSize: '0.71rem',
+                  fontWeight: 700,
+                }}
+              >
+                {prospectAddress.trim() ? `✅ 3. Address: ${prospectAddress}` : '3. Ask Street Address'}
+              </span>
+              <span
+                style={{
+                  background: confirmedAppt ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid ' + (confirmedAppt ? '#10b981' : 'rgba(255,255,255,0.2)'),
+                  color: confirmedAppt ? '#6ee7b7' : '#cbd5e1',
+                  padding: '0.12rem 0.5rem',
+                  borderRadius: '999px',
+                  fontSize: '0.71rem',
+                  fontWeight: 700,
+                }}
+              >
+                {confirmedAppt ? `✅ 4. Confirmed (${confirmedAppt.confirmed_datetime}) — Reply YES` : '4. Agree Date/Time → Reply YES to Confirmation Text'}
+              </span>
             </div>
             {isAdmin && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -1852,7 +1933,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 </div>
               )}
 
-              {/* Appointment Confirmation + 3-Step SMS Cadence Banner */}
+              {/* Appointment Confirmation + Confirmation Text Banner */}
               {confirmedAppt && (
                 <div
                   style={{
@@ -1874,7 +1955,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                       <CheckCircle2 size={15} color="#34d399" />
                       <span>
-                        <strong>Appointment Confirmed!</strong> {confirmedAppt.appointment_type} consultation
+                        <strong>Appointment Set!</strong> {confirmedAppt.appointment_type} consultation
                         {confirmedAppt.product_line ? ` (${confirmedAppt.product_line})` : ''} for{' '}
                         <strong>{confirmedAppt.customer_name}</strong> — <strong>{confirmedAppt.confirmed_datetime}</strong> with King Amen Ra.
                       </span>
@@ -1890,7 +1971,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                           fontWeight: 800,
                         }}
                       >
-                        ✅ [1/3] CONFIRMATION TEXT SENT
+                        ✅ INITIAL CONFIRMATION TEXT SENT (REPLY YES)
                       </span>
                       <span
                         style={{
@@ -1903,34 +1984,21 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                           fontWeight: 800,
                         }}
                       >
-                        📅 [2/3] DAY-BEFORE REMINDER SCHEDULED
-                      </span>
-                      <span
-                        style={{
-                          backgroundColor: 'rgba(200, 150, 62, 0.28)',
-                          color: '#ffd88a',
-                          border: '1px solid #c8963e',
-                          padding: '0.12rem 0.5rem',
-                          borderRadius: '999px',
-                          fontSize: '0.66rem',
-                          fontWeight: 800,
-                        }}
-                      >
-                        ⏰ [3/3] SAME-DAY REMINDER SCHEDULED
+                        🏷️ LEAD TAG: {confirmedAppt.lead_source || 'Website Traffic'}
                       </span>
                     </div>
                   </div>
                   <div style={{ fontSize: '0.72rem', color: '#e2e8f0', display: 'flex', gap: '0.85rem', flexWrap: 'wrap' }}>
                     <span>👤 <strong>Name:</strong> {confirmedAppt.customer_name}</span>
-                    <span>📍 <strong>Address:</strong> {confirmedAppt.customer_address || prospectAddress || 'Verified on File'}</span>
-                    <span>📞 <strong>Phone:</strong> {confirmedAppt.sms_reminder_phone || prospectPhone || '(623) 223-0165'}</span>
+                    <span>📍 <strong>Address:</strong> {confirmedAppt.customer_address || prospectAddress}</span>
+                    <span>📞 <strong>Phone:</strong> {confirmedAppt.sms_reminder_phone || prospectPhone}</span>
                   </div>
                   <div style={{ fontSize: '0.72rem', color: '#d1fae5' }}>
-                    📲 <strong>Confirmation Text Sent:</strong>{' '}
+                    📲 <strong>Confirmation Text Sent (Reply YES to Confirm):</strong>{' '}
                     <em>
                       "
                       {confirmedAppt.sms_reminder_text ||
-                        `Hi ${confirmedAppt.customer_name}, your ${confirmedAppt.appointment_type} consultation with King Amen Ra is confirmed for ${confirmedAppt.confirmed_datetime}.`}
+                        `Hi ${confirmedAppt.customer_name}, your ${confirmedAppt.appointment_type} consultation with King Amen Ra is scheduled for ${confirmedAppt.confirmed_datetime}. Please reply YES to confirm your appointment.`}
                       "
                     </em>
                   </div>
@@ -2133,7 +2201,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     onClick={() =>
                       triggerScriptStepDirective(
                         3,
-                        `Execute Step 3 Path B (Executive Alternative-Choice Appointment Close): Say to ${firstName}: "Because King Amen Ra is currently on a live consultation helping another family, I want to reserve a dedicated one-on-one time for you on his private calendar. To lock that in and send your confirmation text along with day-before and same-day reminders, may I confirm your full name, street address, and best phone number—and do you prefer a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?"`
+                        `Execute Step 3 Path B (Executive Alternative-Choice Appointment Close): Say to ${firstName}: "Because King Amen Ra is currently on a live consultation helping another family, I want to reserve a dedicated one-on-one time for you on his private calendar. To lock that in and send your confirmation text—which you simply reply YES to confirm—may I confirm your full name, street address, and best phone number, and do you prefer a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?"`
                       )
                     }
                     style={{
@@ -2649,10 +2717,10 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
                     <div style={{ background: '#16244d', padding: '0.75rem', borderRadius: '8px', border: '1.5px solid #3b82f6' }}>
                       <div style={{ fontWeight: 800, color: '#60a5fa', marginBottom: '0.35rem' }}>
-                        PATH B — EXECUTIVE APPOINTMENT CLOSE (NAME, ADDRESS & PHONE + 3 SMS REMINDERS)
+                        PATH B — EXECUTIVE APPOINTMENT CLOSE (NAME, ADDRESS & PHONE + CONFIRMATION TEXT)
                       </div>
                       <p style={{ margin: '0 0 0.5rem', color: '#e2e8f0', fontSize: '0.76rem' }}>
-                        "May I confirm your <strong>full name</strong>, <strong>street address</strong>, and <strong>best phone number</strong> so I can lock in your appointment and send your automatic confirmation text followed by day-before and same-day reminders?"
+                        "May I confirm your <strong>full name</strong>, <strong>street address</strong>, and <strong>best phone number</strong> so I can lock in your appointment and send your confirmation text? Simply reply <strong>YES</strong> to that text to confirm!"
                       </p>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.35rem' }}>
                         {(['Telephone', 'In-Person', 'Video'] as const).map((t) => (
@@ -2662,7 +2730,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                             onClick={() =>
                               triggerScriptStepDirective(
                                 3,
-                                `${firstName} selected a ${t} appointment for Tomorrow at 10:00 AM! Immediately call the book_appointment tool with customer_name="${prospectName}", phone="${prospectPhone}", address="${prospectAddress || 'Phoenix, AZ'}", appointment_type="${t}", preferred_datetime="Tomorrow at 10:00 AM", state="${prospectState}" and confirm the appointment plus the immediate confirmation text, day-before reminder, and same-day reminder.`
+                                `${firstName} selected a ${t} appointment for Tomorrow at 10:00 AM! Immediately call the book_appointment tool with customer_name="${prospectName}", phone="${prospectPhone}", address="${prospectAddress || 'Phoenix, AZ'}", appointment_type="${t}", preferred_datetime="Tomorrow at 10:00 AM", state="${prospectState}" and confirm the appointment plus the immediate confirmation text asking them to reply YES.`
                               )
                             }
                             style={{
@@ -2692,23 +2760,23 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                     {[
                       {
                         title: '🛡️ 1. Modern Term & Whole Life Insurance (Living Benefits)',
-                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Modern Term & Whole Life with Living Benefits script to ${firstName}: "I would love to help you with Life Insurance! Unlike old-fashioned policies that only pay out when you pass away, our modern Term and Whole Life policies across 104+ carriers include Living Benefits at no extra cost—meaning if you ever suffer a heart attack, stroke, cancer, or chronic illness, the policy accelerates tax-free cash directly to you while you are alive. To have Principal Broker King Amen Ra prepare your custom side-by-side quote and lock in your appointment with an instant confirmation text plus day-before and same-day reminders, may I get your full name, street address, and best phone number?"`,
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Modern Term & Whole Life with Living Benefits script to ${firstName}: "I would love to help you with Life Insurance! Unlike old-fashioned policies that only pay out when you pass away, our modern Term and Whole Life policies across 104+ carriers include Living Benefits at no extra cost—meaning if you ever suffer a heart attack, stroke, cancer, or chronic illness, the policy accelerates tax-free cash directly to you while you are alive. To have Principal Broker King Amen Ra prepare your custom side-by-side quote and lock in your appointment with an instant confirmation text, may I get your full name, street address, and best phone number?"`,
                       },
                       {
                         title: '📈 2. Investment Grade High Cash-Value IUL (Section 7702)',
-                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Investment Grade High Cash-Value IUL (Section 7702) script to ${firstName}: "Our Investment Grade High Cash-Value IUL structured under IRS Section 7702 gives you S&P 500 market-linked growth with a 0% contractual floor so you never lose a dime in a market crash, tax-free retirement income distributions, and full Living Benefits. To schedule your strategy session with King Amen Ra and send your instant confirmation text plus day-before and same-day reminders, may I confirm your full name, street address, and best phone number?"`,
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Investment Grade High Cash-Value IUL (Section 7702) script to ${firstName}: "Our Investment Grade High Cash-Value IUL structured under IRS Section 7702 gives you S&P 500 market-linked growth with a 0% contractual floor so you never lose a dime in a market crash, tax-free retirement income distributions, and full Living Benefits. To schedule your strategy session with King Amen Ra and send your instant confirmation text, may I confirm your full name, street address, and best phone number?"`,
                       },
                       {
                         title: '🏥 3. Individual & Family Health (ACA & Private PPO)',
-                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Individual & Family Health Insurance script to ${firstName}: "For individuals, families, and self-employed professionals under 65, we shop both ACA Marketplace plans with maximum federal tax subsidies and Private Underwritten PPO networks side-by-side across 104+ carriers to cut deductibles and keep your preferred doctors in-network. To reserve your review with King Amen Ra and send your automatic confirmation text plus day-before and same-day reminders, may I have your full name, street address, and best phone number?"`,
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Individual & Family Health Insurance script to ${firstName}: "For individuals, families, and self-employed professionals under 65, we shop both ACA Marketplace plans with maximum federal tax subsidies and Private Underwritten PPO networks side-by-side across 104+ carriers to cut deductibles and keep your preferred doctors in-network. To reserve your review with King Amen Ra and send your automatic confirmation text, may I have your full name, street address, and best phone number?"`,
                       },
                       {
                         title: '🏢 4. Group Health Insurance (1–50+ Employees, Level-Funded & ICHRA)',
-                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Group Health & Corporate Benefits script to ${firstName}: "For businesses with 1 to 50+ employees, we design Level-Funded PPO, Small Group, and tax-deductible ICHRA benefit strategies that typically lower employer premium costs by 15% to 30% while upgrading employee networks. To schedule your census audit with King Amen Ra and send your confirmation text plus day-before and same-day reminders, may I get your full name, business or street address, and best phone number?"`,
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Group Health & Corporate Benefits script to ${firstName}: "For businesses with 1 to 50+ employees, we design Level-Funded PPO, Small Group, and tax-deductible ICHRA benefit strategies that typically lower employer premium costs by 15% to 30% while upgrading employee networks. To schedule your census audit with King Amen Ra and send your confirmation text, may I get your full name, business or street address, and best phone number?"`,
                       },
                       {
                         title: '🏡 5. Asset-Based Long Term Care (Hybrid Estate Protection)',
-                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Asset-Based Long Term Care script to ${firstName}: "Traditional health insurance and Medicare do not cover extended nursing home, assisted living, or private home care. Our Asset-Based Hybrid Long-Term Care policies guarantee tax-free monthly care benefits—and if you never need care, 100% of your principal passes tax-free to your family so it is never 'use it or lose it.' To schedule your estate-protection review with King Amen Ra and send your confirmation text plus day-before and same-day reminders, may I have your full name, street address, and best phone number?"`,
+                        prompt: `[SCRIPT TREE DIRECTIVE]: Speak our Asset-Based Long Term Care script to ${firstName}: "Traditional health insurance and Medicare do not cover extended nursing home, assisted living, or private home care. Our Asset-Based Hybrid Long-Term Care policies guarantee tax-free monthly care benefits—and if you never need care, 100% of your principal passes tax-free to your family so it is never 'use it or lose it.' To schedule your estate-protection review with King Amen Ra and send your confirmation text, may I have your full name, street address, and best phone number?"`,
                       },
                       {
                         title: '❌ Objection: "I’m happy with my current plan / don’t want to change"',
@@ -2716,7 +2784,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                       },
                       {
                         title: '❌ Objection: "Just mail me something / I’m busy right now"',
-                        prompt: `Speak Objection Rebuttal 4 to ${firstName}: "I completely respect your time, ${firstName}. Because there are over 104 carriers, mailing generic brochures wouldn't show your exact rates. Instead, let’s grab your full name, street address, and phone number to lock in a quick Telephone, In-Person, or Video appointment, and we’ll send an instant confirmation text followed by day-before and same-day reminders. Does tomorrow morning or afternoon work better?"`,
+                        prompt: `Speak Objection Rebuttal 4 to ${firstName}: "I completely respect your time, ${firstName}. Because there are over 104 carriers, mailing generic brochures wouldn't show your exact rates. Instead, let’s grab your full name, street address, and phone number to lock in a quick Telephone, In-Person, or Video appointment, and we’ll send an instant confirmation text that you simply reply YES to confirm. Does tomorrow morning or afternoon work better?"`,
                       },
                     ].map((obj, i) => (
                       <button

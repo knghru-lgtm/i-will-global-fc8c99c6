@@ -36,6 +36,43 @@ export interface SarahSessionContext {
   caller_name?: string;
   on_warm_transfer?: boolean;
   product_interest?: string;
+  source_channel?: 'call_in_lead' | 'website_traffic' | 'outbound';
+  preferred_datetime?: string;
+  appointment_type?: 'Telephone' | 'In-Person' | 'Video';
+}
+
+export function isPlaceholderProspectName(name?: string): boolean {
+  const clean = String(name || '').trim();
+  if (!clean) return true;
+  return /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary|website visitor|inbound caller|there|unknown|guest|customer|client)$/i.test(
+    clean
+  );
+}
+
+export function isPlaceholderProspectPhone(phone?: string, mode: 'inbound' | 'outbound' = 'inbound'): boolean {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length < 10) return true;
+  if (mode === 'inbound' && digits.endsWith('6232230165')) return true;
+  return false;
+}
+
+export function isPlaceholderProspectAddress(address?: string): boolean {
+  const clean = String(address || '').trim();
+  if (!clean || clean.length < 4) return true;
+  return /^(not provided|not provided yet|none|unknown|on file|n\/a|pending|tbd)$/i.test(clean);
+}
+
+export function resolveInboundLeadSource(ctx?: Partial<SarahSessionContext>): string {
+  if (ctx?.mode === 'outbound' || ctx?.source_channel === 'outbound') {
+    return 'Outbound Caller';
+  }
+  if (ctx?.source_channel === 'call_in_lead') {
+    return 'Call-In Lead';
+  }
+  if (ctx?.source_channel === 'website_traffic') {
+    return 'Website Traffic';
+  }
+  return 'Call-In Lead';
 }
 
 export function detectProductInterest(text: string, fallback = ''): string {
@@ -68,15 +105,15 @@ const DIRECTORY_PROMPT_LIST = IWG_TEAM_DIRECTORY.map(
 export function buildSarahSystemInstruction(ctx?: Partial<SarahSessionContext>): string {
   const mode = ctx?.mode === 'outbound' ? 'outbound' : 'inbound';
   const rawName = (ctx?.prospect_name || '').trim();
-  const isGenericName =
-    !rawName ||
-    /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawName);
-  const prospectName = isGenericName ? 'Valued Client' : rawName;
-  const firstName = isGenericName ? 'there' : prospectName.split(/\s+/)[0] || 'there';
+  const isGenericName = isPlaceholderProspectName(rawName);
+  const prospectName = isGenericName ? 'Not provided yet' : rawName;
+  const firstName = isGenericName ? 'there' : rawName.split(/\s+/)[0] || 'there';
   const state = ctx?.state || 'Arizona';
   const callerName = ctx?.caller_name || 'Sarah';
   const onWarmTransfer = Boolean(ctx?.on_warm_transfer);
   const activeProduct = ctx?.product_interest || '';
+  const hasValidPhone = !isPlaceholderProspectPhone(ctx?.prospect_phone, mode);
+  const hasValidAddress = !isPlaceholderProspectAddress(ctx?.address);
 
   return `You are Sarah, the Receptionist, 6-Division Insurance Specialist, and Outbound Caller on line ${SARAH_MAIN_LINE_DISPLAY} (${SARAH_MAIN_LINE_E164}) for IWG Insurance and Financial Services (iwillglobal.com).
 NEVER refer to yourself as "AI", "AI Receptionist", "Virtual Receptionist", or "Voice AI" to any caller—simply refer to yourself as the Receptionist (or Sarah, the Receptionist).
@@ -84,91 +121,99 @@ You represent a 100% free fiduciary advisory comparing over 104 premier carriers
 Every interaction must reflect our four core pillars: World-Class Excellence, Uncompromising Integrity, Radical Service Orientation, and Genuine Care & Empathy.
 
 CURRENT CALL MODE ON LINE ${SARAH_MAIN_LINE_DISPLAY}: ${mode.toUpperCase()}${activeProduct ? `\nDETECTED CUSTOMER PRODUCT INTEREST: ${activeProduct} (Stay strictly focused on ${activeProduct}—NEVER treat this caller as a Medicare lead unless they specifically ask about Medicare!)` : ''}
+CAPTURED PROSPECT DETAILS SO FAR:
+- Full Name: ${isGenericName ? 'MISSING (You MUST ask the caller for their full first and last name!)' : prospectName}
+- Phone Number: ${hasValidPhone ? ctx?.prospect_phone : 'MISSING (You MUST ask the caller for their best 10-digit phone number!)'}
+- Street Address: ${hasValidAddress ? ctx?.address : 'MISSING (You MUST ask the caller for their street address!)'}
 ${mode === 'outbound'
-      ? `ACTIVE OUTBOUND PROSPECT: ${prospectName} (Address them as: "${firstName}", State: ${state}${ctx?.prospect_phone ? `, Phone: ${ctx.prospect_phone}` : ''}${ctx?.address ? `, Address: ${ctx.address}` : ''})
+      ? `ACTIVE OUTBOUND PROSPECT: ${isGenericName ? 'Valued Client' : prospectName} (Address them as: "${firstName}", State: ${state}${hasValidPhone ? `, Phone: ${ctx?.prospect_phone}` : ''}${hasValidAddress ? `, Address: ${ctx?.address}` : ''})
 KING AMEN RA WARM TRANSFER STATUS: ${onWarmTransfer
-        ? 'ON_WARM_TRANSFER (King Amen Ra is currently on a live consultation—use Path B Executive Alternative-Choice Appointment Close to book and confirm a Telephone, In-Person, or Video appointment and submit a text reminder!)'
-        : 'AVAILABLE (King Amen Ra is available—use Path A Direct Transfer OR Path B Appointment Booking + Text Reminder!)'
+        ? 'ON_WARM_TRANSFER (King Amen Ra is currently on a live consultation—use Path B Executive Alternative-Choice Appointment Close to book a Telephone, In-Person, or Video appointment and send an initial confirmation text!)'
+        : 'AVAILABLE (King Amen Ra is available—use Path A Direct Transfer OR Path B Appointment Booking + Initial Confirmation Text!)'
       }`
-      : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Receptionist Mode — Answer immediately, listen to which of our 6 product divisions they are asking about, route to any of the 42 directory members via transfer, or schedule & confirm an appointment with King Amen Ra and submit an automatic SMS text reminder)`
+      : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Receptionist Mode — Answer immediately right away, listen to which of our 6 product divisions they are asking about, route to any of the 42 directory members via transfer, or follow the mandatory step-by-step appointment setting process to add a new lead and book an appointment with King Amen Ra)`
     }
 
 ================================================================================
 CRITICAL RULE #1 — STRICT 6-PRODUCT-LINE ISOLATION & AWARD-WINNING APPOINTMENT SCRIPTS
 ================================================================================
-IWG Insurance and Financial Services has 6 distinct divisions. Listen carefully to what the customer asks for and respond ONLY for that division using these award-winning scripts that lead directly to a confirmed appointment:
+IWG Insurance and Financial Services has 6 distinct divisions. Listen carefully to what the customer asks for and respond ONLY for that division using these award-winning scripts that lead directly to an appointment:
 
 1. DIVISION 1 — MODERN TERM LIFE & WHOLE LIFE INSURANCE WITH LIVING BENEFITS:
    - STRICT ISOLATION: NEVER respond as if they are a Medicare lead! Never mention Medicare, Part A/B/C/D, $1,788 hospital deductibles, $2,400 Rx caps, or "doctors and prescriptions".
    - AWARD-WINNING SCRIPT TO APPOINTMENT:
-     "We would be honored to protect your family with Life Insurance! As a 100% free independent fiduciary brokerage representing over 104 premier carriers with zero broker fees, we specialize in Modern Term Life and Whole Life policies with built-in Living Benefits—which pay tax-free cash directly to you while you are alive in the event of a critical, chronic, or terminal illness—and feature 15-minute no-exam digital approvals at wholesale rates. To have our Principal Broker, King Amen Ra, prepare your side-by-side wholesale rate comparison, let's lock in a dedicated 30-minute Telephone, 30-minute Video, or 60-minute In-Person appointment. May I have your full name, street address, and best phone number—and does tomorrow morning or afternoon work best so I can send your instant confirmation text along with your day-before and same-day reminders?"
+     "We would be honored to protect your family with Life Insurance! As a 100% free independent fiduciary brokerage representing over 104 premier carriers with zero broker fees, we specialize in Modern Term Life and Whole Life policies with built-in Living Benefits—which pay tax-free cash directly to you while you are alive in the event of a critical, chronic, or terminal illness—and feature 15-minute no-exam digital approvals at wholesale rates. Let's set up a dedicated 30-minute Telephone, 30-minute Video, or 60-minute In-Person appointment with our Principal Broker, King Amen Ra. Which format and what day and time work best for you—and may I get your full name, phone number, and street address so I can send your confirmation text?"
 
 2. DIVISION 2 — INVESTMENT GRADE LIFE INSURANCE (HIGH CASH-VALUE IUL / IRS SECTION 7702):
    - STRICT ISOLATION: NEVER mention Medicare!
    - AWARD-WINNING SCRIPT TO APPOINTMENT:
-     "We specialize in institutional-grade wealth accumulation and protection! Representing over 104 premier carriers with zero fees, we structure high cash-value Indexed Universal Life policies under IRS Section 7702 that capture market index upside with a contractual 0% downside floor—so you never lose a penny of principal when the market drops—and generate 100% tax-free retirement income and Infinite Banking liquidity. Let's schedule a private 30-minute Telephone, 30-minute Video, or 60-minute In-Person illustration review with our Principal Broker, King Amen Ra. May I get your full name, address, and best cell phone number, and what day and time works best so I can send your confirmation text and schedule your day-before and same-day reminders?"
+     "We specialize in institutional-grade wealth accumulation and protection! Representing over 104 premier carriers with zero fees, we structure high cash-value Indexed Universal Life policies under IRS Section 7702 that capture market index upside with a contractual 0% downside floor—so you never lose a penny of principal when the market drops—and generate 100% tax-free retirement income and Infinite Banking liquidity. Let's schedule a private 30-minute Telephone, 30-minute Video, or 60-minute In-Person illustration review with our Principal Broker, King Amen Ra. What day and time works best for you—and may I get your full name, phone number, and street address so I can send your confirmation text?"
 
 3. DIVISION 3 — INDIVIDUAL & FAMILY HEALTH INSURANCE (ACA MARKETPLACE & PRIVATE PPO):
    - STRICT ISOLATION: Do NOT pitch Medicare!
    - AWARD-WINNING SCRIPT TO APPOINTMENT:
-     "We would be honored to help you and your family save on health coverage! As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we compare both ACA Marketplace plans—maximizing your Advanced Premium Tax Credits and Silver CSR $0 deductibles—and nationwide off-exchange private PPO networks where you never need a referral to see top specialists. Let's reserve a 30-minute Telephone, 30-minute Video, or 60-minute In-Person consultation with our Principal Broker, King Amen Ra, to check if you qualify for a $0 or reduced-cost plan. May I have your full name, street address, and best phone number, and does tomorrow morning or afternoon work best so I can send your automatic confirmation text plus your day-before and same-day reminders?"
+     "We would be honored to help you and your family save on health coverage! As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we compare both ACA Marketplace plans—maximizing your Advanced Premium Tax Credits and Silver CSR $0 deductibles—and nationwide off-exchange private PPO networks where you never need a referral to see top specialists. Let's reserve a 30-minute Telephone, 30-minute Video, or 60-minute In-Person consultation with our Principal Broker, King Amen Ra, to check if you qualify for a $0 or reduced-cost plan. What day and time works best—and may I have your full name, phone number, and street address so I can send your confirmation text?"
 
 4. DIVISION 4 — GROUP HEALTH INSURANCE & CORPORATE EMPLOYEE BENEFITS (1–50+ EMPLOYEES, LEVEL-FUNDED & ICHRA):
    - STRICT ISOLATION: Do NOT pitch Medicare!
    - AWARD-WINNING SCRIPT TO APPOINTMENT:
-     "We would love to support your business and employees! As an independent fiduciary brokerage representing over 104 premier carriers, we design Level-Funded and ICHRA corporate benefit plans for businesses with 1 to 50+ employees that typically slash employer healthcare overhead by 15% to 30% while refunding unused claims reserves directly back to your business at year-end. Let's schedule a complimentary Corporate Benefits Audit with our Principal Broker, King Amen Ra, by Telephone, Video, or In-Person. May I get your full name, business or street address, and best phone number, and what day and time works best so I can send your confirmation text and set your day-before and same-day reminders?"
+     "We would love to support your business and employees! As an independent fiduciary brokerage representing over 104 premier carriers, we design Level-Funded and ICHRA corporate benefit plans for businesses with 1 to 50+ employees that typically slash employer healthcare overhead by 15% to 30% while refunding unused claims reserves directly back to your business at year-end. Let's schedule a complimentary Corporate Benefits Audit with our Principal Broker, King Amen Ra, by Telephone, Video, or In-Person. What day and time works best—and may I get your full name, phone number, and business or street address so I can send your confirmation text?"
 
 5. DIVISION 5 — ASSET-BASED LONG TERM CARE (HYBRID LIFE + LTC, "USE-IT-OR-LEAVE-IT"):
    - STRICT ISOLATION: Focus strictly on Long-Term Care asset protection!
    - AWARD-WINNING SCRIPT TO APPOINTMENT:
-     "Protecting your life savings and dignity is at the heart of what we do! Traditional long-term care was a 'use-it-or-lose-it' trap with constant rate hikes, so we represent over 104 premier carriers offering modern Asset-Based Hybrid Life and Long-Term Care with guaranteed level premiums—paying tax-free monthly benefits for home health care, assisted living, or memory care if you need it, or returning 100% of your benefit tax-free to your family if you never use it. Let's schedule a dedicated Telephone, Video, or In-Person asset-protection consultation with our Principal Broker, King Amen Ra. May I have your full name, street address, and best phone number, and does tomorrow morning or afternoon work best so I can send your automatic confirmation text and schedule your day-before and same-day reminders?"
+     "Protecting your life savings and dignity is at the heart of what we do! Traditional long-term care was a 'use-it-or-lose-it' trap with constant rate hikes, so we represent over 104 premier carriers offering modern Asset-Based Hybrid Life and Long-Term Care with guaranteed level premiums—paying tax-free monthly benefits for home health care, assisted living, or memory care if you need it, or returning 100% of your benefit tax-free to your family if you never use it. Let's schedule a dedicated Telephone, Video, or In-Person asset-protection consultation with our Principal Broker, King Amen Ra. What day and time works best—and may I have your full name, phone number, and street address so I can send your confirmation text?"
 
 6. DIVISION 6 — 2027 MEDICARE PLANS (MEDIGAP PLAN G/N, PART C ADVANTAGE, PART D $2,400 RX CAP):
-   - Use our 2027 Medicare script ($1,788 Part A hospital deductible, $209.50/mo Part B with $292 deductible and uncapped 20% coinsurance, $2,400 Part D Rx cap, and side-by-side Medigap Plan G/N vs. Medicare Advantage comparisons across 104+ carriers), leading directly to a live transfer or a confirmed appointment where you collect their full name, street address, and phone number.
+   - Use our 2027 Medicare script ($1,788 Part A hospital deductible, $209.50/mo Part B with $292 deductible and uncapped 20% coinsurance, $2,400 Part D Rx cap, and side-by-side Medigap Plan G/N vs. Medicare Advantage comparisons across 104+ carriers), leading directly to a live transfer or a confirmed appointment where you collect their full name, phone number, and street address.
 
 ================================================================================
-CRITICAL RULE #2 — COLLECT FULL NAME, ADDRESS & PHONE NUMBER + SEND AUTOMATIC CONFIRMATION TEXT + DAY-BEFORE & SAME-DAY REMINDERS
+CRITICAL RULE #2 — MANDATORY STEP-BY-STEP APPOINTMENT SETTING (COLLECT NAME, PHONE & ADDRESS) & CONFIRMATION TEXT RULE
 ================================================================================
-Whenever a prospect or caller wants to schedule/book an appointment:
-1. COLLECT FULL NAME, STREET ADDRESS & PHONE NUMBER:
-   - Before or while locking in their appointment, always make sure you politely collect or confirm from the prospect:
-     (a) Their **Full Name** (first and last name)
-     (b) Their **Street Address** (street, city, state/zip)
-     (c) Their **Best Phone Number** (for the confirmation text and reminders)
-     (d) Their preferred **Appointment Format** (strictly: **30-minute Telephone**, **60-minute In-Person**, or **30-minute Video**) and **Day & Time**.
-2. IMMEDIATELY EXECUTE \`book_appointment\`:
-   - Invoke the \`book_appointment\` tool passing \`customer_name\`, \`address\`, \`phone\`, \`product_interest\`, \`appointment_type\`, \`preferred_datetime\`, and \`send_text_reminder: true\`.
-   - The system automatically sends the **Immediate Confirmation Text** AND schedules the **Day-Before Reminder Text (24 hours prior)** and **Same-Day Reminder Text (morning of appointment / 2 hours prior)**.
-3. VERBALLY CONFIRM ALL DETAILS & THE 3-STEP TEXT SEQUENCE:
-   - Explicitly confirm the appointment format, product line, date/time, and their name/address/phone with Principal Broker King Amen Ra, AND
-   - Explicitly tell the customer: **"I have just sent an automatic confirmation text to your phone, and you will also receive a reminder text the day before your appointment as well as a same-day reminder text on the day of your appointment. Please reply YES to the confirmation text to lock in your time!"**
+Whenever a prospect or caller wants to schedule/book an appointment, you MUST follow these steps in order so we can properly add them as a new lead ("Call-In Lead" or "Website Traffic"):
+1. STEP 1 — SELECT FORMAT & DATE/TIME:
+   - Offer the 3 appointment formats (**30-minute Telephone**, **60-minute In-Person**, or **30-minute Video**) and ask what **day and time** works best.
+2. STEP 2 — ASK FOR & COLLECT FULL NAME, PHONE NUMBER, AND STREET ADDRESS:
+   - You MUST collect all three of these before finalizing the appointment:
+     (a) **Full Name** (first and last name)
+     (b) **Phone Number** (10-digit phone number)
+     (c) **Street Address** (street address, city, state/zip)
+   - If the caller gives a date and time (e.g., "tomorrow at 10am") but has NOT yet given their Full Name, Phone Number, or Street Address, DO NOT say the appointment is booked yet! Instead, ask for the missing details:
+     "Tomorrow at 10:00 AM works great! To add your file and lock in that appointment with Principal Broker King Amen Ra, may I please get your full first and last name, your best phone number, and your street address?"
+   - If they gave their name and phone number but not their street address yet, ask:
+     "Thank you! And what is your street address so I can finish setting up your appointment and send your confirmation text?"
+3. STEP 3 — BOOK APPOINTMENT & SEND INITIAL CONFIRMATION TEXT ONLY:
+   - Once you have collected **Full Name + Phone Number + Street Address + Date/Time**, immediately invoke \`book_appointment\`.
+   - Tell the customer ONLY about the **initial confirmation text** and that they just need to reply **YES** to confirm:
+     **"Wonderful, [Full Name]! I have scheduled your [Appointment Type] [Product] appointment with our Principal Broker King Amen Ra for [Date/Time], and I have just sent a confirmation text to your phone at [Phone]. Please reply YES to that confirmation text to confirm your appointment!"**
+   - **STRICT INTERNAL REMINDER RULE**: NEVER mention "day-before reminder texts" or "same-day reminder texts" to the customer! Those reminder texts are an internal automation that our system sends out automatically the day before and the day of the appointment—we NEVER tell the customer about the reminder texts, they just happen automatically.
 
 ================================================================================
-MODE 1: VIRTUAL RECEPTIONIST WHEN PEOPLE CALL ${SARAH_MAIN_LINE_DISPLAY} (INBOUND)
+MODE 1: RECEPTIONIST WHEN PEOPLE CALL ${SARAH_MAIN_LINE_DISPLAY} (INBOUND)
 ================================================================================
-1. REQUIRED INBOUND RECEPTIONIST GREETING:
-   When greeting an inbound caller on ${SARAH_MAIN_LINE_DISPLAY}, speak warmly and naturally:
-   "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"
+1. REQUIRED INBOUND RECEPTIONIST GREETING (ANSWER RIGHT AWAY):
+   When greeting an inbound caller on ${SARAH_MAIN_LINE_DISPLAY}, answer immediately right away:
+   "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?"
 
-2. 42-MEMBER TEAM DIRECTORY ROUTING & AUTOMATIC AI WHISPER TRANSFER (TRANSFER UPON REQUEST):
-   If the caller asks to be transferred, asks to speak with an advisor, or asks for any specific person on the I Will Global Team Directory (such as King Amen Ra, Aneesha Sullivan PA, Sarah Jenkins, Marcus Vance, JaKeeta Sullivan, Shakira Granger, Kamille Martinez, Regina McCullough, Robert Chen, etc.):
-   - CRITICAL TRANSFER-UPON-REQUEST RULE: NEVER ask for the caller's name or ask any follow-up questions before transferring! Transfer immediately!
+2. 42-MEMBER TEAM DIRECTORY ROUTING & AUTOMATIC WHISPER TRANSFER (TRANSFER UPON REQUEST):
+   If the caller asks to be transferred, asks to speak with an advisor right now, or asks for any specific person on the I Will Global Team Directory (such as King Amen Ra, Aneesha Sullivan PA, Sarah Jenkins, Marcus Vance, JaKeeta Sullivan, Shakira Granger, Kamille Martinez, Regina McCullough, Robert Chen, etc.):
+   - CRITICAL TRANSFER-UPON-REQUEST RULE: Transfer immediately!
    - Step 1 (Hold Framing): Say warmly: "Wonderful! Please hold for just a moment while I dial [Name] and get them on the line for you. I’m going to share your notes with them first so you don't have to repeat yourself—please stay with me for just 15 seconds."
-   - Step 2 (Execute Tool Immediately): On this EXACT SAME TURN, invoke the \`whisper_warm_transfer\` tool with \`recipient_name\` and \`reason\` set to the exact product they asked about (e.g. "Life Insurance & IUL illustration" or "2027 Medicare review").
+   - Step 2 (Execute Tool Immediately): On this EXACT SAME TURN, invoke the \`whisper_warm_transfer\` tool with \`recipient_name\` and \`reason\` set to the exact product they asked about.
    - Step 3 (Merge Intro): Once the tool returns, announce the merge introduction warmly!
 
 ================================================================================
 MODE 2: OUTBOUND CALLER ON ${SARAH_MAIN_LINE_DISPLAY} (UNIFIED OUTBOUND SCRIPT & DECISION TREE)
 ================================================================================
 When operating in OUTBOUND mode:
-- NOTE: If at ANY point during an outbound call the customer says they want **Life Insurance**, **Individual/Family Health**, **Group Health**, or **Long-Term Care**, immediately pivot to CRITICAL RULE #1 for that product line and book/confirm their appointment with a text reminder or transfer them!
+- NOTE: If at ANY point during an outbound call the customer says they want **Life Insurance**, **Individual/Family Health**, **Group Health**, or **Long-Term Care**, immediately pivot to CRITICAL RULE #1 for that product line!
 - Otherwise, for Medicare prospects:
   • STEP 1A (Greeting): "Hello ${firstName}, this is ${callerName} calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"
   • STEP 1B (2027 Value Hook): "We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. To give you the most accurate, side-by-side information about your Medicare options and protect your benefits, would you like to know about the upcoming changes for 2027?"
-  • STEP 2 (3-Point Summary & Close): Share the $1,788 Part A deductible, $209.50/mo Part B with uncapped 20% coinsurance, and $2,400 Part D Rx cap, then ask: "To make this effortless for you, our Principal Broker King Amen Ra can verify your options in just a few minutes at zero cost. Would you like me to get him on the line right now, or schedule a confirmed appointment and send you a text reminder?"
-  • STEP 3 (Path A Whisper Transfer vs. Path B Confirmed Appointment + Text Reminder):
+  • STEP 2 (3-Point Summary & Close): Share the $1,788 Part A deductible, $209.50/mo Part B with uncapped 20% coinsurance, and $2,400 Part D Rx cap, then ask: "To make this effortless for you, our Principal Broker King Amen Ra can verify your options in just a few minutes at zero cost. Would you like me to get him on the line right now, or schedule an appointment?"
+  • STEP 3 (Path A Whisper Transfer vs. Path B Step-by-Step Appointment + Confirmation Text):
     - Path A: Place on hold, call \`whisper_warm_transfer\`, deliver private whisper, and merge both parties on the line.
-    - Path B: Offer Telephone (30m), In-Person (60m), or Video (30m), invoke \`book_appointment\`, verbally confirm the appointment, and confirm that the SMS text reminder has been submitted to their phone!
+    - Path B: Offer Telephone (30m), In-Person (60m), or Video (30m), verify/collect their Full Name, Phone Number, and Street Address, invoke \`book_appointment\`, and ask them to reply YES to the initial confirmation text!
 
 I WILL GLOBAL 42-MEMBER TEAM DIRECTORY:
 ${DIRECTORY_PROMPT_LIST}
@@ -176,6 +221,7 @@ ${DIRECTORY_PROMPT_LIST}
 COMMUNICATION STYLE:
 - Warm, calm, relaxed, articulate, empathetic, and natural spoken voice (Vindemiatrix).
 - Keep spoken turns concise (1 to 3 sentences) so the conversation flows naturally in under 1 second.
+- Never mention day-before or same-day reminder texts to the customer—only mention the initial confirmation text and ask them to reply YES.
 - Never recite raw E.164 phone numbers or email addresses out loud.`;
 }
 
@@ -187,12 +233,12 @@ export const SARAH_TOOLS: Tool[] = [
       {
         name: 'book_appointment',
         description:
-          'Books and officially confirms a consultation appointment with Principal Broker King Amen Ra in the IWG CRM calendar AND automatically submits an SMS text message reminder to the customer. Call this immediately whenever the customer agrees to schedule an appointment or gives a preferred day/time or format.',
+          'Books and officially confirms a consultation appointment with Principal Broker King Amen Ra in the IWG CRM calendar AND sends an initial SMS confirmation text asking the customer to reply YES (only after collecting Full Name, Phone Number, Street Address, Format, and Date/Time).',
         parameters: {
           type: Type.OBJECT,
           properties: {
             customer_name: { type: Type.STRING, description: 'Full name of the customer or prospect (First and Last Name)' },
-            phone: { type: Type.STRING, description: 'Phone number of the customer to receive the automatic confirmation text, day-before reminder, and same-day reminder' },
+            phone: { type: Type.STRING, description: 'Phone number of the customer to receive the initial confirmation text (reply YES)' },
             address: { type: Type.STRING, description: 'Full street address, city, state, and zip of the customer or prospect' },
             email: { type: Type.STRING, description: 'Email address if provided' },
             product_interest: {
@@ -211,7 +257,7 @@ export const SARAH_TOOLS: Tool[] = [
             state: { type: Type.STRING, description: 'State of residence (e.g. AZ)' },
             send_text_reminder: {
               type: Type.BOOLEAN,
-              description: 'Whether to send the automatic SMS confirmation text plus day-before and same-day reminders (always true)',
+              description: 'Whether to send the initial SMS confirmation text (always true)',
             },
             notes: {
               type: Type.STRING,
@@ -224,7 +270,7 @@ export const SARAH_TOOLS: Tool[] = [
       {
         name: 'send_appointment_text_reminder',
         description:
-          'Submits an immediate SMS text message appointment confirmation and reminder to the customer phone number.',
+          'Submits an immediate SMS confirmation text message to the customer phone number asking them to reply YES to confirm.',
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -312,58 +358,180 @@ export const SARAH_TOOLS: Tool[] = [
   },
 ];
 
+export async function upsertReceptionistLeadFromContext(
+  ctx: Partial<SarahSessionContext>,
+  extraNotes?: string
+): Promise<string | null> {
+  const mode = ctx.mode === 'outbound' ? 'outbound' : 'inbound';
+  const rawName = String(ctx.prospect_name || '').trim();
+  const rawPhone = String(ctx.prospect_phone || '').trim();
+  const rawAddress = String(ctx.address || '').trim();
+  const hasName = !isPlaceholderProspectName(rawName);
+  const hasPhone = !isPlaceholderProspectPhone(rawPhone, mode);
+  const hasAddress = !isPlaceholderProspectAddress(rawAddress);
+
+  // Need at least a real phone number or a real full name to create/update a lead
+  if (!hasName && !hasPhone) return ctx.lead_id || null;
+
+  const nameParts = hasName ? rawName.split(/\s+/) : ['Inbound', 'Caller'];
+  const firstName = nameParts[0] || 'Inbound';
+  const lastName = nameParts.slice(1).join(' ') || 'Lead';
+  const phone = hasPhone ? rawPhone : null;
+  const address = hasAddress ? rawAddress : null;
+  const state = ctx.state || 'AZ';
+  const leadSource = resolveInboundLeadSource(ctx);
+  const productLine = ctx.product_interest || 'Insurance & Benefits';
+  const noteLine =
+    extraNotes ||
+    `[${leadSource}] Added by Receptionist (${productLine})${hasName ? ` — Name: ${rawName}` : ''}${hasPhone ? `, Phone: ${rawPhone}` : ''}${hasAddress ? `, Address: ${rawAddress}` : ''}`;
+
+  try {
+    let existing = ctx.lead_id
+      ? await one(`SELECT id, source FROM leads WHERE id = $1 LIMIT 1`, [ctx.lead_id])
+      : phone
+        ? await one(`SELECT id, source FROM leads WHERE phone = $1 LIMIT 1`, [phone])
+        : hasName
+          ? await one(`SELECT id, source FROM leads WHERE first_name ILIKE $1 AND last_name ILIKE $2 LIMIT 1`, [firstName, lastName])
+          : null;
+
+    if (!existing) {
+      const leadId = crypto.randomUUID();
+      const inserted = await one(
+        `INSERT INTO leads (id, first_name, last_name, phone, address, state, status, source, interest, notes, last_disposition, last_contacted_at, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'New', $7, $8, $9, $10, now(), now(), now())
+         RETURNING id`,
+        [
+          leadId,
+          firstName,
+          lastName,
+          phone,
+          address,
+          state,
+          leadSource,
+          productLine,
+          noteLine,
+          `${leadSource} captured by Receptionist`,
+        ]
+      );
+      return inserted?.id || leadId;
+    } else {
+      await q(
+        `UPDATE leads
+         SET first_name = CASE WHEN $2 != 'Inbound' AND $2 != 'Valued' THEN $2 ELSE first_name END,
+             last_name = CASE WHEN $3 != 'Caller' AND $3 != 'Lead' AND $3 != 'Client' THEN $3 ELSE last_name END,
+             phone = COALESCE(NULLIF($4, ''), phone),
+             address = COALESCE(NULLIF($5, ''), address),
+             source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' THEN $6 ELSE source END,
+             interest = COALESCE(NULLIF($7, ''), interest),
+             notes = CASE WHEN COALESCE(notes, '') LIKE '%' || $8 || '%' THEN notes ELSE COALESCE(notes, '') || ' | ' || $8 END,
+             last_contacted_at = now(),
+             updated_at = now()
+         WHERE id = $1`,
+        [existing.id, firstName, lastName, phone || '', address || '', leadSource, productLine, noteLine]
+      ).catch(() => { });
+      return existing.id;
+    }
+  } catch {
+    return ctx.lead_id || null;
+  }
+}
+
 export async function executeSarahTool(
   name: string,
   args: Record<string, any>,
   ctx?: Partial<SarahSessionContext>
 ): Promise<Record<string, any>> {
   if (name === 'book_appointment' || name === 'send_appointment_text_reminder') {
+    const mode = ctx?.mode === 'outbound' ? 'outbound' : 'inbound';
     const rawCustomerName = (args.customer_name || ctx?.prospect_name || '').trim();
-    const isGeneric =
-      !rawCustomerName ||
-      /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(
-        rawCustomerName
-      );
-    const customerName = isGeneric ? 'Valued Client' : rawCustomerName;
-    const nameParts = customerName.split(/\s+/);
-    const firstName = nameParts[0] || 'Valued';
-    const lastName = nameParts.slice(1).join(' ') || 'Client';
-    const apptTypeRaw = String(args.appointment_type || 'Telephone').trim();
+    const isGeneric = isPlaceholderProspectName(rawCustomerName);
+    const apptTypeRaw = String(args.appointment_type || ctx?.appointment_type || 'Telephone').trim();
     const apptType = /in-person|in person|face/i.test(apptTypeRaw)
       ? 'In-Person'
       : /video|meet|zoom/i.test(apptTypeRaw)
-      ? 'Video'
-      : 'Telephone';
-    const apptDatetime = String(args.preferred_datetime || 'Tomorrow at 10:00 AM').trim();
-    const phone = args.phone || args.customer_phone || ctx?.prospect_phone || '+16232230165';
-    const address = String(args.address || args.customer_address || ctx?.address || '').trim();
+        ? 'Video'
+        : 'Telephone';
+    const apptDatetime = String(args.preferred_datetime || ctx?.preferred_datetime || 'Tomorrow at 10:00 AM').trim();
+    const rawPhone = String(args.phone || args.customer_phone || ctx?.prospect_phone || '').trim();
+    const hasValidPhone = !isPlaceholderProspectPhone(rawPhone, mode);
+    const rawAddress = String(args.address || args.customer_address || ctx?.address || '').trim();
+    const hasValidAddress = !isPlaceholderProspectAddress(rawAddress);
     const state = args.state || ctx?.state || 'AZ';
     const productLine =
       detectProductInterest(
         `${args.product_interest || ''} ${args.notes || ''} ${ctx?.product_interest || ''}`,
         args.product_interest || ctx?.product_interest || 'Insurance & Benefits'
       ) || 'Insurance & Benefits';
+
+    // Enforce mandatory step-by-step appointment collection (Full Name, Phone Number, Street Address) in inbound mode
+    if (mode === 'inbound' && !args.force_book) {
+      const missingFields: string[] = [];
+      if (isGeneric) missingFields.push('your full first and last name');
+      if (!hasValidPhone) missingFields.push('your best phone number');
+      if (!hasValidAddress) missingFields.push('your street address');
+
+      if (missingFields.length > 0) {
+        // Save any partial lead info already collected
+        if (!isGeneric || hasValidPhone) {
+          const partialLeadId = await upsertReceptionistLeadFromContext({
+            ...ctx,
+            prospect_name: !isGeneric ? rawCustomerName : ctx?.prospect_name,
+            prospect_phone: hasValidPhone ? rawPhone : ctx?.prospect_phone,
+            address: hasValidAddress ? rawAddress : ctx?.address,
+            product_interest: productLine,
+          });
+          if (partialLeadId && ctx) ctx.lead_id = partialLeadId;
+        }
+        const missingListStr =
+          missingFields.length === 1
+            ? missingFields[0]
+            : missingFields.length === 2
+              ? `${missingFields[0]} and ${missingFields[1]}`
+              : `${missingFields[0]}, ${missingFields[1]}, and ${missingFields[2]}`;
+
+        return {
+          success: false,
+          appointment_confirmed: false,
+          needs_contact_info: true,
+          missing_fields: missingFields,
+          appointment_type: apptType,
+          preferred_datetime: apptDatetime,
+          product_line: productLine,
+          message: `I have ${apptDatetime} ready for your ${apptType} ${productLine} appointment with our Principal Broker, King Amen Ra! To finish setting up your appointment and send your confirmation text, may I please get ${missingListStr}?`,
+        };
+      }
+    }
+
+    const customerName = isGeneric ? 'Valued Client' : rawCustomerName;
+    const nameParts = customerName.split(/\s+/);
+    const firstName = nameParts[0] || 'Valued';
+    const lastName = nameParts.slice(1).join(' ') || 'Client';
+    const phone = hasValidPhone ? rawPhone : rawPhone || '+16232230165';
+    const address = hasValidAddress ? rawAddress : '';
+    const leadSource = resolveInboundLeadSource(ctx);
     const notes =
       args.notes ||
-      `${productLine} consultation booked & confirmed via Receptionist (${ctx?.mode === 'outbound' ? 'Outbound Line' : 'Receptionist'} ${SARAH_MAIN_LINE_DISPLAY}) for ${customerName}${address ? `, Address: ${address}` : ''}, Phone: ${phone}`;
+      `[${leadSource}] ${productLine} consultation booked via Receptionist (${SARAH_MAIN_LINE_DISPLAY}) for ${customerName}${address ? `, Address: ${address}` : ''}, Phone: ${phone}`;
 
-    const smsText = `Hi ${isGeneric ? 'there' : firstName}, your ${productLine} ${apptType} appointment with Principal Broker King Amen Ra (NPN 16094432) at IWG Insurance & Financial Services is CONFIRMED for ${apptDatetime}${address ? ` (Address on file: ${address})` : ''}. Reply YES to confirm! You will also receive a reminder text the day before and on the day of your appointment. Questions? Call ${SARAH_MAIN_LINE_DISPLAY}.`;
-    const dayBeforeSmsText = `[DAY-BEFORE REMINDER]: Hi ${isGeneric ? 'there' : firstName}, friendly reminder that your ${productLine} ${apptType} appointment with Principal Broker King Amen Ra at IWG Insurance & Financial Services is tomorrow (${apptDatetime}). Reply YES to re-confirm or call ${SARAH_MAIN_LINE_DISPLAY} if you need to adjust.`;
-    const sameDaySmsText = `[SAME-DAY REMINDER]: Hi ${isGeneric ? 'there' : firstName}, your ${productLine} ${apptType} appointment with Principal Broker King Amen Ra at IWG Insurance & Financial Services is TODAY (${apptDatetime})${apptType === 'In-Person' && address ? ` at ${address}` : ''}. King Amen Ra looks forward to speaking with you!`;
+    // Customer-facing initial confirmation SMS ONLY asks customer to reply YES (never mentions internal reminder texts)
+    const smsText = `Hi ${isGeneric ? 'there' : firstName}, your ${productLine} ${apptType} appointment with Principal Broker King Amen Ra (NPN 16094432) at IWG Insurance & Financial Services is set for ${apptDatetime}${address ? ` (${address})` : ''}. Please reply YES to confirm your appointment! Questions? Call ${SARAH_MAIN_LINE_DISPLAY}.`;
+    // Internal automated reminders (scheduled silently in CRM for day-before and same-day delivery)
+    const dayBeforeSmsText = `[INTERNAL DAY-BEFORE REMINDER]: Hi ${isGeneric ? 'there' : firstName}, friendly reminder that your ${productLine} ${apptType} appointment with Principal Broker King Amen Ra at IWG Insurance & Financial Services is tomorrow (${apptDatetime}). Call ${SARAH_MAIN_LINE_DISPLAY} if you need any assistance.`;
+    const sameDaySmsText = `[INTERNAL SAME-DAY REMINDER]: Hi ${isGeneric ? 'there' : firstName}, your ${productLine} ${apptType} appointment with Principal Broker King Amen Ra at IWG Insurance & Financial Services is TODAY (${apptDatetime})${apptType === 'In-Person' && address ? ` at ${address}` : ''}. King Amen Ra looks forward to speaking with you!`;
 
     try {
       let lead = ctx?.lead_id
         ? await one(`SELECT id FROM leads WHERE id = $1 LIMIT 1`, [ctx.lead_id])
         : await one(
-            `SELECT id FROM leads WHERE phone = $1 OR (first_name ILIKE $2 AND last_name ILIKE $3) LIMIT 1`,
-            [phone, firstName, lastName]
-          );
+          `SELECT id FROM leads WHERE phone = $1 OR (first_name ILIKE $2 AND last_name ILIKE $3) LIMIT 1`,
+          [phone, firstName, lastName]
+        );
 
       if (!lead) {
         const leadId = crypto.randomUUID();
         lead = await one(
-          `INSERT INTO leads (id, first_name, last_name, phone, address, state, status, source, notes, last_disposition, last_contacted_at, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, 'Appointment Set', $7, $8, $9, now(), now(), now())
+          `INSERT INTO leads (id, first_name, last_name, phone, address, state, status, source, interest, notes, last_disposition, last_contacted_at, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'Appointment Set', $7, $8, $9, $10, now(), now(), now())
            RETURNING id`,
           [
             leadId,
@@ -372,24 +540,27 @@ export async function executeSarahTool(
             phone,
             address || null,
             state,
-            `Receptionist (${productLine})`,
+            leadSource,
+            productLine,
             notes,
-            `Confirmed ${productLine} ${apptType} Appt + Confirmation, Day-Before & Same-Day Texts Scheduled`,
+            `[${leadSource}] ${productLine} ${apptType} Appointment Set (${apptDatetime}) — Initial Confirmation Text Sent`,
           ]
         );
       } else {
         await q(
-          `UPDATE leads SET first_name = CASE WHEN $4 != 'Valued' THEN $4 ELSE first_name END, last_name = CASE WHEN $5 != 'Client' THEN $5 ELSE last_name END, phone = COALESCE(NULLIF($6, ''), phone), address = COALESCE(NULLIF($7, ''), address), status = 'Appointment Set', notes = COALESCE(notes, '') || ' | ' || $2, last_disposition = $3, last_contacted_at = now(), updated_at = now() WHERE id = $1`,
+          `UPDATE leads SET first_name = CASE WHEN $4 != 'Valued' THEN $4 ELSE first_name END, last_name = CASE WHEN $5 != 'Client' THEN $5 ELSE last_name END, phone = COALESCE(NULLIF($6, ''), phone), address = COALESCE(NULLIF($7, ''), address), status = 'Appointment Set', source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' THEN $8 ELSE source END, interest = COALESCE(NULLIF($9, ''), interest), notes = COALESCE(notes, '') || ' | ' || $2, last_disposition = $3, last_contacted_at = now(), updated_at = now() WHERE id = $1`,
           [
             lead.id,
             notes,
-            `Confirmed ${productLine} ${apptType} Appt + Confirmation, Day-Before & Same-Day Texts Scheduled`,
+            `[${leadSource}] ${productLine} ${apptType} Appointment Set (${apptDatetime}) — Initial Confirmation Text Sent`,
             firstName,
             lastName,
             phone,
             address,
+            leadSource,
+            productLine,
           ]
-        ).catch(() => {});
+        ).catch(() => { });
       }
 
       const kingUser = await one(
@@ -409,17 +580,18 @@ export async function executeSarahTool(
 
       const appt = await one(
         `INSERT INTO activities (id, type, subject, body, related_type, related_id, assigned_to, due_at, end_at, status, completed, meta, created_at)
-         VALUES ($1, 'event', $2, $3, 'lead', $4, $5, $6, $7, 'Confirmed', false, $8, now())
+         VALUES ($1, 'event', $2, $3, 'lead', $4, $5, $6, $7, 'Pending Customer YES Confirmation', false, $8, now())
          RETURNING id`,
         [
           activityId,
-          `📅 Confirmed ${productLine} ${apptType} Consultation with King Amen Ra - ${customerName}`,
-          `Confirmed live by Receptionist on ${SARAH_MAIN_LINE_DISPLAY} for ${customerName} (${apptDatetime}).\nFull Name: ${customerName}\nPhone: ${phone}\nAddress: ${address || 'On File'}\nProduct Division: ${productLine}\nFormat: ${apptType} (${durationMinutes} min)\n3-Step SMS Cadence: Confirmation Text Sent + Day-Before Reminder Scheduled + Same-Day Reminder Scheduled\nNotes: ${notes}`,
+          `📅 ${productLine} ${apptType} Consultation with King Amen Ra - ${customerName} (${leadSource})`,
+          `Scheduled live by Receptionist on ${SARAH_MAIN_LINE_DISPLAY} for ${customerName} (${apptDatetime}).\nLead Tag / Source: ${leadSource}\nFull Name: ${customerName}\nPhone: ${phone}\nAddress: ${address || 'On File'}\nProduct Division: ${productLine}\nFormat: ${apptType} (${durationMinutes} min)\nInitial Confirmation Text Sent (Customer replies YES to confirm; internal day-before & same-day reminders scheduled automatically)\nNotes: ${notes}`,
           lead?.id || null,
           assignedAgentId,
           scheduledTime.toISOString(),
           endAt.toISOString(),
           JSON.stringify({
+            lead_source: leadSource,
             product_line: productLine,
             customer_name: customerName,
             customer_phone: phone,
@@ -439,18 +611,18 @@ export async function executeSarahTool(
             duration_minutes: durationMinutes,
             line_number: SARAH_MAIN_LINE_E164,
             call_mode: ctx?.mode || 'inbound',
-            booked_by: 'sarah_voice_ai',
+            booked_by: 'receptionist',
           }),
         ]
       );
 
-      // 1. Immediate Automatic Confirmation SMS
+      // 1. Immediate Automatic Confirmation SMS (Customer replies YES)
       await q(
         `INSERT INTO activities (id, type, subject, body, related_type, related_id, assigned_to, status, completed, direction, phone, provider, disposition_id, disposition, meta, created_at)
-         VALUES ($1, 'call', $2, $3, 'lead', $4, $5, 'Completed', true, 'outbound', $6, 'google_voice', 'appointment_set', 'SMS Confirmation & Text Reminder Sent', $7, now())`,
+         VALUES ($1, 'call', $2, $3, 'lead', $4, $5, 'Completed', true, 'outbound', $6, 'google_voice', 'appointment_set', 'Initial Confirmation SMS Sent (Reply YES)', $7, now())`,
         [
           smsActivityId,
-          `📲 [1/3] Immediate Appointment Confirmation Text sent to ${phone} (${customerName} — ${productLine})`,
+          `📲 Initial Appointment Confirmation Text sent to ${phone} (${customerName} — ${leadSource})`,
           smsText,
           lead?.id || null,
           assignedAgentId,
@@ -460,6 +632,7 @@ export async function executeSarahTool(
             cadence_step: 'immediate_confirmation',
             text_reminder_submitted: true,
             appointment_id: appt?.id || activityId,
+            lead_source: leadSource,
             product_line: productLine,
             customer_name: customerName,
             customer_address: address,
@@ -468,15 +641,15 @@ export async function executeSarahTool(
             expected_reply: 'YES',
           }),
         ]
-      ).catch(() => {});
+      ).catch(() => { });
 
-      // 2. Day-Before Reminder SMS (Scheduled 24h before appointment)
+      // 2. Silent Internal Day-Before Reminder SMS (Scheduled 24h before appointment)
       await q(
         `INSERT INTO activities (id, type, subject, body, related_type, related_id, assigned_to, due_at, status, completed, direction, phone, provider, disposition_id, disposition, meta, created_at)
-         VALUES ($1, 'call', $2, $3, 'lead', $4, $5, $6, 'Scheduled (Day-Before Reminder)', false, 'outbound', $7, 'google_voice', 'appointment_set', 'Day-Before SMS Reminder Scheduled', $8, now())`,
+         VALUES ($1, 'call', $2, $3, 'lead', $4, $5, $6, 'Scheduled (Internal Day-Before Reminder)', false, 'outbound', $7, 'google_voice', 'appointment_set', 'Internal Day-Before SMS Reminder Scheduled', $8, now())`,
         [
           dayBeforeSmsId,
-          `📲 [2/3] Day-Before Appointment Reminder Text scheduled for ${phone} (${customerName} — ${productLine})`,
+          `📲 [Internal Auto-Reminder] Day-Before Text scheduled for ${phone} (${customerName})`,
           dayBeforeSmsText,
           lead?.id || null,
           assignedAgentId,
@@ -484,9 +657,11 @@ export async function executeSarahTool(
           phone,
           JSON.stringify({
             sms: true,
+            internal_only: true,
             cadence_step: 'day_before_reminder',
             scheduled_for: dayBeforeTime.toISOString(),
             appointment_id: appt?.id || activityId,
+            lead_source: leadSource,
             product_line: productLine,
             customer_name: customerName,
             customer_address: address,
@@ -494,15 +669,15 @@ export async function executeSarahTool(
             confirmed_datetime: apptDatetime,
           }),
         ]
-      ).catch(() => {});
+      ).catch(() => { });
 
-      // 3. Same-Day Reminder SMS (Scheduled 2h before appointment on the day of)
+      // 3. Silent Internal Same-Day Reminder SMS (Scheduled 2h before appointment on the day of)
       await q(
         `INSERT INTO activities (id, type, subject, body, related_type, related_id, assigned_to, due_at, status, completed, direction, phone, provider, disposition_id, disposition, meta, created_at)
-         VALUES ($1, 'call', $2, $3, 'lead', $4, $5, $6, 'Scheduled (Same-Day Reminder)', false, 'outbound', $7, 'google_voice', 'appointment_set', 'Same-Day SMS Reminder Scheduled', $8, now())`,
+         VALUES ($1, 'call', $2, $3, 'lead', $4, $5, $6, 'Scheduled (Internal Same-Day Reminder)', false, 'outbound', $7, 'google_voice', 'appointment_set', 'Internal Same-Day SMS Reminder Scheduled', $8, now())`,
         [
           sameDaySmsId,
-          `📲 [3/3] Same-Day Appointment Reminder Text scheduled for ${phone} (${customerName} — ${productLine})`,
+          `📲 [Internal Auto-Reminder] Same-Day Text scheduled for ${phone} (${customerName})`,
           sameDaySmsText,
           lead?.id || null,
           assignedAgentId,
@@ -510,9 +685,11 @@ export async function executeSarahTool(
           phone,
           JSON.stringify({
             sms: true,
+            internal_only: true,
             cadence_step: 'same_day_reminder',
             scheduled_for: sameDayTime.toISOString(),
             appointment_id: appt?.id || activityId,
+            lead_source: leadSource,
             product_line: productLine,
             customer_name: customerName,
             customer_address: address,
@@ -520,7 +697,7 @@ export async function executeSarahTool(
             confirmed_datetime: apptDatetime,
           }),
         ]
-      ).catch(() => {});
+      ).catch(() => { });
 
       try {
         const { publish } = await import('../realtime.ts');
@@ -531,6 +708,7 @@ export async function executeSarahTool(
           same_day_sms_id: sameDaySmsId,
           related_type: 'lead',
           related_id: lead?.id || null,
+          lead_source: leadSource,
           customer_name: customerName,
           customer_address: address,
           product_line: productLine,
@@ -541,7 +719,7 @@ export async function executeSarahTool(
           same_day_reminder_scheduled: true,
           sms_reminder_phone: phone,
         });
-      } catch {}
+      } catch { }
 
       return {
         success: true,
@@ -559,6 +737,7 @@ export async function executeSarahTool(
         same_day_sms_id: sameDaySmsId,
         appointment_id: appt?.id || activityId,
         lead_id: lead?.id || null,
+        lead_source: leadSource,
         customer_name: customerName,
         customer_address: address,
         product_line: productLine,
@@ -566,7 +745,7 @@ export async function executeSarahTool(
         preferred_datetime: apptDatetime,
         confirmed_datetime: apptDatetime,
         line_number: SARAH_MAIN_LINE_DISPLAY,
-        message: `Wonderful, ${isGeneric ? 'thank you' : customerName}! I have officially confirmed your ${apptType} ${productLine} appointment with our Principal Broker King Amen Ra for ${apptDatetime}${address ? ` with your address on file at ${address}` : ''}, and I have just sent an automatic confirmation text to your phone at ${phone}—followed by an automatic day-before reminder text and a same-day reminder text. Please reply YES to that confirmation text, and we look forward to speaking with you!`,
+        message: `Wonderful, ${isGeneric ? 'thank you' : customerName}! I have scheduled your ${apptType} ${productLine} appointment with our Principal Broker King Amen Ra for ${apptDatetime}${address ? ` with your address at ${address}` : ''}, and I have just sent a confirmation text to your phone at ${phone}. Please reply YES to that confirmation text to confirm your appointment, and we look forward to speaking with you!`,
       };
     } catch (err: any) {
       console.error('Error booking appointment in Sarah Voice Service:', err);
@@ -581,6 +760,7 @@ export async function executeSarahTool(
         sms_reminder_text: smsText,
         day_before_sms_text: dayBeforeSmsText,
         same_day_sms_text: sameDaySmsText,
+        lead_source: leadSource,
         customer_name: customerName,
         customer_address: address,
         product_line: productLine,
@@ -588,7 +768,7 @@ export async function executeSarahTool(
         preferred_datetime: apptDatetime,
         confirmed_datetime: apptDatetime,
         line_number: SARAH_MAIN_LINE_DISPLAY,
-        message: `Wonderful! I have officially confirmed your ${apptType} ${productLine} appointment with our Principal Broker King Amen Ra for ${apptDatetime}, and I have just sent an automatic confirmation text to your phone—followed by an automatic day-before reminder and same-day reminder. Please reply YES to that confirmation text!`,
+        message: `Wonderful, ${isGeneric ? 'thank you' : customerName}! I have scheduled your ${apptType} ${productLine} appointment with our Principal Broker King Amen Ra for ${apptDatetime}, and I have just sent a confirmation text to your phone at ${phone}. Please reply YES to that confirmation text to confirm your appointment!`,
       };
     }
   }
@@ -886,21 +1066,23 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
     // ignore
   }
 
+  const initMode: 'inbound' | 'outbound' = initialCtx?.mode === 'outbound' ? 'outbound' : 'inbound';
   const rawInitName = (initialCtx?.prospect_name || '').trim();
-  const isGenericInitName =
-    !rawInitName ||
-    /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawInitName);
+  const isGenericInitName = isPlaceholderProspectName(rawInitName);
+  const rawInitPhone = (initialCtx?.prospect_phone || '').trim();
+  const isGenericInitPhone = isPlaceholderProspectPhone(rawInitPhone, initMode);
 
   const sessionContext: SarahSessionContext = {
-    mode: initialCtx?.mode === 'outbound' ? 'outbound' : 'inbound',
+    mode: initMode,
     lead_id: initialCtx?.lead_id,
-    prospect_name: isGenericInitName ? 'Valued Client' : rawInitName,
-    prospect_phone: initialCtx?.prospect_phone || '+16232230165',
+    prospect_name: isGenericInitName ? (initMode === 'outbound' ? 'Valued Client' : '') : rawInitName,
+    prospect_phone: isGenericInitPhone ? (initMode === 'outbound' ? '+16232230165' : '') : rawInitPhone,
     state: initialCtx?.state || 'Arizona',
-    address: initialCtx?.address || '',
+    address: isPlaceholderProspectAddress(initialCtx?.address) ? '' : String(initialCtx?.address || '').trim(),
     caller_name: initialCtx?.caller_name || 'Sarah',
     on_warm_transfer: initialCtx?.on_warm_transfer !== undefined ? Boolean(initialCtx.on_warm_transfer) : dbWarmTransfer,
     product_interest: initialCtx?.product_interest || '',
+    source_channel: initialCtx?.source_channel || (initMode === 'outbound' ? 'outbound' : 'website_traffic'),
   };
 
   const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
@@ -1471,42 +1653,147 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   }
 }
 
-export function extractCustomerContactDetails(text: string): {
+const NON_NAME_WORDS_RE =
+  /^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|telephone|phone|video|in-person|person|appointment|schedule|book|confirm|yes|yeah|yep|okay|ok|please|thank|thanks|hello|hi|hey|my|the|and|for|with|about|want|need|would|like|can|you|help|me|set|up|an|at|on|in|to|from|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale|peoria|tucson)$/i;
+
+function toTitleCaseWords(input: string): string {
+  return String(input || '')
+    .trim()
+    .split(/\s+/)
+    .map((w) => (w.length <= 2 && /^[A-Z]{2}$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))
+    .join(' ');
+}
+
+function isValidExtractedFullName(candidate: string): boolean {
+  const words = String(candidate || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length < 2 || words.length > 3) return false;
+  for (const w of words) {
+    if (!/^[A-Za-z][A-Za-z'-]{1,20}$/.test(w)) return false;
+    if (NON_NAME_WORDS_RE.test(w)) return false;
+  }
+  return true;
+}
+
+export function extractCustomerContactDetails(
+  text: string,
+  history?: Array<{ speaker: 'sarah' | 'user'; text: string }>
+): {
   fullName?: string;
   phone?: string;
   address?: string;
 } {
-  const s = String(text || '');
+  // Build user-only text so we NEVER accidentally extract Sarah's own (480) 331-9455 number or words
+  const userTurns: string[] = [];
+  if (Array.isArray(history) && history.length > 0) {
+    for (const h of history) {
+      if ((h.speaker === 'user' || (h as any).role === 'user') && h.text) {
+        userTurns.push(String(h.text).trim());
+      }
+    }
+  }
+  if (text) {
+    userTurns.push(String(text).trim());
+  }
+  const s = userTurns.join(' | ');
   let fullName: string | undefined;
   let phone: string | undefined;
   let address: string | undefined;
 
-  const nameMatch =
-    s.match(/\b(?:my name is|my full name is|name is|this is|i am|i'm)\s+([A-Z][a-z]{1,20}(?:\s+[A-Z][a-z]{1,20}){1,2})\b/) ||
-    s.match(/\b([A-Z][a-z]{2,20}\s+[A-Z][a-z]{2,20})(?=\s*(?:,|and my|at\s+\d|phone|address|\d{3}))/);
-  if (
-    nameMatch?.[1] &&
-    !/^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday)$/i.test(
-      nameMatch[1].split(/\s+/)[0]
-    )
-  ) {
-    fullName = nameMatch[1].trim();
+  // 1. Extract Phone Number (ignoring the agency's own 480-331-9455 and 602-456-9681 numbers)
+  const phoneRegex = /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g;
+  let pm: RegExpExecArray | null;
+  while ((pm = phoneRegex.exec(s)) !== null) {
+    const digits = pm[0].replace(/\D/g, '');
+    if (
+      digits.length >= 10 &&
+      !digits.endsWith('4803319455') &&
+      !digits.endsWith('6024569681') &&
+      !digits.endsWith('6232230165')
+    ) {
+      phone = pm[0].trim();
+    }
   }
 
-  const phoneMatch = s.match(/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/);
-  if (phoneMatch?.[0]) {
-    phone = phoneMatch[0].trim();
-  }
-
+  // 2. Extract Street Address (case-insensitive)
   const addrMatch =
     s.match(
-      /\b(?:address is|live at|located at|at)\s+(\d{1,6}\s+[A-Za-z0-9.\s]{3,45}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl|Parkway|Pkwy)(?:[,\s]+[A-Za-z\s]{2,25})?(?:[,\s]+[A-Z]{2})?(?:\s+\d{5})?)\b/i
+      /\b(?:address is|live at|located at)\s+(\d{1,6}\s+[A-Za-z0-9.\s,#-]{3,55}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl|Parkway|Pkwy|Trail|Trl|Loop|Hwy|Highway|Terrace|Ter)(?:[,\s]+[A-Za-z.\s]{2,25})?(?:[,\s]+[A-Za-z]{2,15})?(?:\s+\d{5})?)\b/i
     ) ||
     s.match(
-      /\b(\d{1,6}\s+[A-Za-z0-9.\s]{3,40}\s+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl|Parkway|Pkwy)(?:[,\s]+[A-Za-z\s]{2,25})?(?:[,\s]+[A-Z]{2})?(?:\s+\d{5})?)\b/i
+      /\b(\d{1,6}\s+[A-Za-z0-9.\s]{2,40}\s+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl|Parkway|Pkwy|Trail|Trl|Loop|Hwy|Highway|Terrace|Ter)\b(?:[,\s]+[A-Za-z.\s]{2,25})?(?:[,\s]+[A-Za-z]{2,15})?(?:\s+\d{5})?)/i
     );
   if (addrMatch?.[1]) {
-    address = addrMatch[1].trim();
+    address = addrMatch[1].replace(/\s+\|\s+.*$/, '').trim();
+  }
+
+  // 3. Extract Full Name (case-insensitive so Web Speech API lowercase transcripts work!)
+  const explicitNameMatch =
+    s.match(
+      /\b(?:my name is|my full name is|name is|this is|i am|i'm)\s+([A-Za-z][A-Za-z'-]{1,20}(?:\s+[A-Za-z][A-Za-z'-]{1,20}){1,2})\b/i
+    ) ||
+    s.match(
+      /\b([A-Za-z][A-Za-z'-]{1,20}\s+[A-Za-z][A-Za-z'-]{1,20})(?=\s*(?:,|and my|my phone|my number|my address|at\s+\d|phone|address|\(?\d{3}\)?[-.\s]?\d{3}))/i
+    );
+
+  if (explicitNameMatch?.[1] && isValidExtractedFullName(explicitNameMatch[1])) {
+    fullName = toTitleCaseWords(explicitNameMatch[1]);
+  }
+
+  // 4. Context-aware direct turn extraction (when caller answers Sarah's question directly, e.g., "John Smith" or "123 Main St")
+  const allTurns = [...(history || [])];
+  if (text && (!allTurns.length || allTurns[allTurns.length - 1]?.text !== text)) {
+    allTurns.push({ speaker: 'user', text });
+  }
+
+  for (let i = 0; i < allTurns.length; i++) {
+    const turn = allTurns[i];
+    if (turn.speaker !== 'user' && (turn as any).role !== 'user') continue;
+    const uText = String(turn.text || '').trim();
+    if (!uText) continue;
+    const prevSarah =
+      allTurns
+        .slice(0, i)
+        .reverse()
+        .find((t) => t.speaker === 'sarah' || (t as any).role === 'sarah')?.text || '';
+
+    // Direct name answer or leading name in user turn
+    if (!fullName) {
+      const cleanedForName = uText
+        .replace(/^(?:yes|yeah|sure|okay|ok|hi|hello)[,\s]+/i, '')
+        .replace(/[,.;|].*$/, '')
+        .trim();
+      const firstTwoWordsMatch = cleanedForName.match(/^([A-Za-z][A-Za-z'-]{1,20}\s+[A-Za-z][A-Za-z'-]{1,20})(?:\s+([A-Za-z][A-Za-z'-]{1,20}))?$/);
+      if (firstTwoWordsMatch) {
+        const candidate = firstTwoWordsMatch[2]
+          ? `${firstTwoWordsMatch[1]} ${firstTwoWordsMatch[2]}`
+          : firstTwoWordsMatch[1];
+        if (isValidExtractedFullName(candidate)) {
+          fullName = toTitleCaseWords(candidate);
+        }
+      } else if (/full name|first and last name|your name/i.test(prevSarah)) {
+        const leadWordsMatch = cleanedForName.match(/^([A-Za-z][A-Za-z'-]{1,20}\s+[A-Za-z][A-Za-z'-]{1,20})\b/);
+        if (leadWordsMatch?.[1] && isValidExtractedFullName(leadWordsMatch[1])) {
+          fullName = toTitleCaseWords(leadWordsMatch[1]);
+        }
+      }
+    }
+
+    // Direct address answer if Sarah asked for street address
+    if (!address && /street address|your address|business or street address/i.test(prevSarah)) {
+      const numStreetMatch = uText.match(/\b(\d{1,6}\s+[A-Za-z0-9.\s,#-]{4,60})\b/);
+      if (numStreetMatch?.[1]) {
+        const candidateAddr = numStreetMatch[1]
+          .replace(/\b(?:and my phone|my phone|phone is|number is).*$/i, '')
+          .replace(/[,;\s]+$/, '')
+          .trim();
+        if (candidateAddr.length >= 6 && !/^\d{3}[-.\s]?\d{3}[-.\s]?\d{4}$/.test(candidateAddr)) {
+          address = candidateAddr;
+        }
+      }
+    }
   }
 
   return { fullName, phone, address };
@@ -1515,8 +1802,10 @@ export function extractCustomerContactDetails(text: string): {
 export function detectAppointmentBookingIntent(
   userText: string,
   sarahText = '',
-  historyText = ''
+  historyText = '',
+  history?: Array<{ speaker: 'sarah' | 'user'; text: string }>
 ): {
+  wantsAppointment: boolean;
   shouldBook: boolean;
   appointmentType: 'Telephone' | 'In-Person' | 'Video';
   preferredDatetime: string;
@@ -1529,18 +1818,18 @@ export function detectAppointmentBookingIntent(
   const lowerUser = String(userText || '').toLowerCase();
   const lowerSarah = String(sarahText || '').toLowerCase();
 
-  const extracted = extractCustomerContactDetails(`${historyText} ${userText}`);
+  const extracted = extractCustomerContactDetails(userText, history);
   const productInterest = detectProductInterest(combined, 'Insurance & Benefits');
   const apptType: 'Telephone' | 'In-Person' | 'Video' = /in-person|in person|face to face/i.test(
-    `${userText} ${sarahText}`
+    `${historyText} ${userText} ${sarahText}`
   )
     ? 'In-Person'
-    : /video|google meet|zoom/i.test(`${userText} ${sarahText}`)
-    ? 'Video'
-    : 'Telephone';
+    : /video|google meet|zoom/i.test(`${historyText} ${userText} ${sarahText}`)
+      ? 'Video'
+      : 'Telephone';
 
   const timeMatch =
-    `${userText} ${sarahText}`.match(
+    `${userText} ${historyText} ${sarahText}`.match(
       /\b((?:tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|next week)(?:\s+(?:morning|afternoon|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?|\d{1,2}(?::\d{2})?\s*(?:am|pm)|morning|afternoon)\b/i
     )?.[0] || 'Tomorrow at 10:00 AM';
 
@@ -1548,13 +1837,13 @@ export function detectAppointmentBookingIntent(
     /\b(tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|\d{1,2}\s*(?:am|pm)|telephone|phone appointment|in-person|in person|video appointment)\b/i.test(
       lowerUser
     ) &&
-    /\b(schedule|book|appointment|set up|confirm|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm)|telephone|in-person|video|text reminder|remind)\b/i.test(
+    /\b(schedule|book|appointment|set up|confirm|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm)|telephone|in-person|video|confirmation text)\b/i.test(
       `${lowerUser} ${historyText.toLowerCase()}`
     );
 
   const userGivesContactForBooking =
-    Boolean(extracted.phone || extracted.address) &&
-    /\b(appointment|schedule|book|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|telephone|in-person|video|confirmation text)\b/i.test(
+    Boolean(extracted.fullName || extracted.phone || extracted.address) &&
+    /\b(appointment|schedule|book|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm)|telephone|in-person|video|confirmation text|full name|street address)\b/i.test(
       combined
     );
 
@@ -1565,14 +1854,20 @@ export function detectAppointmentBookingIntent(
     );
 
   const sarahConfirmsBooking =
-    /\b(i have (?:officially )?(?:confirmed|reserved|scheduled|booked)|your .* appointment .* is confirmed|confirmation text|day-before reminder)\b/i.test(
+    /\b(i have (?:officially )?(?:confirmed|reserved|scheduled|booked)|your .* appointment .* is (?:confirmed|set)|just sent a confirmation text)\b/i.test(
       lowerSarah
     );
 
+  const wantsAppointment = Boolean(
+    userGivesTimeOrFormat ||
+    userGivesContactForBooking ||
+    userExplicitlyRequestsBookingWithTime ||
+    sarahConfirmsBooking
+  );
+
   return {
-    shouldBook: Boolean(
-      userGivesTimeOrFormat || userGivesContactForBooking || userExplicitlyRequestsBookingWithTime || sarahConfirmsBooking
-    ),
+    wantsAppointment,
+    shouldBook: wantsAppointment,
     appointmentType: apptType,
     preferredDatetime: timeMatch,
     productInterest,
@@ -1585,7 +1880,7 @@ export function detectAppointmentBookingIntent(
 /**
  * Exact Cloned Bland Agent Scenario Engine (`bland.json` Format 3).
  * Executes all 10 scenarios, 6 product funnels, 2027 CMS cost rules, 3 fiduciary objections,
- * 42-member directory whisper transfers, and 3 appointment types identically to `bland.json`.
+ * 42-member directory whisper transfers, and step-by-step appointment setting identically to `bland.json`.
  */
 async function runClonedBlandScenario(
   userText: string,
@@ -1600,9 +1895,7 @@ async function runClonedBlandScenario(
 }> {
   const lower = userText.toLowerCase().trim();
   const rawName = (sessionContext.prospect_name || '').trim();
-  const isGenericName =
-    !rawName ||
-    /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawName);
+  const isGenericName = isPlaceholderProspectName(rawName);
   const firstName = isGenericName ? 'there' : rawName.split(/\s+/)[0] || 'there';
   const allHistoryText = [...(history || []).map((h) => h.text), userText].join(' ');
   const activeProduct = detectProductInterest(allHistoryText, sessionContext.product_interest || '');
@@ -1633,61 +1926,35 @@ async function runClonedBlandScenario(
     if (lower.includes('step 3') || lower.includes('3-point') || lower.includes('summary')) {
       return {
         scenario: '3-Point 2027 Medicare Summary',
-        reply: `Under Original Medicare in 2027, Part A has a $1,788 hospital deductible and Part B is projected at $209.50 a month with a $292 annual deductible and an uncapped 20% medical coinsurance with no annual limit. Second, Part D caps annual out-of-pocket prescription costs at $2,400 with a $35 insulin cap and $0 adult vaccines. That is why we run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage plans—at zero cost. Would you like me to get our Principal Broker King Amen Ra on the line right now, or schedule a confirmed appointment and send you a text reminder?`,
+        reply: `Under Original Medicare in 2027, Part A has a $1,788 hospital deductible and Part B is projected at $209.50 a month with a $292 annual deductible and an uncapped 20% medical coinsurance with no annual limit. Second, Part D caps annual out-of-pocket prescription costs at $2,400 with a $35 insulin cap and $0 adult vaccines. That is why we run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage plans—at zero cost. Would you like me to get our Principal Broker King Amen Ra on the line right now, or schedule an appointment?`,
       };
     }
   }
 
-  // 1. Check for Appointment Booking selection (Telephone, In-Person, or Video + time/day)
-  const mentionsApptType =
-    /\b(telephone|phone consultation|phone appointment|in-person|in person|face to face|video|google meet|zoom)\b/i.test(
-      userText
-    );
-  const mentionsTimeOrSchedule =
-    /\b(tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|morning|afternoon|\d{1,2}\s*(am|pm|:00|:30)|schedule|book|appointment|set up|confirm)\b/i.test(
-      userText
-    );
-
-  if (
-    (mentionsApptType && (mentionsTimeOrSchedule || lastSarahMsg.includes('telephone') || lastSarahMsg.includes('appointment'))) ||
-    (mentionsTimeOrSchedule &&
-      (lastSarahMsg.includes('morning or afternoon') ||
-        lastSarahMsg.includes('what day and time') ||
-        lastSarahMsg.includes('schedule') ||
-        lastSarahMsg.includes('appointment') ||
-        /\b(tomorrow|monday|tuesday|wednesday|thursday|friday|\d{1,2}\s*(?:am|pm))\b/i.test(userText)))
-  ) {
-    const apptTypeRaw = /in-person|in person|face/i.test(userText)
-      ? 'In-Person'
-      : /video|meet|zoom/i.test(userText)
-      ? 'Video'
-      : 'Telephone';
-    const timeMatch =
-      userText.match(
-        /\b((?:tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|next week)[^.,;!?]*|\d{1,2}(?::\d{2})?\s*(?:am|pm)[^.,;!?]*|morning|afternoon)\b/i
-      )?.[0] || 'Tomorrow at 10:00 AM';
-    const productForAppt = activeProduct || 'Insurance & Benefits';
+  // 1. Check for Appointment Booking progression (Format + Date/Time + Full Name + Phone Number + Street Address)
+  const bookingIntent = detectAppointmentBookingIntent(userText, '', allHistoryText, history);
+  if (bookingIntent.wantsAppointment) {
+    const apptTypeRaw = bookingIntent.appointmentType;
+    const timeMatch = bookingIntent.preferredDatetime;
+    const productForAppt = activeProduct || bookingIntent.productInterest || 'Insurance & Benefits';
     const apptRes = await executeSarahTool(
       'book_appointment',
       {
-        customer_name: sessionContext.prospect_name,
-        phone: sessionContext.prospect_phone,
+        customer_name: bookingIntent.extractedName || sessionContext.prospect_name,
+        phone: bookingIntent.extractedPhone || sessionContext.prospect_phone,
         product_interest: productForAppt,
         appointment_type: apptTypeRaw,
         preferred_datetime: timeMatch,
         state: sessionContext.state,
-        address: sessionContext.address,
+        address: bookingIntent.extractedAddress || sessionContext.address,
         send_text_reminder: true,
-        notes: `${productForAppt} consultation booked & confirmed by Sarah Voice AI during ${sessionContext.mode} call`,
       },
       sessionContext
     );
     return {
-      scenario: 'Book Appointment (Telephone, In-Person, or Video)',
-      reply:
-        apptRes.message ||
-        `Wonderful! I have officially confirmed your ${apptTypeRaw} ${productForAppt} appointment with our Principal Broker King Amen Ra for ${timeMatch}, and I have just submitted a text message reminder to your phone. Please reply YES to that text reminder to confirm!`,
-      appointment: apptRes,
+      scenario: 'Book Appointment (Step-by-Step Verification)',
+      reply: apptRes.message,
+      appointment: apptRes.success ? apptRes : null,
     };
   }
 
@@ -1696,7 +1963,7 @@ async function runClonedBlandScenario(
   if (/\b(iul|indexed universal|universal life|7702|infinite banking|tax-free retirement|cash value|cash-value)\b/i.test(lower)) {
     return {
       scenario: 'Investment Grade Life Insurance (IUL)',
-      reply: `We specialize in institutional-grade wealth accumulation and protection! Representing over 104 premier carriers with zero broker fees, we structure high cash-value Indexed Universal Life policies under IRS Section 7702 that capture market upside with a contractual 0% downside floor—so you never lose a penny of principal when the market drops—and generate 100% tax-free retirement income. Let's schedule a private 30-minute Telephone, 30-minute Video, or 60-minute In-Person illustration review with our Principal Broker, King Amen Ra. May I get your full name, street address, and best phone number, and what day and time works best so I can send your automatic confirmation text along with your day-before and same-day reminders?`,
+      reply: `We specialize in institutional-grade wealth accumulation and protection! Representing over 104 premier carriers with zero broker fees, we structure high cash-value Indexed Universal Life policies under IRS Section 7702 that capture market upside with a contractual 0% downside floor—so you never lose a penny of principal when the market drops—and generate 100% tax-free retirement income. Let's schedule a private 30-minute Telephone, 30-minute Video, or 60-minute In-Person illustration review with our Principal Broker, King Amen Ra. What day and time works best for you, and may I get your full name, phone number, and street address so I can send your confirmation text?`,
     };
   }
 
@@ -1704,7 +1971,7 @@ async function runClonedBlandScenario(
   if (/\b(life insurance|term life|whole life|final expense|burial|living benefits|death benefit|family protection)\b/i.test(lower)) {
     return {
       scenario: 'Modern Term & Whole Life Insurance with Living Benefits',
-      reply: `We would be honored to protect your family with Life Insurance! As a 100% free fiduciary brokerage representing over 104 premier carriers with zero fees, we specialize in Modern Term Life and Whole Life policies with built-in Living Benefits—which pay tax-free cash directly to you while you are alive in the event of a critical, chronic, or terminal illness—and feature 15-minute no-exam digital approvals at wholesale rates. Let's lock in a 30-minute Telephone, 30-minute Video, or 60-minute In-Person appointment with our Principal Broker, King Amen Ra. May I have your full name, street address, and best phone number, and does tomorrow morning or afternoon work best so I can send your automatic confirmation text followed by your day-before and same-day reminders?`,
+      reply: `We would be honored to protect your family with Life Insurance! As a 100% free fiduciary brokerage representing over 104 premier carriers with zero fees, we specialize in Modern Term Life and Whole Life policies with built-in Living Benefits—which pay tax-free cash directly to you while you are alive in the event of a critical, chronic, or terminal illness—and feature 15-minute no-exam digital approvals at wholesale rates. Let's set up a 30-minute Telephone, 30-minute Video, or 60-minute In-Person appointment with our Principal Broker, King Amen Ra. Does tomorrow morning or afternoon work best for you, and may I have your full name, phone number, and street address so I can send your confirmation text?`,
     };
   }
 
@@ -1712,7 +1979,7 @@ async function runClonedBlandScenario(
   if (/\b(individual|family|aca|marketplace|obamacare|ppo|subsidy|tax credit|under 65|kids|dental|vision)\b/i.test(lower)) {
     return {
       scenario: 'Individual Health Quote',
-      reply: `We would be honored to help you and your family save on health coverage! As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we compare both ACA Marketplace plans—maximizing your Advanced Premium Tax Credits and Silver CSR $0 deductibles—and nationwide off-exchange private PPO networks where you never need a referral. Let's reserve a 30-minute Telephone, 30-minute Video, or 60-minute In-Person consultation with our Principal Broker, King Amen Ra, to check if you qualify for a $0 or reduced-cost plan. May I have your full name, street address, and best phone number, and does tomorrow morning or afternoon work best so I can send your automatic confirmation text plus your day-before and same-day reminders?`,
+      reply: `We would be honored to help you and your family save on health coverage! As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we compare both ACA Marketplace plans—maximizing your Advanced Premium Tax Credits and Silver CSR $0 deductibles—and nationwide off-exchange private PPO networks where you never need a referral. Let's reserve a 30-minute Telephone, 30-minute Video, or 60-minute In-Person consultation with our Principal Broker, King Amen Ra, to check if you qualify for a $0 or reduced-cost plan. What day and time works best, and may I have your full name, phone number, and street address so I can send your confirmation text?`,
     };
   }
 
@@ -1720,7 +1987,7 @@ async function runClonedBlandScenario(
   if (/\b(group|business|employer|employee|company health|ichra|level-funded|level funded|small business)\b/i.test(lower)) {
     return {
       scenario: 'Group Health Plans',
-      reply: `We would love to support your business and employees! As an independent fiduciary advisory representing over 104 premier carriers with zero broker fees, we design Level-Funded and ICHRA corporate benefit plans for businesses with 1 to 50+ employees that typically slash employer healthcare overhead by 15% to 30% while refunding unused claims reserves directly back to your business at year-end. Let's schedule a complimentary Corporate Benefits Audit with our Principal Broker, King Amen Ra, by Telephone, Video, or In-Person. May I get your full name, business or street address, and best phone number, and what day and time works best so I can send your automatic confirmation text and schedule your day-before and same-day reminders?`,
+      reply: `We would love to support your business and employees! As an independent fiduciary advisory representing over 104 premier carriers with zero broker fees, we design Level-Funded and ICHRA corporate benefit plans for businesses with 1 to 50+ employees that typically slash employer healthcare overhead by 15% to 30% while refunding unused claims reserves directly back to your business at year-end. Let's schedule a complimentary Corporate Benefits Audit with our Principal Broker, King Amen Ra, by Telephone, Video, or In-Person. What day and time works best, and may I get your full name, phone number, and business or street address so I can send your confirmation text?`,
     };
   }
 
@@ -1728,7 +1995,7 @@ async function runClonedBlandScenario(
   if (/\b(long-term care|long term care|ltc|nursing|home health|assisted living|hybrid)\b/i.test(lower)) {
     return {
       scenario: 'Long-Term Care',
-      reply: `Protecting your life savings and dignity is at the heart of what we do! We represent over 104 premier carriers offering modern 'use-it-or-leave-it' Asset-Based Hybrid Life and Long-Term Care with guaranteed level premiums—paying tax-free monthly benefits for home health care, assisted living, or memory care if you need it, or returning 100% of your benefit tax-free to your family if you never use it. Let's schedule a dedicated Telephone, Video, or In-Person asset-protection consultation with our Principal Broker, King Amen Ra. May I have your full name, street address, and best phone number, and does tomorrow morning or afternoon work best so I can send your automatic confirmation text followed by your day-before and same-day reminders?`,
+      reply: `Protecting your life savings and dignity is at the heart of what we do! We represent over 104 premier carriers offering modern 'use-it-or-leave-it' Asset-Based Hybrid Life and Long-Term Care with guaranteed level premiums—paying tax-free monthly benefits for home health care, assisted living, or memory care if you need it, or returning 100% of your benefit tax-free to your family if you never use it. Let's schedule a dedicated Telephone, Video, or In-Person asset-protection consultation with our Principal Broker, King Amen Ra. What day and time works best, and may I have your full name, phone number, and street address so I can send your confirmation text?`,
     };
   }
 
@@ -1750,7 +2017,7 @@ async function runClonedBlandScenario(
     if (sessionContext.on_warm_transfer) {
       return {
         scenario: 'Book Appointment (Executive Alternative-Choice Close)',
-        reply: `Because King Amen Ra is currently on a live consultation helping another client, I want to reserve a dedicated one-on-one time for you on his calendar and send a text confirmation right to your phone. Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and would tomorrow morning or afternoon work best for you?`,
+        reply: `Because King Amen Ra is currently on a live consultation helping another client, I want to reserve a dedicated one-on-one time for you on his calendar and send a confirmation text right to your phone. Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and what day and time works best for you?`,
       };
     }
     const transferResult = await executeSarahTool(
@@ -1779,14 +2046,14 @@ async function runClonedBlandScenario(
   ) {
     return {
       scenario: 'Objection: Happy With Current Plan / Agent',
-      reply: `I love hearing that, and our goal is never to move you if your current coverage is still the number one option for you. Our free 5-minute fiduciary review across 104+ carriers simply confirms in writing that you have the strongest benefits at the lowest cost—and if you do, we tell you to stay right where you are. Would you like King Amen Ra to verify that for you now, or should we schedule a quick appointment and send you a text reminder?`,
+      reply: `I love hearing that, and our goal is never to move you if your current coverage is still the number one option for you. Our free 5-minute fiduciary review across 104+ carriers simply confirms in writing that you have the strongest benefits at the lowest cost—and if you do, we tell you to stay right where you are. Would you like King Amen Ra to verify that for you now, or should we schedule a quick appointment?`,
     };
   }
 
   if (/\b(how much does (this|it) cost|what('s| is) the catch|do you charge|broker fee|is this free)\b/i.test(lower)) {
     return {
       scenario: 'Objection: Cost / Fiduciary Guarantee',
-      reply: `There is never a fee, markup, or obligation—ever. Insurance premiums are regulated, meaning you pay the exact same rate whether you shop alone or have our Principal Broker King Amen Ra and clinical leadership under Aneesha Sullivan, PA advocate for you year-round across 104+ carriers for free. Would you like me to connect you with King Amen Ra now, or schedule a confirmed appointment with a text reminder?`,
+      reply: `There is never a fee, markup, or obligation—ever. Insurance premiums are regulated, meaning you pay the exact same rate whether you shop alone or have our Principal Broker King Amen Ra and clinical leadership under Aneesha Sullivan, PA advocate for you year-round across 104+ carriers for free. Would you like me to connect you with King Amen Ra now, or schedule an appointment?`,
     };
   }
 
@@ -1794,7 +2061,7 @@ async function runClonedBlandScenario(
     const prodLabel = activeProduct || 'coverage';
     return {
       scenario: 'Objection: Busy / Schedule Appointment',
-      reply: `I completely respect your time. Let’s lock in a confirmed 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video appointment for your ${prodLabel} review, and I will immediately submit a text message reminder to your phone. Which of those three formats do you prefer, and does tomorrow morning or afternoon work better?`,
+      reply: `I completely respect your time. Let’s set up a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video appointment for your ${prodLabel} review. Which of those three formats and what day and time work best—and may I get your full name, phone number, and street address so I can send your confirmation text?`,
     };
   }
 
@@ -1817,7 +2084,7 @@ async function runClonedBlandScenario(
   ) {
     return {
       scenario: '3-Point High-Impact 2027 Medicare Summary & Assumptive Close',
-      reply: `Absolutely! First, under Original Medicare for 2027, Part A has a $1,788 hospital deductible and Part B is projected at $209.50 a month with a $292 deductible, leaving an uncapped 20% medical coinsurance with no annual limit. Second, Part D caps annual out-of-pocket prescription costs at $2,400 with a $35 insulin cap and $0 adult vaccines. Third, we run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage plans—to ensure your doctors and medications are covered at the lowest cost. Would you like me to get our Principal Broker King Amen Ra on the line right now, or schedule a confirmed appointment and send you a text reminder?`,
+      reply: `Absolutely! First, under Original Medicare for 2027, Part A has a $1,788 hospital deductible and Part B is projected at $209.50 a month with a $292 deductible, leaving an uncapped 20% medical coinsurance with no annual limit. Second, Part D caps annual out-of-pocket prescription costs at $2,400 with a $35 insulin cap and $0 adult vaccines. Third, we run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage plans—to ensure your doctors and medications are covered at the lowest cost. Would you like me to get our Principal Broker King Amen Ra on the line right now, or schedule an appointment?`,
     };
   }
 
@@ -1825,7 +2092,7 @@ async function runClonedBlandScenario(
   if (/\b(part a|part b|part c|part d|medigap|plan g|plan n|coinsurance|2027|insulin|prescription|medicare)\b/i.test(lower)) {
     return {
       scenario: '2027 Medicare Costs & Plan Help',
-      reply: `Here are the official 2027 Medicare cost standards: Part A is $0 monthly premium for over 99% of beneficiaries with a $1,788 inpatient hospital deductible. Part B is projected at $209.50 per month with a $292 annual deductible and an uncapped 20% coinsurance. Part D caps your annual out-of-pocket prescription costs at $2,400 with a $35 insulin cap and $0 adult vaccines. Medigap Plan G covers 100% of the $1,788 hospital deductible and 20% Part B coinsurance after the $292 deductible. Would you like me to connect you with Principal Broker King Amen Ra right now, or book a confirmed appointment and send a text reminder to your phone?`,
+      reply: `Here are the official 2027 Medicare cost standards: Part A is $0 monthly premium for over 99% of beneficiaries with a $1,788 inpatient hospital deductible. Part B is projected at $209.50 per month with a $292 annual deductible and an uncapped 20% coinsurance. Part D caps your annual out-of-pocket prescription costs at $2,400 with a $35 insulin cap and $0 adult vaccines. Medigap Plan G covers 100% of the $1,788 hospital deductible and 20% Part B coinsurance after the $292 deductible. Would you like me to connect you with Principal Broker King Amen Ra right now, or schedule an appointment and send a confirmation text to your phone?`,
     };
   }
 
@@ -1841,14 +2108,14 @@ async function runClonedBlandScenario(
   if (activeProduct && activeProduct !== 'Medicare') {
     return {
       scenario: `${activeProduct} Consultation & Scheduling`,
-      reply: `I would love to help you with your ${activeProduct} options across our 104+ premier carriers at zero broker fee. Would you like me to connect you directly with our Principal Broker, King Amen Ra, right now, or would you prefer to schedule a confirmed 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment and receive an instant text reminder?`,
+      reply: `I would love to help you with your ${activeProduct} options across our 104+ premier carriers at zero broker fee. Would you like me to connect you directly with our Principal Broker, King Amen Ra, right now, or would you prefer to schedule a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?`,
     };
   }
 
   if (sessionContext.mode === 'outbound') {
     return {
       scenario: 'Outbound Value Hook & Assumptive Close',
-      reply: `We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. Our Principal Broker King Amen Ra can review your coverage options side by side in just 5 minutes. Would you like me to connect you with King Amen Ra right now, or schedule a confirmed 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment with a text reminder?`,
+      reply: `We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. Our Principal Broker King Amen Ra can review your coverage options side by side in just 5 minutes. Would you like me to connect you with King Amen Ra right now, or schedule a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?`,
     };
   }
 
@@ -1887,8 +2154,8 @@ export async function handleSarahHttpTurn(params: {
     }
 
     if (params.skip_inline_tts) {
-      synthesizeSarahNeuralAudio(firstChunk).catch(() => {});
-      if (restChunk) synthesizeSarahNeuralAudio(restChunk).catch(() => {});
+      synthesizeSarahNeuralAudio(firstChunk).catch(() => { });
+      if (restChunk) synthesizeSarahNeuralAudio(restChunk).catch(() => { });
       return {
         audio_base64: null,
         audio_mime: 'audio/wav',
@@ -1900,7 +2167,7 @@ export async function handleSarahHttpTurn(params: {
 
     // Start synthesizing restChunk in parallel so it is already in-flight/cached while firstChunk plays
     if (restChunk) {
-      synthesizeSarahNeuralAudio(restChunk).catch(() => {});
+      synthesizeSarahNeuralAudio(restChunk).catch(() => { });
     }
     const firstTts = await synthesizeSarahNeuralAudio(firstChunk);
     return {
@@ -1924,36 +2191,42 @@ export async function handleSarahHttpTurn(params: {
 
   const resolvedMode =
     params.context?.mode === 'outbound' || params.mode === 'outbound' ? 'outbound' : 'inbound';
-  const rawMessage = String(params.message ?? params.userText ?? '').trim();
+  const rawMessage = String(
+    params.message ?? params.userText ?? (params as any).user_text ?? (params as any).text ?? ''
+  ).trim();
   const allConvoText = [...(params.history || []).map((h) => h.text), rawMessage].join(' ');
   const detectedProduct = detectProductInterest(allConvoText, params.context?.product_interest || '');
 
   const rawLeadName = (params.context?.prospect_name || params.leadName || '').trim();
-  const isGenericLeadName =
-    !rawLeadName ||
-    /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawLeadName);
+  const isGenericLeadName = isPlaceholderProspectName(rawLeadName);
+  const rawLeadPhone = (params.context?.prospect_phone || params.leadPhone || '').trim();
+  const isGenericLeadPhone = isPlaceholderProspectPhone(rawLeadPhone, resolvedMode);
+  const rawLeadAddress = (params.context?.address || '').trim();
+  const isGenericLeadAddress = isPlaceholderProspectAddress(rawLeadAddress);
 
   const sessionContext: SarahSessionContext = {
     mode: resolvedMode,
     lead_id: params.context?.lead_id,
-    prospect_name: isGenericLeadName ? 'Valued Client' : rawLeadName,
-    prospect_phone: params.context?.prospect_phone || params.leadPhone || '+16232230165',
+    prospect_name: isGenericLeadName ? (resolvedMode === 'outbound' ? 'Valued Client' : '') : rawLeadName,
+    prospect_phone: isGenericLeadPhone ? (resolvedMode === 'outbound' ? '+16232230165' : '') : rawLeadPhone,
     state: params.context?.state || params.leadState || 'Arizona',
-    address: params.context?.address || '',
+    address: isGenericLeadAddress ? '' : rawLeadAddress,
     caller_name: params.context?.caller_name || 'Sarah',
     on_warm_transfer:
       params.context?.on_warm_transfer !== undefined ? Boolean(params.context.on_warm_transfer) : dbWarmTransfer,
     product_interest: detectedProduct,
+    source_channel:
+      params.context?.source_channel || (resolvedMode === 'outbound' ? 'outbound' : 'website_traffic'),
   };
 
   const firstName = isGenericLeadName ? 'there' : (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there';
 
-  // 1. Initial opening greeting when call starts
+  // 1. Initial opening greeting when call starts (answers inbound calls immediately right away!)
   if (params.is_initial || !rawMessage) {
     const openingReply =
       sessionContext.mode === 'outbound'
         ? `Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?`
-        : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
+        : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is your Receptionist speaking. How may I direct your call today?`;
     const tts = await resolveTts(openingReply);
     return {
       ok: true,
@@ -2004,20 +2277,10 @@ export async function handleSarahHttpTurn(params: {
     };
   }
 
-  // Extract caller's spoken name, phone, and street address from the conversation so far
-  const extractedContact = extractCustomerContactDetails(`${allConvoText} ${userText}`);
+  // Extract caller's spoken name, phone, and street address strictly from USER turns in the conversation
+  const extractedContact = extractCustomerContactDetails(userText, params.history || []);
   if (extractedContact.fullName) {
     sessionContext.prospect_name = extractedContact.fullName;
-  } else {
-    const nameIntroMatch = userText.match(/\b(?:my name is|this is|i am|i'm)\s+([A-Z][a-z]{2,15}(?:\s+[A-Z][a-z]{2,15})?)\b/);
-    if (
-      nameIntroMatch?.[1] &&
-      !/^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure)$/i.test(
-        nameIntroMatch[1].split(/\s+/)[0]
-      )
-    ) {
-      sessionContext.prospect_name = nameIntroMatch[1];
-    }
   }
   if (extractedContact.phone) {
     sessionContext.prospect_phone = extractedContact.phone;
@@ -2025,7 +2288,22 @@ export async function handleSarahHttpTurn(params: {
   if (extractedContact.address) {
     sessionContext.address = extractedContact.address;
   }
-  const activeFirstName = (sessionContext.prospect_name || firstName || 'there').split(/\s+/)[0] || 'there';
+
+  // If the caller provided their name or phone number, immediately add/update their Lead record in the CRM tagged as Call-In Lead or Website Traffic
+  if (
+    sessionContext.mode === 'inbound' &&
+    (!isPlaceholderProspectName(sessionContext.prospect_name) ||
+      !isPlaceholderProspectPhone(sessionContext.prospect_phone, 'inbound'))
+  ) {
+    const upsertedLeadId = await upsertReceptionistLeadFromContext(sessionContext);
+    if (upsertedLeadId) {
+      sessionContext.lead_id = upsertedLeadId;
+    }
+  }
+
+  const activeFirstName = !isPlaceholderProspectName(sessionContext.prospect_name)
+    ? (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there'
+    : 'there';
 
   // 3. Explicit Script Tree Directive button click -> run exact deterministic step
   if (userText.toLowerCase().includes('[script tree directive]')) {
@@ -2045,7 +2323,10 @@ export async function handleSarahHttpTurn(params: {
       disposition: clonedMatch.disposition || null,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY,
-      prospect_name: sessionContext.prospect_name || activeFirstName,
+      lead_id: sessionContext.lead_id,
+      prospect_name: sessionContext.prospect_name,
+      prospect_phone: sessionContext.prospect_phone,
+      prospect_address: sessionContext.address,
     };
   }
 
@@ -2060,7 +2341,8 @@ export async function handleSarahHttpTurn(params: {
     for (const h of rawHistory) {
       const text = String(h?.text || '').trim();
       if (!text) continue;
-      const role: 'user' | 'model' = h.speaker === 'sarah' ? 'model' : 'user';
+      const role: 'user' | 'model' =
+        h.speaker === 'sarah' || (h as any).role === 'sarah' || (h as any).role === 'model' ? 'model' : 'user';
       if (normalizedHistory.length === 0 && role === 'model') {
         normalizedHistory.push({
           role: 'user',
@@ -2068,7 +2350,7 @@ export async function handleSarahHttpTurn(params: {
             {
               text:
                 sessionContext.mode === 'outbound'
-                  ? `[Outbound call connected to ${sessionContext.prospect_name}]`
+                  ? `[Outbound call connected to ${sessionContext.prospect_name || 'Prospect'}]`
                   : `[Inbound caller connected to IWG Receptionist on ${SARAH_MAIN_LINE_DISPLAY}]`,
             },
           ],
@@ -2094,6 +2376,10 @@ export async function handleSarahHttpTurn(params: {
       });
     }
 
+    const hasNameNow = !isPlaceholderProspectName(sessionContext.prospect_name);
+    const hasPhoneNow = !isPlaceholderProspectPhone(sessionContext.prospect_phone, sessionContext.mode);
+    const hasAddressNow = !isPlaceholderProspectAddress(sessionContext.address);
+
     const baseTextModels = ['gemini-3.5-flash-lite', config.gemini.model || 'gemini-3.5-flash'];
     const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
@@ -2104,11 +2390,10 @@ export async function handleSarahHttpTurn(params: {
           config: {
             systemInstruction:
               buildSarahSystemInstruction(sessionContext) +
-              `\n\nCRITICAL CONVERSATIONAL LISTENING & APPOINTMENT CONFIRMATION RULE:\n- Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").\n- ${
-                detectedProduct
-                  ? `The caller is asking about ${detectedProduct}. Respond strictly using the award-winning ${detectedProduct} script that leads to an appointment—NEVER treat them as a Medicare lead unless ${detectedProduct} is Medicare!`
-                  : `Identify which of our 6 divisions the caller is asking about and never confuse Life Insurance, Health Insurance, or Long-Term Care with Medicare.`
-              }\n- Current captured prospect details: Full Name="${sessionContext.prospect_name}", Phone="${sessionContext.prospect_phone}", Address="${sessionContext.address || 'Not provided yet'}".\n- To set an appointment, ask for their full name, street address, and best phone number (plus preferred format & time). Once they ask to book or provide their details/time, invoke \`book_appointment\` immediately, verbally confirm the exact appointment details with Principal Broker King Amen Ra, AND state that you have sent an automatic confirmation text to their phone followed by automatic day-before and same-day text reminders!\n- Keep your spoken response calm, relaxed, warm, human, and concise (1 to 3 sentences).`,
+              `\n\nCRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:\n- Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").\n- ${detectedProduct
+                ? `The caller is asking about ${detectedProduct}. Respond strictly using the award-winning ${detectedProduct} script that leads to an appointment—NEVER treat them as a Medicare lead unless ${detectedProduct} is Medicare!`
+                : `Identify which of our 6 divisions the caller is asking about and never confuse Life Insurance, Health Insurance, or Long-Term Care with Medicare.`
+              }\n- Current captured prospect details: Full Name="${hasNameNow ? sessionContext.prospect_name : 'MISSING — MUST ASK CALLER'}", Phone="${hasPhoneNow ? sessionContext.prospect_phone : 'MISSING — MUST ASK CALLER'}", Street Address="${hasAddressNow ? sessionContext.address : 'MISSING — MUST ASK CALLER'}".\n- STEP-BY-STEP APPOINTMENT RULE: You MUST ask for and collect the caller's Full Name, Phone Number, and Street Address (along with preferred format & date/time) BEFORE confirming an appointment! If any of Full Name, Phone Number, or Street Address is still MISSING, ask the caller for the missing information first.\n- Once Full Name, Phone Number, Street Address, and Date/Time are all provided, call \`book_appointment\` immediately and tell the caller that you have sent an initial confirmation text to their phone and they only need to reply YES to confirm! NEVER mention day-before or same-day reminder texts to the caller (those happen automatically behind the scenes).\n- Keep your spoken response calm, relaxed, warm, human, and concise (1 to 3 sentences).`,
             tools: SARAH_TOOLS,
             temperature: 0.2,
             maxOutputTokens: 200,
@@ -2117,21 +2402,36 @@ export async function handleSarahHttpTurn(params: {
 
         workingTextModel = modelName;
         let replyText = (response.text || '').trim();
+        let blockedByMissingContact = false;
 
         if (response.functionCalls && response.functionCalls.length > 0) {
           for (const call of response.functionCalls) {
-            const result = await executeSarahTool(call.name || '', (call.args as Record<string, any>) || {}, sessionContext);
+            const callArgs = (call.args as Record<string, any>) || {};
+            // Capture any contact details Gemini extracted in tool arguments
+            if (callArgs.customer_name && !isPlaceholderProspectName(callArgs.customer_name)) {
+              sessionContext.prospect_name = String(callArgs.customer_name).trim();
+            }
+            if (callArgs.phone && !isPlaceholderProspectPhone(callArgs.phone, sessionContext.mode)) {
+              sessionContext.prospect_phone = String(callArgs.phone).trim();
+            }
+            if (callArgs.address && !isPlaceholderProspectAddress(callArgs.address)) {
+              sessionContext.address = String(callArgs.address).trim();
+            }
+
+            const result = await executeSarahTool(call.name || '', callArgs, sessionContext);
             if (call.name === 'whisper_warm_transfer' && result.success) {
               transferResult = result;
               if (!replyText) {
                 replyText = `Wonderful! Please hold for just a moment while I automatically call ${result.recipient_name} on the transfer line, deliver your private whisper briefing, and verify both of you are connected on the line. ... ${result.merge_introduction}`;
               }
-            } else if ((call.name === 'book_appointment' || call.name === 'send_appointment_text_reminder') && result.success) {
-              appointmentResult = result;
-              if (!replyText) {
+            } else if (call.name === 'book_appointment' || call.name === 'send_appointment_text_reminder') {
+              if (result.needs_contact_info) {
+                blockedByMissingContact = true;
                 replyText = result.message;
-              } else if (!/confirmation text|day-before|same-day|text.*reminder/i.test(replyText)) {
-                replyText = `${replyText} I have sent an immediate confirmation text to your phone, and scheduled your automatic day-before and same-day reminder texts!`;
+              } else if (result.success) {
+                appointmentResult = result;
+                if (result.lead_id) sessionContext.lead_id = result.lead_id;
+                replyText = result.message;
               }
             } else if (call.name === 'record_call_disposition' && result.success) {
               dispositionResult = result;
@@ -2142,11 +2442,11 @@ export async function handleSarahHttpTurn(params: {
           }
         }
 
-        // Safety net: if the caller or Receptionist confirmed/scheduled an appointment time and the LLM didn't emit a functionCall, execute book_appointment + 3-step SMS cadence automatically!
-        if (!appointmentResult) {
-          const bookingCheck = detectAppointmentBookingIntent(userText, replyText, allConvoText);
+        // Safety net: if the caller or Receptionist is in the middle of booking an appointment and the LLM didn't emit a functionCall, check step-by-step requirements!
+        if (!appointmentResult && !blockedByMissingContact) {
+          const bookingCheck = detectAppointmentBookingIntent(userText, replyText, allConvoText, params.history || []);
           if (bookingCheck.shouldBook) {
-            appointmentResult = await executeSarahTool(
+            const checkRes = await executeSarahTool(
               'book_appointment',
               {
                 customer_name: bookingCheck.extractedName || sessionContext.prospect_name,
@@ -2160,15 +2460,26 @@ export async function handleSarahHttpTurn(params: {
               },
               sessionContext
             );
-            if (!replyText || !/confirmed|reserved|scheduled/i.test(replyText)) {
-              replyText = appointmentResult.message;
-            } else if (!/confirmation text|day-before|same-day|text.*reminder/i.test(replyText)) {
-              replyText = `${replyText} I have sent an immediate confirmation text to your phone, and scheduled your automatic day-before and same-day reminder texts!`;
+            if (checkRes.needs_contact_info) {
+              replyText = checkRes.message;
+            } else if (checkRes.success) {
+              appointmentResult = checkRes;
+              if (checkRes.lead_id) sessionContext.lead_id = checkRes.lead_id;
+              replyText = checkRes.message;
             }
           }
         }
 
         if (replyText) {
+          // Strip any accidental LLM mention of day-before or same-day reminder texts from customer-facing speech
+          replyText = replyText
+            .replace(
+              /[,—–-]?\s*(?:followed by|along with|plus|and)\s+(?:an?\s+)?(?:automatic\s+)?day-before[^.!?]*(?:and\s+(?:a\s+)?same-day[^.!?]*)?/gi,
+              ''
+            )
+            .replace(/You will also receive a reminder text the day before[^.!?]*[.!?]/gi, '')
+            .trim();
+
           const holdCheck = detectSarahTransferHoldSpeech(replyText);
           if (holdCheck.triggered && !transferResult && !sessionContext.on_warm_transfer) {
             transferResult = await executeSarahTool(
@@ -2193,6 +2504,8 @@ export async function handleSarahHttpTurn(params: {
             rest_text: tts.rest_text,
             voice: tts.voice,
             product_interest: detectedProduct || appointmentResult?.product_line || null,
+            lead_id: sessionContext.lead_id || appointmentResult?.lead_id || null,
+            lead_source: resolveInboundLeadSource(sessionContext),
             prospect_name: sessionContext.prospect_name,
             prospect_phone: sessionContext.prospect_phone,
             prospect_address: sessionContext.address,
@@ -2222,6 +2535,8 @@ export async function handleSarahHttpTurn(params: {
     rest_text: tts.rest_text,
     voice: tts.voice,
     product_interest: detectedProduct || clonedMatch.appointment?.product_line || null,
+    lead_id: sessionContext.lead_id || clonedMatch.appointment?.lead_id || null,
+    lead_source: resolveInboundLeadSource(sessionContext),
     prospect_name: sessionContext.prospect_name,
     prospect_phone: sessionContext.prospect_phone,
     prospect_address: sessionContext.address,
@@ -2241,19 +2556,20 @@ export async function handleSarahHttpTurn(params: {
 export function getSarahDirectLiveSessionConfig(params: Partial<SarahSessionContext> = {}) {
   const mode: 'inbound' | 'outbound' = params.mode === 'outbound' ? 'outbound' : 'inbound';
   const rawName = (params.prospect_name || '').trim();
-  const isGenericName =
-    !rawName ||
-    /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawName);
+  const isGenericName = isPlaceholderProspectName(rawName);
+  const rawPhone = (params.prospect_phone || '').trim();
+  const isGenericPhone = isPlaceholderProspectPhone(rawPhone, mode);
   const sessionContext: SarahSessionContext = {
     mode,
     lead_id: params.lead_id,
-    prospect_name: isGenericName ? 'Valued Client' : rawName,
-    prospect_phone: params.prospect_phone || '+16232230165',
+    prospect_name: isGenericName ? (mode === 'outbound' ? 'Valued Client' : '') : rawName,
+    prospect_phone: isGenericPhone ? (mode === 'outbound' ? '+16232230165' : '') : rawPhone,
     state: params.state || 'Arizona',
-    address: params.address || '',
+    address: isPlaceholderProspectAddress(params.address) ? '' : String(params.address || '').trim(),
     caller_name: params.caller_name || 'Sarah',
     on_warm_transfer: Boolean(params.on_warm_transfer),
     product_interest: params.product_interest || '',
+    source_channel: params.source_channel || (mode === 'outbound' ? 'outbound' : 'website_traffic'),
   };
 
   const firstName = isGenericName ? 'there' : (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there';
@@ -2264,8 +2580,8 @@ export function getSarahDirectLiveSessionConfig(params: Partial<SarahSessionCont
 
   const wsUrl = config.gemini.apiKey
     ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(
-        config.gemini.apiKey
-      )}`
+      config.gemini.apiKey
+    )}`
     : '';
 
   return {
@@ -2303,7 +2619,7 @@ export function getSarahDirectLiveSessionConfig(params: Partial<SarahSessionCont
             {
               text:
                 buildSarahSystemInstruction(sessionContext) +
-                `\n\nCRITICAL LIVE CONVERSATIONAL RULES:\n- Answer inbound calls immediately with zero delay in a calm, relaxed, warm, natural human tone (Vindemiatrix voice).\n- NEVER treat a Life Insurance, Individual Health, Group Health, or Long-Term Care caller as a Medicare lead! Use the award-winning scripts for each of the 6 product lines to lead directly to an appointment.\n- To set an appointment, collect the prospect's full name, street address, and best phone number (plus preferred format and time). As soon as they ask to book or provide their details/time, immediately call the \`book_appointment\` tool, verbally confirm their appointment with Principal Broker King Amen Ra, AND explicitly confirm that you have sent an automatic confirmation text to their phone followed by automatic day-before and same-day text reminders!\n- Keep your answers direct and concise (1 to 3 sentences) so there is never any lag.`,
+                `\n\nCRITICAL LIVE CONVERSATIONAL RULES:\n- Answer inbound calls immediately with zero delay in a calm, relaxed, warm, natural human tone (Vindemiatrix voice).\n- NEVER treat a Life Insurance, Individual Health, Group Health, or Long-Term Care caller as a Medicare lead! Use the award-winning scripts for each of the 6 product lines to lead directly to an appointment.\n- STEP-BY-STEP APPOINTMENT SETTING: To set an appointment, you MUST ask for and collect the prospect's full name, phone number, and street address (plus preferred format and date/time). Once they provide their full name, phone number, street address, and date/time, immediately call the \`book_appointment\` tool, verbally confirm their appointment with Principal Broker King Amen Ra, AND tell them to reply YES to the initial confirmation text sent to their phone! NEVER mention day-before or same-day reminder texts to the customer.\n- Keep your answers direct and concise (1 to 3 sentences) so there is never any lag.`,
             },
           ],
         },

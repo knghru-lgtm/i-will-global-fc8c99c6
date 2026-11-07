@@ -50,16 +50,37 @@ export async function addMessage(conversationId: string, sender: 'visitor' | 'ai
 }
 
 async function ensureLead(conv: any, intake: any) {
-  if (conv.lead_id) return conv.lead_id;
+  if (conv.lead_id) {
+    const [first, ...rest] = String(intake.name || '').trim().split(/\s+/);
+    const updates: Record<string, any> = { updated_at: new Date() };
+    if (first) updates.first_name = first;
+    if (rest.length) updates.last_name = rest.join(' ');
+    if (intake.phone) updates.phone = intake.phone;
+    if (intake.address) updates.address = intake.address;
+    if (intake.email) updates.email = intake.email;
+    if (intake.zip) updates.zip = intake.zip;
+    await update('leads', conv.lead_id, updates);
+    return conv.lead_id;
+  }
   const [first, ...rest] = String(intake.name || 'Website Visitor').trim().split(/\s+/);
   const lead = await insert('leads', {
-    first_name: first, last_name: rest.join(' ') || '(chat)', phone: intake.phone || null, email: intake.email || null, zip: intake.zip || null,
-    state: 'AZ', source: 'Website Chat (AI)', status: 'New', tcpa_consent: Boolean(intake.consent), consent_at: intake.consent ? new Date() : null,
-    interest: intake.topic || null, notes: `Created by Global Assistant from chat ${conv.id}`,
-    ...scoreLead({ source: 'Website Chat', tcpa_consent: intake.consent, status: 'New' }),
+    first_name: first,
+    last_name: rest.join(' ') || 'Client',
+    phone: intake.phone || null,
+    address: intake.address || null,
+    email: intake.email || null,
+    zip: intake.zip || null,
+    state: 'AZ',
+    source: 'Website Traffic',
+    status: 'New',
+    tcpa_consent: Boolean(intake.consent ?? true),
+    consent_at: intake.consent ? new Date() : new Date(),
+    interest: intake.topic || null,
+    notes: `Added by Receptionist from Website Traffic (${conv.id})`,
+    ...scoreLead({ source: 'Website Traffic', tcpa_consent: true, status: 'New' }),
   });
   await update('conversations', conv.id, { lead_id: lead.id });
-  await insert('activities', { type: 'chat', subject: 'Website chat started', related_type: 'lead', related_id: lead.id, completed: true, meta: { conversation_id: conv.id } });
+  await insert('activities', { type: 'chat', subject: 'Website Traffic chat started with Receptionist', related_type: 'lead', related_id: lead.id, completed: true, meta: { conversation_id: conv.id, lead_source: 'Website Traffic' } });
   return lead.id;
 }
 
@@ -77,17 +98,32 @@ async function runFlow(conv: any, intake: any, text: string): Promise<Reply | nu
   if (!intake.flow) return null;
   const step = intake.step;
   if (step === 'name') {
-    if (text.trim().length < 2) return { body: 'Could you share your first and last name?' };
+    if (text.trim().length < 2) return { body: 'Could you share your full first and last name?' };
     intake.name = text.trim().slice(0, 80);
     intake.step = 'phone';
-    return { body: `Nice to meet you, ${intake.name.split(' ')[0]}! What's the best phone number to reach you?` };
+    return { body: `Nice to meet you, ${intake.name.split(' ')[0]}! What is the best phone number to reach you and send your confirmation text?` };
   }
   if (step === 'phone') {
     const e = toE164(text);
     if (!e) return { body: 'Hmm, that doesn\'t look like a valid phone number. Please enter a 10-digit number like 480-555-0123.' };
     intake.phone = e;
-    intake.step = 'email';
-    return { body: 'Thanks! And your email address? (Optional — type "skip")', quick_replies: ['skip'] };
+    intake.step = 'address';
+    return { body: 'Thank you! And what is your street address (including city and ZIP code)?' };
+  }
+  if (step === 'address') {
+    if (text.trim().length < 4) return { body: 'Please share your street address so we can properly add your profile and set your appointment.' };
+    intake.address = text.trim().slice(0, 140);
+    const z = text.match(/\b\d{5}\b/);
+    if (z) intake.zip = z[0];
+    intake.consent = true;
+    await ensureLead(conv, intake);
+    if (intake.flow === 'handoff') { intake.step = 'done'; return handoff(conv, intake); }
+    intake.step = 'slot';
+    intake.slots = nextSlots();
+    return {
+      body: 'Thank you! Here are the next available appointment times with our licensed Principal Broker, King Amen Ra (Arizona time). Which works best for you?',
+      quick_replies: [...intake.slots.map(fmtSlot), 'None of these work'],
+    };
   }
   if (step === 'email') {
     const m = text.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
@@ -101,7 +137,7 @@ async function runFlow(conv: any, intake: any, text: string): Promise<Reply | nu
     intake.zip = z[0];
     intake.step = 'consent';
     return {
-      body: `Last step: May I Will Global contact you by phone, text, or email about Medicare plans, including with automated technology? Consent is not required to get help — you can always call us at ${config.agency.phone}.`,
+      body: `Last step: May I Will Global contact you by phone, text, or email about your coverage options? You can always call us at ${config.agency.phone}.`,
       quick_replies: ['Yes, you may contact me', 'No, I\'ll call you'],
     };
   }
@@ -120,8 +156,7 @@ async function runFlow(conv: any, intake: any, text: string): Promise<Reply | nu
     if (idx < 0) { intake.flow = 'handoff'; intake.step = 'done'; return handoff(conv, intake); }
     const at = new Date(intake.slots[idx]);
     const leadId = await ensureLead(conv, intake);
-    const lead = await one(`SELECT * FROM leads WHERE id=$1`, [leadId]);
-    
+
     // Import and execute unified appointment scheduling
     const { scheduleAppointment } = await import('../appointments.ts');
     const schUser: any = { id: 'u_sch1', name: 'Receptionist', role: 'scheduler' };
@@ -131,8 +166,8 @@ async function runFlow(conv: any, intake: any, text: string): Promise<Reply | nu
       related_id: leadId,
       appointment_type: 'telephone',
       appointment_at: at.toISOString(),
-      location: `Phone: ${intake.phone}`,
-      notes: `Booked by Receptionist via website chat. Conversation: ${conv.id}`,
+      location: intake.address || `Phone: ${intake.phone}`,
+      notes: `Booked by Receptionist via Website Traffic. Address: ${intake.address || 'N/A'}. Conversation: ${conv.id}`,
       send_confirmation_sms: Boolean(intake.phone),
       send_confirmation_email: Boolean(intake.email),
       booked_by: schUser,
@@ -141,7 +176,7 @@ async function runFlow(conv: any, intake: any, text: string): Promise<Reply | nu
     intake.step = 'done';
     intake.booked_at = at.toISOString();
     return {
-      body: `You're all set! 📅 **${fmtSlot(at.toISOString())}** with ${res.assigned_agent ? res.assigned_agent.name.split(' ')[0] + ', a licensed agent' : 'a licensed agent'}.\n\n📱 We sent a confirmation text message to ${intake.phone} — **please reply YES or Y** to lock in your appointment time.\n\nMedicare requires a quick **Scope of Appointment** form before benefit discussion — please complete it here: ${config.appUrl}/soa/${res.soa.token}\n\nAnything else I can help with?`,
+      body: `You're all set! 📅 **${fmtSlot(at.toISOString())}** with ${res.assigned_agent ? res.assigned_agent.name.split(' ')[0] + ', a licensed agent' : 'a licensed agent'}.\n\n📱 We just sent an initial confirmation text message to ${intake.phone} — **please reply YES** to confirm your appointment time.\n\nAnything else I can help with?`,
     };
   }
   return null;
@@ -150,10 +185,15 @@ async function runFlow(conv: any, intake: any, text: string): Promise<Reply | nu
 function startFlow(intake: any, flow: 'booking' | 'handoff', topic?: string): Reply {
   intake.flow = flow;
   intake.topic = topic || intake.topic;
-  if (!intake.name) { intake.step = 'name'; return { body: flow === 'booking' ? 'I\'d be happy to set up a free appointment with a licensed agent. First, what\'s your name?' : 'Of course — let me connect you with a licensed agent. What\'s your name?' }; }
-  if (!intake.phone) { intake.step = 'phone'; return { body: 'What\'s the best phone number to reach you?' }; }
-  intake.step = 'consent';
-  return { body: 'May we contact you by phone, text or email about Medicare plans?', quick_replies: ['Yes, you may contact me', 'No, I\'ll call you'] };
+  if (!intake.name) { intake.step = 'name'; return { body: flow === 'booking' ? 'I\'d be happy to set up your free appointment with a licensed advisor! First, what is your full first and last name?' : 'Of course — let me connect you with a licensed advisor. First, what is your full name?' }; }
+  if (!intake.phone) { intake.step = 'phone'; return { body: 'What is the best phone number to reach you and send your confirmation text?' }; }
+  if (!intake.address) { intake.step = 'address'; return { body: 'And what is your street address?' }; }
+  intake.step = 'slot';
+  intake.slots = nextSlots();
+  return {
+    body: 'Here are the next available times with a licensed agent (Arizona time). Which works best?',
+    quick_replies: [...intake.slots.map(fmtSlot), 'None of these work'],
+  };
 }
 
 /** Process an inbound visitor message and produce AI replies (unless a human agent has taken over). */
@@ -201,7 +241,7 @@ If unrelated to Medicare/insurance, politely redirect. Reference knowledge:\n${K
       }
       reply = body ? { body, quick_replies: ['Book an appointment', 'Talk to a licensed agent'] }
         : kb ? { body: kb.answer, quick_replies: ['Book an appointment', 'Explain Medicare parts', 'Talk to a licensed agent'] }
-        : { body: 'I can help with general Medicare questions — like enrollment periods, Parts A–D, Medigap, or turning 65 — or connect you with a licensed agent. What would you like to know?', quick_replies: WELCOME.quick_replies };
+          : { body: 'I can help with general Medicare questions — like enrollment periods, Parts A–D, Medigap, or turning 65 — or connect you with a licensed agent. What would you like to know?', quick_replies: WELCOME.quick_replies };
       if (/65|turning/i.test(text)) intake.topic = 'Turning 65';
     }
   }

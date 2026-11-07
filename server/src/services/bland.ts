@@ -94,13 +94,17 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
 4. CALLING HOURS & CONTINUOUS DIALING:
    - Answer every inbound call immediately, 24 hours a day, 7 days a week.
    - Outbound: call every prospect assigned to Bland AI Monday through Friday 9:00 AM to 7:00 PM and Saturday through Sunday 9:00 AM to 6:00 PM (Arizona time), up to 1,000 calls per day, continuously dialing the assigned queue without stopping.
-5. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}):
-   - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER), do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
-   - Use the Executive Alternative-Choice Appointment Close with {prospect_name}: "Because King Amen Ra is currently on a live consultation helping another family with their 2027 benefits, I want to reserve a dedicated one-on-one time for you on his private calendar so you receive his undivided attention. Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and would morning or afternoon work best for you?"
-   - Offer and select strictly from these THREE appointment types ONLY:
-     1) Telephone Appointment (30 minutes)
-     2) In-Person Appointment (60 minutes)
-     3) Video Appointment (30 minutes)
+5. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}) & MANDATORY STEP-BY-STEP APPOINTMENT SETTING:
+   - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER) or when an inbound/outbound caller wants to set an appointment, do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
+   - Follow the Appointment Setting Steps in order:
+     Step 1 (Offer 3 Formats & Preferred Date/Time): "Because King Amen Ra is currently on a live consultation helping another family, I want to reserve a dedicated one-on-one time for you on his private calendar so you receive his undivided attention. Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and what day and time works best for you?"
+     Step 2 (Collect Full Name, Phone Number & Street Address to Add Lead): Before confirming the appointment, you MUST ask for and collect the customer's:
+       1) Full Name (first and last name)
+       2) Best Phone Number
+       3) Street Address
+       (This allows you to properly add the new lead in the CRM tagged as a Call-In Lead or Website Traffic.)
+     Step 3 (Confirm Appointment & Send Initial Confirmation Text ONLY): Once you have their Full Name, Phone Number, Street Address, Appointment Format (Telephone, In-Person, or Video), and Date/Time, confirm the appointment and let them know you have sent an initial confirmation text to their phone—and ask them to simply reply YES to that confirmation text to lock in their appointment.
+     STRICT INTERNAL REMINDER RULE: Our day-before and same-day reminder texts are sent automatically by our internal CRM system. NEVER tell the customer on the call or in the initial text that we are sending day-before or same-day reminder texts—the customer only needs to reply YES to the initial confirmation text!
 6. AUTOMATIC AI WHISPER TRANSFER FOR ALL (CALL BROKER FIRST & BRIEF BEFORE MERGING):
    - Whisper transfer is 100% AUTOMATIC and performed privately by the AI for all callers and all 42 directory members.
    - When King Amen Ra is NOT on a warm transfer call and {prospect_name} agrees to learn about the 2027 changes or speak with an advisor:
@@ -313,7 +317,7 @@ export async function getBlandConfig(): Promise<BlandConfig> {
     model: val.model || 'enhanced',
     max_duration: Number(val.max_duration) || 15,
     record: val.record !== undefined ? Boolean(val.record) : true,
-    wait_for_greeting: val.wait_for_greeting !== undefined ? Boolean(val.wait_for_greeting) : true,
+    wait_for_greeting: val.wait_for_greeting !== undefined ? Boolean(val.wait_for_greeting) : false,
     from_number: val.from_number || DEFAULT_BLAND_CALLER_ID,
     transfer_phone_number: val.transfer_phone_number || '+16024569681',
     prompt_template: val.prompt_template || DEFAULT_BLAND_PROMPT,
@@ -1563,7 +1567,7 @@ export async function handleBlandWebhook(payload: any) {
     });
   }
 
-  // If an appointment was booked (or King was on a warm transfer and the caller engaged), create the calendar appointment activity and submit SMS Text Reminder automatically!
+  // If an appointment was booked (or King was on a warm transfer and the caller engaged), create/update the lead, create the calendar appointment activity, send the initial Confirmation Text (Reply YES), and silently schedule internal Day-Before & Same-Day reminders!
   if (dispositionId === 'appointment_set') {
     const startAt = new Date(Date.now() + 24 * 3600 * 1000);
     startAt.setHours(10, 0, 0, 0);
@@ -1579,16 +1583,42 @@ export async function handleBlandWebhook(payload: any) {
         : /\b(individual|family|aca|marketplace|private ppo|under 65)\b/i.test(lowerText)
         ? 'Individual & Family Health Insurance'
         : 'Medicare';
-    const customerName = variables.first_name || metadata.prospect_name || 'Valued Client';
-    const customerPhone = toE164(payload.to || payload.phone_number || activity?.phone || '') || '(480) 331-9455';
+    const customerName = variables.full_name || variables.first_name || metadata.prospect_name || 'Valued Client';
+    const customerPhone = toE164(payload.to || payload.from || payload.phone_number || activity?.phone || '') || '(480) 331-9455';
+    const customerAddress = variables.appointment_address || variables.address || metadata.address || '';
     const requestedTimeLabel = variables.appointment_datetime || 'Tomorrow at 10:00 AM MST';
+    const isInboundCall = payload.inbound === true || metadata.call_direction === 'inbound' || activity?.direction === 'inbound';
+    const leadSourceLabel = isInboundCall ? 'Call-In Lead' : (metadata.source || 'Call-In Lead');
+
+    let targetLeadId = relatedId;
+    if (!targetLeadId && customerPhone && customerPhone !== '+14803319455') {
+      const existingLead = await one(`SELECT id FROM leads WHERE phone = $1 ORDER BY created_at DESC LIMIT 1`, [customerPhone]).catch(() => null);
+      if (existingLead?.id) {
+        targetLeadId = existingLead.id;
+      } else {
+        const nameParts = String(customerName).trim().split(/\s+/);
+        const createdLead = await insert('leads', {
+          first_name: nameParts[0] || 'Valued',
+          last_name: nameParts.slice(1).join(' ') || 'Caller',
+          phone: customerPhone,
+          address: customerAddress || null,
+          state: variables.state || metadata.state || 'AZ',
+          source: leadSourceLabel,
+          status: 'Appointment Set',
+          owner_id: 'u_principal',
+          assigned_agent_id: 'u_principal',
+          notes: `[${leadSourceLabel}] Added by Receptionist on (480) 331-9455 — ${detectedProduct} (${selectedApptLabel} on ${requestedTimeLabel})`,
+        }).catch(() => null);
+        if (createdLead?.id) targetLeadId = createdLead.id;
+      }
+    }
 
     await insert('activities', {
       type: 'event',
       subject: `📅 Confirmed ${detectedProduct} ${selectedApptLabel} Appointment — ${customerName}`,
-      body: `Sarah AI confirmed a ${selectedApptLabel} (${durMin} min) ${detectedProduct} consultation with Principal Broker King Amen Ra.\nConfirmed Date/Time: ${requestedTimeLabel}\nText Reminder: Submitted to ${customerPhone}\nSummary: ${summary || `Confirmed ${detectedProduct} consultation`}`,
+      body: `Receptionist confirmed a ${selectedApptLabel} (${durMin} min) ${detectedProduct} consultation with Principal Broker King Amen Ra.\nConfirmed Date/Time: ${requestedTimeLabel}\nAddress: ${customerAddress || 'On File'}\nLead Source Tag: ${leadSourceLabel}\nInitial Confirmation Text: Sent to ${customerPhone} (Reply YES to confirm)\nSummary: ${summary || `Confirmed ${detectedProduct} consultation`}`,
       related_type: relatedType,
-      related_id: relatedId,
+      related_id: targetLeadId,
       user_id: userId,
       assigned_to: 'u_principal',
       due_at: startAt,
@@ -1597,11 +1627,13 @@ export async function handleBlandWebhook(payload: any) {
       completed: false,
       meta: {
         booked_by_user_id: userId,
-        booked_by_name: 'Sarah (Voice AI)',
+        booked_by_name: 'Receptionist',
+        lead_source: leadSourceLabel,
         product_line: detectedProduct,
         appointment_type: selectedApptType,
         appointment_type_label: selectedApptLabel,
         requested_datetime_raw: requestedTimeLabel,
+        customer_address: customerAddress,
         confirmed: true,
         text_reminder_submitted: true,
         bland_call_id: callId,
@@ -1610,29 +1642,68 @@ export async function handleBlandWebhook(payload: any) {
       },
     });
 
-    const smsBody = `Hi ${customerName}, your ${detectedProduct} ${selectedApptLabel} appointment with Principal Broker King Amen Ra (NPN 16094432) at IWG Insurance & Financial Services is CONFIRMED for ${requestedTimeLabel}. Reply YES to confirm or call (480) 331-9455 with any questions.`;
+    const smsBody = `Hi ${customerName}, your ${detectedProduct} ${selectedApptLabel} appointment with Principal Broker King Amen Ra (NPN 16094432) at IWG Insurance & Financial Services is scheduled for ${requestedTimeLabel}. Please reply YES to confirm your appointment, or call (480) 331-9455 with any questions.`;
     await insert('activities', {
       type: 'call',
-      subject: `📲 Appointment Confirmation & Text Reminder SMS sent to ${customerPhone}`,
+      subject: `📲 Initial Appointment Confirmation SMS sent to ${customerPhone} (Reply YES)`,
       body: smsBody,
       related_type: relatedType,
-      related_id: relatedId,
+      related_id: targetLeadId,
       user_id: userId,
       direction: 'outbound',
       phone: customerPhone,
       status: 'Completed',
       completed: true,
       provider: 'google_voice',
-      disposition: 'SMS Confirmation & Text Reminder Sent',
+      disposition: 'SMS Confirmation Sent (Reply YES)',
       meta: {
         sms: true,
+        reminder_stage: '1_immediate_confirmation',
         text_reminder_submitted: true,
+        lead_source: leadSourceLabel,
         product_line: detectedProduct,
         appointment_type: selectedApptLabel,
         confirmed_datetime: requestedTimeLabel,
         expected_reply: 'YES',
       },
     });
+
+    // Silently schedule internal Day-Before & Same-Day reminder texts (never mentioned to customer upfront)
+    const dayBeforeAt = new Date(startAt.getTime() - 24 * 3600 * 1000);
+    const sameDayAt = new Date(startAt.getTime() - 2 * 3600 * 1000);
+    await insert('activities', {
+      type: 'call',
+      subject: `📅 [Internal Auto-Reminder: Day-Before] SMS to ${customerPhone}`,
+      body: `Hi ${customerName}, friendly reminder from IWG Insurance & Financial Services: your ${detectedProduct} ${selectedApptLabel} appointment with Principal Broker King Amen Ra is tomorrow (${requestedTimeLabel}). Questions? Call (480) 331-9455.`,
+      related_type: relatedType,
+      related_id: targetLeadId,
+      user_id: userId,
+      direction: 'outbound',
+      phone: customerPhone,
+      due_at: dayBeforeAt,
+      status: 'Scheduled',
+      completed: false,
+      provider: 'google_voice',
+      disposition: 'Day-Before SMS Reminder Scheduled (Internal)',
+      meta: { sms: true, internal_auto_reminder: true, reminder_stage: '2_day_before', scheduled_for: dayBeforeAt.toISOString() },
+    }).catch(() => {});
+
+    await insert('activities', {
+      type: 'call',
+      subject: `⏰ [Internal Auto-Reminder: Same-Day] SMS to ${customerPhone}`,
+      body: `Hi ${customerName}, your ${detectedProduct} ${selectedApptLabel} appointment with Principal Broker King Amen Ra at IWG Insurance & Financial Services is TODAY (${requestedTimeLabel}). We look forward to speaking with you soon!`,
+      related_type: relatedType,
+      related_id: targetLeadId,
+      user_id: userId,
+      direction: 'outbound',
+      phone: customerPhone,
+      due_at: sameDayAt,
+      status: 'Scheduled',
+      completed: false,
+      provider: 'google_voice',
+      disposition: 'Same-Day SMS Reminder Scheduled (Internal)',
+      meta: { sms: true, internal_auto_reminder: true, reminder_stage: '3_same_day', scheduled_for: sameDayAt.toISOString() },
+    }).catch(() => {});
   }
 
   // Trigger CRM automations if linked to a lead or client
