@@ -3,7 +3,7 @@ import { config as appConfig } from '../config.ts';
 import { toE164, googleVoiceWebUrl, telUrl } from './phone.ts';
 import { applyDisposition } from './automation.ts';
 
-export interface BlandConfig {
+export interface SarahDialerConfig {
   api_key: string;
   enabled: boolean;
   pathway_id: string;
@@ -28,7 +28,7 @@ export interface BlandConfig {
   pause_on_warm_transfer: boolean;
   is_calling_paused: boolean;  // Legacy alias for is_on_warm_transfer
   is_on_warm_transfer: boolean; // True when King Amen Ra is on a warm transfer call -> Agent books ONLY Telephone, In-Person, or Video appointments and continues calling!
-  is_campaign_active: boolean; // True when Bland Agent AI autonomous dialer is activated in CRM
+  is_campaign_active: boolean; // True when Sarah Agent AI autonomous dialer is activated in CRM
   paused_reason?: string | null;
   active_transfer_lead_id?: string | null;
   active_transfer_call_id?: string | null;
@@ -39,15 +39,15 @@ export interface BlandConfig {
   campaign_started_at?: string | null;
 }
 
-export const DEFAULT_BLAND_PATHWAY_ID = 'fc8c99c6-88c3-435d-952b-8c93c2db17a6';
-export const DEFAULT_BLAND_CALLER_ID = '+14803319455';
+export const DEFAULT_SARAH_PATHWAY_ID = 'fc8c99c6-88c3-435d-952b-8c93c2db17a6';
+export const DEFAULT_SARAH_CALLER_ID = '+14803319455';
 /** Agency main line — answered 24/7 by Sarah (100% Free Virtual Receptionist & Outbound Caller on (480) 331-9455). Never used as a transfer target. */
 export const AGENCY_MAIN_LINE_E164 = '+14803319455';
 /** Where "Transfer Desk" transfers go (King Amen Ra direct). */
 export const TRANSFER_DESK_E164 = '+16024569681';
 
 export const ALLOWED_APPOINTMENT_TYPES = ['telephone', 'in_person', 'video'] as const;
-export const ALLOWED_BLAND_APPOINTMENT_TYPES = ALLOWED_APPOINTMENT_TYPES;
+export const ALLOWED_SARAH_APPOINTMENT_TYPES = ALLOWED_APPOINTMENT_TYPES;
 export type AllowedAppointmentType = typeof ALLOWED_APPOINTMENT_TYPES[number];
 
 export function normalizeAppointmentType(raw?: string | null): AllowedAppointmentType {
@@ -67,7 +67,7 @@ export function formatAppointmentTypeLabel(type: AllowedAppointmentType): string
   return 'Telephone';
 }
 
-export const DEFAULT_BLAND_PROMPT = `You are Sarah, the Voice AI Receptionist, Multi-Product Line Funnel Specialist, Outbound Caller, and Automatic Whisper Transfer Agent for the Medicare Helpline powered by IWG Insurance and Financial Services, a 100% free fiduciary insurance advisory representing over 104 premier carriers with zero broker fees, led by Principal Broker and Licensed Senior Advisor King Amen Ra (NPN: 16094432) and Chief Operating Officer Aneesha Sullivan, PA (Physician Assistant & Principal Governance).
+export const DEFAULT_SARAH_PROMPT = `You are Sarah, the Voice AI Receptionist, Multi-Product Line Funnel Specialist, Outbound Caller, and Automatic Whisper Transfer Agent for the Medicare Helpline powered by IWG Insurance and Financial Services, a 100% free fiduciary insurance advisory representing over 104 premier carriers with zero broker fees, led by Principal Broker and Licensed Senior Advisor King Amen Ra (NPN: 16094432) and Chief Operating Officer Aneesha Sullivan, PA (Physician Assistant & Principal Governance).
 Every interaction must reflect our four core pillars: World-Class Excellence, Uncompromising Integrity, Radical Service Orientation, and Genuine Care & Empathy.
 
 STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
@@ -199,7 +199,7 @@ export async function getInboundDirectory(): Promise<{
       let e164 = toE164(u.phone);
       if (!e164) continue;
       let displayPhone = u.phone;
-      // (480) 331-9455 is the agency main line answered by Sarah (Bland AI). Never transfer a caller back into it —
+      // (480) 331-9455 is the agency main line answered by Sarah (Sarah Voice Engine). Never transfer a caller back into it —
       // team members listed on the main line route to King Amen Ra's direct line instead.
       if (e164 === AGENCY_MAIN_LINE_E164) {
         e164 = TRANSFER_DESK_E164;
@@ -245,14 +245,14 @@ export async function getInboundDirectory(): Promise<{
     inbound_number: AGENCY_MAIN_LINE_E164,
     inbound_display: '(480) 331-9455',
     outbound_number: AGENCY_MAIN_LINE_E164,
-    ai_line: DEFAULT_BLAND_CALLER_ID,
+    ai_line: DEFAULT_SARAH_CALLER_ID,
     default_transfer_number: '+16024569681',
     directory,
     transfer_list,
   };
 }
 
-export const BLAND_VOICES = [
+export const SARAH_VOICES = [
   { id: 'maya', name: 'Maya (Warm & Empathetic Female — Medicare Specialist)', gender: 'Female', accent: 'American', is_recommended: true },
   { id: 'ryan', name: 'Ryan (Trustworthy & Calm Male — Senior Advisor)', gender: 'Male', accent: 'American', is_recommended: true },
   { id: 'elena', name: 'Elena (Bilingual English / Spanish Female)', gender: 'Female', accent: 'American/Spanish', is_recommended: false },
@@ -275,11 +275,11 @@ async function ensureSettingsTable(): Promise<void> {
   }
 }
 
-export async function getBlandConfig(): Promise<BlandConfig> {
+export async function getSarahDialerConfig(): Promise<SarahDialerConfig> {
   await ensureSettingsTable();
   let row: any = null;
   try {
-    row = await one(`SELECT value FROM settings WHERE key='bland_ai_config'`);
+    row = await one(`SELECT value FROM settings WHERE key='sarah_ai_config'`);
   } catch {
     row = null;
   }
@@ -312,17 +312,17 @@ export async function getBlandConfig(): Promise<BlandConfig> {
   return {
     api_key: val.api_key || envKey || '',
     enabled: val.enabled !== undefined ? Boolean(val.enabled) : true,
-    pathway_id: val.pathway_id || process.env.BLAND_PATHWAY_ID || DEFAULT_BLAND_PATHWAY_ID,
-    github_repo: val.github_repo || process.env.BLAND_GITHUB_REPO || 'https://github.com/KingAmenRa/iwillglobal-crm',
+    pathway_id: val.pathway_id || process.env.SARAH_PATHWAY_ID || DEFAULT_SARAH_PATHWAY_ID,
+    github_repo: val.github_repo || process.env.SARAH_GITHUB_REPO || 'https://github.com/KingAmenRa/iwillglobal-crm',
     default_voice: val.default_voice || 'maya',
     model: val.model || 'enhanced',
     max_duration: Number(val.max_duration) || 15,
     record: val.record !== undefined ? Boolean(val.record) : true,
     wait_for_greeting: val.wait_for_greeting !== undefined ? Boolean(val.wait_for_greeting) : false,
-    from_number: val.from_number || DEFAULT_BLAND_CALLER_ID,
+    from_number: val.from_number || DEFAULT_SARAH_CALLER_ID,
     transfer_phone_number: val.transfer_phone_number || '+16024569681',
-    prompt_template: val.prompt_template || DEFAULT_BLAND_PROMPT,
-    webhook_url: val.webhook_url || `${appConfig.appUrl}/api/bland/webhook`,
+    prompt_template: val.prompt_template || DEFAULT_SARAH_PROMPT,
+    webhook_url: val.webhook_url || `${appConfig.appUrl}/api/sarah/webhook`,
     calling_hours_start: val.calling_hours_start !== undefined ? Number(val.calling_hours_start) : 9,
     calling_hours_end: val.calling_hours_end !== undefined ? Number(val.calling_hours_end) : 19,
     weekend_calling_hours_start: val.weekend_calling_hours_start !== undefined ? Number(val.weekend_calling_hours_start) : 9,
@@ -342,10 +342,10 @@ export async function getBlandConfig(): Promise<BlandConfig> {
   };
 }
 
-export async function saveBlandConfig(partial: Partial<BlandConfig>): Promise<BlandConfig> {
+export async function saveSarahDialerConfig(partial: Partial<SarahDialerConfig>): Promise<SarahDialerConfig> {
   await ensureSettingsTable();
-  const current = await getBlandConfig();
-  const merged: BlandConfig = {
+  const current = await getSarahDialerConfig();
+  const merged: SarahDialerConfig = {
     ...current,
     ...partial,
     api_key: partial.api_key && partial.api_key.trim() !== '' ? partial.api_key.trim() : current.api_key,
@@ -357,7 +357,7 @@ export async function saveBlandConfig(partial: Partial<BlandConfig>): Promise<Bl
   }
 
   await q(
-    `INSERT INTO settings (key, value) VALUES ('bland_ai_config', $1::jsonb)
+    `INSERT INTO settings (key, value) VALUES ('sarah_ai_config', $1::jsonb)
      ON CONFLICT (key) DO UPDATE SET value = $1::jsonb`,
     [JSON.stringify(merged)],
   );
@@ -366,8 +366,8 @@ export async function saveBlandConfig(partial: Partial<BlandConfig>): Promise<Bl
 }
 
 /** Virtual CRM caller that owns every prospect assigned to the Sarah Outbound Caller & Receptionist on (480) 331-9455. */
-export const BLAND_AI_USER_ID = 'u_bland_ai';
-export const BLAND_AI_USER = { id: BLAND_AI_USER_ID, name: 'Sarah — Outbound Caller & Receptionist (480) 331-9455', email: 'sarah@iwillglobal.com', role: 'scheduler', phone: '(480) 331-9455' };
+export const SARAH_AI_USER_ID = 'u_sarah_ai';
+export const SARAH_AI_USER = { id: SARAH_AI_USER_ID, name: 'Sarah — Outbound Caller & Receptionist (480) 331-9455', email: 'sarah@iwillglobal.com', role: 'scheduler', phone: '(480) 331-9455' };
 
 // America/Phoenix is UTC-7 year-round (Arizona does not observe daylight saving time).
 const PHOENIX_OFFSET_MS = 7 * 3600 * 1000;
@@ -389,7 +389,7 @@ function phoenixParts(now: Date = new Date()) {
   };
 }
 
-function hoursForDay(cfg: Pick<BlandConfig, 'calling_hours_start' | 'calling_hours_end' | 'weekend_calling_hours_start' | 'weekend_calling_hours_end'>, day: number) {
+function hoursForDay(cfg: Pick<SarahDialerConfig, 'calling_hours_start' | 'calling_hours_end' | 'weekend_calling_hours_start' | 'weekend_calling_hours_end'>, day: number) {
   const isWeekend = day === 0 || day === 6;
   return {
     isWeekend,
@@ -405,7 +405,7 @@ function hoursForDay(cfg: Pick<BlandConfig, 'calling_hours_start' | 'calling_hou
  * Inbound calls are always answered immediately, 24/7.
  */
 export function getCallingWindow(
-  cfg: Pick<BlandConfig, 'calling_hours_start' | 'calling_hours_end' | 'weekend_calling_hours_start' | 'weekend_calling_hours_end'>,
+  cfg: Pick<SarahDialerConfig, 'calling_hours_start' | 'calling_hours_end' | 'weekend_calling_hours_start' | 'weekend_calling_hours_end'>,
   now: Date = new Date(),
 ) {
   const p = phoenixParts(now);
@@ -469,12 +469,12 @@ export function isWithinRecipientCallingHours(state?: string | null, now: Date =
   }
 }
 
-/** Count Bland AI outbound calls currently ringing / in progress (ignores simulated free calls and stale records older than 20 minutes). */
-async function countActiveBlandCalls(): Promise<number> {
+/** Count Sarah Voice Engine outbound calls currently ringing / in progress (ignores simulated free calls and stale records older than 20 minutes). */
+async function countActiveSarahCalls(): Promise<number> {
   try {
     const row = await one(
       `SELECT count(*)::int AS cnt FROM activities
-       WHERE provider = 'bland_ai' AND type = 'call' AND status = 'In Progress'
+       WHERE provider = 'google_voice_ai' AND type = 'call' AND status = 'In Progress'
          AND COALESCE((meta->>'simulated')::boolean, false) = false
          AND created_at >= now() - interval '20 minutes'`
     );
@@ -490,13 +490,13 @@ const ALL_CALLABLE_LEADS_WHERE = `
   AND phone IS NOT NULL AND trim(phone) != ''
   AND COALESCE(status, 'New') NOT IN ('Converted', 'DNC', 'Unqualified', 'Appointment Set')`;
 
-const BLAND_ASSIGNED_CALLABLE_SQL = `
+const SARAH_ASSIGNED_CALLABLE_SQL = `
   FROM leads
   WHERE ${ALL_CALLABLE_LEADS_WHERE}
     AND (
-      owner_id = '${BLAND_AI_USER_ID}'
-      OR assigned_agent_id = '${BLAND_AI_USER_ID}'
-      OR NOT EXISTS (SELECT 1 FROM leads l2 WHERE l2.owner_id = '${BLAND_AI_USER_ID}' OR l2.assigned_agent_id = '${BLAND_AI_USER_ID}')
+      owner_id = '${SARAH_AI_USER_ID}'
+      OR assigned_agent_id = '${SARAH_AI_USER_ID}'
+      OR NOT EXISTS (SELECT 1 FROM leads l2 WHERE l2.owner_id = '${SARAH_AI_USER_ID}' OR l2.assigned_agent_id = '${SARAH_AI_USER_ID}')
     )
     AND (
       last_contacted_at IS NULL
@@ -504,20 +504,20 @@ const BLAND_ASSIGNED_CALLABLE_SQL = `
       OR (next_callback_at IS NOT NULL AND next_callback_at <= now() AND last_contacted_at < next_callback_at)
     )`;
 
-/** Number of Sarah / Bland-assigned prospects still waiting to be called today. */
-export async function countBlandAssignedRemaining(startOfDay?: Date): Promise<{ assigned_total: number; remaining_today: number }> {
+/** Number of Sarah / Sarah-assigned prospects still waiting to be called today. */
+export async function countSarahAssignedRemaining(startOfDay?: Date): Promise<{ assigned_total: number; remaining_today: number }> {
   const sod = startOfDay || phoenixParts().startOfDay;
   try {
     const explicitRow = await one(
       `SELECT count(*)::int AS cnt FROM leads WHERE owner_id = $1 OR assigned_agent_id = $1`,
-      [BLAND_AI_USER_ID]
+      [SARAH_AI_USER_ID]
     );
     let totalCnt = explicitRow?.cnt || 0;
     if (totalCnt === 0) {
       const allRow = await one(`SELECT count(*)::int AS cnt FROM leads WHERE ${ALL_CALLABLE_LEADS_WHERE}`);
       totalCnt = allRow?.cnt || 0;
     }
-    const remaining = await one(`SELECT count(*)::int AS cnt ${BLAND_ASSIGNED_CALLABLE_SQL}`, [sod]);
+    const remaining = await one(`SELECT count(*)::int AS cnt ${SARAH_ASSIGNED_CALLABLE_SQL}`, [sod]);
     return { assigned_total: totalCnt, remaining_today: remaining?.cnt || 0 };
   } catch {
     return { assigned_total: 0, remaining_today: 0 };
@@ -528,7 +528,7 @@ export async function countBlandAssignedRemaining(startOfDay?: Date): Promise<{ 
 async function acquireDialerLease(seconds = 45): Promise<boolean> {
   try {
     const row = await one(
-      `INSERT INTO settings (key, value) VALUES ('bland_dialer_lease', jsonb_build_object('until', (now() + ($1 || ' seconds')::interval)::text))
+      `INSERT INTO settings (key, value) VALUES ('sarah_dialer_lease', jsonb_build_object('until', (now() + ($1 || ' seconds')::interval)::text))
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
        WHERE (settings.value->>'until')::timestamptz < now()
        RETURNING key`,
@@ -542,19 +542,19 @@ async function acquireDialerLease(seconds = 45): Promise<boolean> {
 
 async function releaseDialerLease(): Promise<void> {
   try {
-    await q(`UPDATE settings SET value = jsonb_build_object('until', (now() - interval '1 second')::text) WHERE key = 'bland_dialer_lease'`);
+    await q(`UPDATE settings SET value = jsonb_build_object('until', (now() - interval '1 second')::text) WHERE key = 'sarah_dialer_lease'`);
   } catch {
     // ignore
   }
 }
 
 /**
- * Autonomous Bland AI dialer tick. Safe to call as often as desired (webhook, cron, CRM heartbeat).
+ * Autonomous Sarah Voice Engine dialer tick. Safe to call as often as desired (webhook, cron, CRM heartbeat).
  * While the campaign is active and the calling window is open, it keeps every line busy by dialing the
- * next prospects assigned to Bland AI (one attempt per prospect per day, due callbacks first).
+ * next prospects assigned to Sarah Voice Engine (one attempt per prospect per day, due callbacks first).
  */
-export async function runBlandAutoDialerTick(opts: { reason?: string; force?: boolean; auto_complete_free?: boolean } = {}) {
-  const cfg = await getBlandConfig();
+export async function runSarahAutoDialerTick(opts: { reason?: string; force?: boolean; auto_complete_free?: boolean } = {}) {
+  const cfg = await getSarahDialerConfig();
   const callingWindow = getCallingWindow(cfg);
   const forceDial = Boolean(opts.force || opts.reason === 'activate' || opts.reason === 'assign' || process.env.NODE_ENV === 'test');
   const base = {
@@ -586,14 +586,14 @@ export async function runBlandAutoDialerTick(opts: { reason?: string; force?: bo
   const dispatched: any[] = [];
   let lastError: string | null = null;
   try {
-    const activeCalls = await countActiveBlandCalls();
+    const activeCalls = await countActiveSarahCalls();
     const slots = Math.max(0, Math.min(cfg.max_concurrent_calls, dailyLimit - callsToday) - activeCalls);
     if (slots === 0) {
       return { ...base, dispatched, active_calls: activeCalls, skipped: 'all_lines_busy' };
     }
 
     const candidates = await q(
-      `SELECT * ${BLAND_ASSIGNED_CALLABLE_SQL}
+      `SELECT * ${SARAH_ASSIGNED_CALLABLE_SQL}
        ORDER BY (next_callback_at IS NOT NULL AND next_callback_at <= now()) DESC,
                 score DESC NULLS LAST,
                 COALESCE(attempts, 0) ASC,
@@ -617,13 +617,13 @@ export async function runBlandAutoDialerTick(opts: { reason?: string; force?: bo
 
       try {
         const prospectFullName = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Valued Beneficiary';
-        const res = await sendBlandCall({
+        const res = await sendSarahCall({
           phone: lead.phone,
           related_type: 'lead',
           related_id: lead.id,
           prospect_name: prospectFullName,
           state: lead.state || 'AZ',
-          user: BLAND_AI_USER,
+          user: SARAH_AI_USER,
           override_pause: true,
         });
 
@@ -653,7 +653,7 @@ export async function runBlandAutoDialerTick(opts: { reason?: string; force?: bo
               body: `Booked by Sarah (100% Free Voice AI Outbound Caller on (480) 331-9455) via 4-Step Outbound Script (Path B).\nClient: ${prospectFullName}\nPhone: ${lead.phone}\nType: Telephone (30 min)\nRequested Time: Tomorrow at 10:00 AM Arizona Time`,
               related_type: 'lead',
               related_id: lead.id,
-              user_id: BLAND_AI_USER.id,
+              user_id: SARAH_AI_USER.id,
               assigned_to: 'u_principal',
               due_at: startAt,
               end_at: endAt,
@@ -663,7 +663,7 @@ export async function runBlandAutoDialerTick(opts: { reason?: string; force?: bo
                 booked_by_name: 'Sarah (100% Free Voice AI on (480) 331-9455)',
                 appointment_type: 'telephone',
                 appointment_type_label: 'Telephone',
-                bland_call_id: res.call_id,
+                sarah_call_id: res.call_id,
               },
             });
             appointmentEventId = apptRow?.id || null;
@@ -706,7 +706,7 @@ export async function runBlandAutoDialerTick(opts: { reason?: string; force?: bo
               body: `Booked & Warm-Transferred by Sarah (100% Free Voice AI Outbound Caller on (480) 331-9455) via 4-Step Outbound Script (Path A + Path B).\nHold Message to ${firstName}: "Wonderful, ${firstName}! Please hold for just a moment while I dial King Amen Ra and get him on the line."\nPrivate Whisper to King (+16024569681): "${scripts.whisperBriefing}"\n3-Way Merge: "${scripts.mergeIntroduction}"`,
               related_type: 'lead',
               related_id: lead.id,
-              user_id: BLAND_AI_USER.id,
+              user_id: SARAH_AI_USER.id,
               assigned_to: 'u_principal',
               due_at: startAt,
               end_at: endAt,
@@ -718,7 +718,7 @@ export async function runBlandAutoDialerTick(opts: { reason?: string; force?: bo
                 appointment_type_label: 'Telephone',
                 whisper_briefing: scripts.whisperBriefing,
                 merge_introduction: scripts.mergeIntroduction,
-                bland_call_id: res.call_id,
+                sarah_call_id: res.call_id,
               },
             });
             appointmentEventId = apptRow?.id || null;
@@ -761,14 +761,14 @@ export async function runBlandAutoDialerTick(opts: { reason?: string; force?: bo
       } catch (err: any) {
         // Release the claim so the prospect is retried later.
         await q(`UPDATE leads SET last_contacted_at = $2 WHERE id = $1`, [lead.id, lead.last_contacted_at || null]).catch(() => {});
-        lastError = err?.message || 'Bland AI dispatch failed';
-        console.error(`Bland auto-dialer failed for lead ${lead.id}:`, lastError);
+        lastError = err?.message || 'Sarah Voice Engine dispatch failed';
+        console.error(`Sarah auto-dialer failed for lead ${lead.id}:`, lastError);
         // Invalid phone numbers are skipped; account/API/hours errors stop this tick to avoid burning through the queue.
         if (err?.status !== 400) break;
       }
     }
 
-    const remaining = await countBlandAssignedRemaining(callingWindow.start_of_day);
+    const remaining = await countSarahAssignedRemaining(callingWindow.start_of_day);
     return {
       ...base,
       dispatched,
@@ -783,14 +783,14 @@ export async function runBlandAutoDialerTick(opts: { reason?: string; force?: bo
 }
 
 /**
- * Check how many Bland AI outbound calls have been placed today (America/Phoenix time).
+ * Check how many Sarah Voice Engine outbound calls have been placed today (America/Phoenix time).
  */
 export async function getCallsTodayCount(): Promise<number> {
   try {
     const row = await one(
       `SELECT count(*)::int AS cnt FROM activities
        WHERE type = 'call'
-         AND provider = 'bland_ai'
+         AND provider = 'google_voice_ai'
          AND created_at >= date_trunc('day', now() AT TIME ZONE 'America/Phoenix') AT TIME ZONE 'America/Phoenix'`
     );
     return row?.cnt || 0;
@@ -800,7 +800,7 @@ export async function getCallsTodayCount(): Promise<number> {
 }
 
 /**
- * Validate if Bland AI can currently dispatch a new outbound call:
+ * Validate if Sarah Voice Engine can currently dispatch a new outbound call:
  * IMPORTANT: When King Amen Ra is on a warm transfer call (`is_on_warm_transfer` / `is_calling_paused`),
  * outbound calling is NOT blocked! Instead, the agent continues making calls and strictly selects
  * Telephone, In-Person, or Video appointments!
@@ -815,7 +815,7 @@ export async function canDispatchOutboundCall(override = false): Promise<{
   is_campaign_active: boolean;
   operating_mode: 'WARM_TRANSFER_OR_APPOINTMENT' | 'APPOINTMENT_ONLY_TELEPHONE_IN_PERSON_VIDEO';
 }> {
-  const cfg = await getBlandConfig();
+  const cfg = await getSarahDialerConfig();
   const callsToday = await getCallsTodayCount();
   const limit = cfg.daily_call_limit || 1000;
   const isOnWarmTransfer = Boolean(cfg.is_on_warm_transfer || cfg.is_calling_paused);
@@ -868,7 +868,7 @@ export async function canDispatchOutboundCall(override = false): Promise<{
 
 /**
  * Set whether King Amen Ra is currently on a warm transfer call.
- * When active=true, the Bland AI Agent DOES NOT STOP CALLING — it knows King is on a warm transfer call,
+ * When active=true, the Sarah Voice Engine Agent DOES NOT STOP CALLING — it knows King is on a warm transfer call,
  * strictly selects Telephone, In-Person, or Video appointments only, and continues calling the queue!
  */
 export async function setWarmTransferStatus(params: {
@@ -876,8 +876,8 @@ export async function setWarmTransferStatus(params: {
   lead_id?: string | null;
   call_id?: string | null;
   reason?: string;
-}): Promise<BlandConfig> {
-  return saveBlandConfig({
+}): Promise<SarahDialerConfig> {
+  return saveSarahDialerConfig({
     is_on_warm_transfer: params.on_warm_transfer,
     is_calling_paused: params.on_warm_transfer,
     paused_reason: params.on_warm_transfer
@@ -891,14 +891,14 @@ export async function setWarmTransferStatus(params: {
 
 /**
  * Backwards-compatible helper called when a warm transfer is initiated.
- * Sets `is_on_warm_transfer = true` so the Bland Agent AI knows King is on a warm transfer call,
+ * Sets `is_on_warm_transfer = true` so the Sarah Agent AI knows King is on a warm transfer call,
  * switches to booking ONLY Telephone, In-Person, or Video appointments, and continues calling!
  */
 export async function pauseCallingForWarmTransfer(params: {
   lead_id?: string | null;
   call_id?: string | null;
   reason?: string;
-}): Promise<BlandConfig> {
+}): Promise<SarahDialerConfig> {
   return setWarmTransferStatus({
     on_warm_transfer: true,
     lead_id: params.lead_id,
@@ -907,7 +907,7 @@ export async function pauseCallingForWarmTransfer(params: {
   });
 }
 
-export async function setBlandCallingPause(paused: boolean, reason?: string | null): Promise<BlandConfig> {
+export async function setSarahCallingPause(paused: boolean, reason?: string | null): Promise<SarahDialerConfig> {
   return setWarmTransferStatus({
     on_warm_transfer: paused,
     reason: reason || undefined,
@@ -916,12 +916,12 @@ export async function setBlandCallingPause(paused: boolean, reason?: string | nu
 
 /**
  * Called when King Amen Ra finishes a warm transfer consultation and dispositions the lead.
- * Returns the Bland Agent AI to live warm-transfer capability while continuing outbound calls.
+ * Returns the Sarah Agent AI to live warm-transfer capability while continuing outbound calls.
  */
 export async function resumeCallingAfterDisposition(params?: {
   lead_id?: string | null;
   disposition?: string;
-}): Promise<BlandConfig> {
+}): Promise<SarahDialerConfig> {
   return setWarmTransferStatus({
     on_warm_transfer: false,
     lead_id: null,
@@ -930,18 +930,18 @@ export async function resumeCallingAfterDisposition(params?: {
 }
 
 /**
- * Activate or stop the autonomous Bland Agent AI outbound calling campaign from the CRM.
+ * Activate or stop the autonomous Sarah Agent AI outbound calling campaign from the CRM.
  */
-export async function setBlandCampaignActive(active: boolean, options?: {
+export async function setSarahCampaignActive(active: boolean, options?: {
   on_warm_transfer?: boolean;
   user?: { id: string; name: string; email?: string; role: string };
   max_initial_calls?: number;
 }): Promise<{
-  config: BlandConfig;
+  config: SarahDialerConfig;
   dispatched_calls: any[];
   queue_remaining: number;
 }> {
-  const updates: Partial<BlandConfig> = {
+  const updates: Partial<SarahDialerConfig> = {
     is_campaign_active: active,
     campaign_started_at: active ? new Date().toISOString() : null,
   };
@@ -953,7 +953,7 @@ export async function setBlandCampaignActive(active: boolean, options?: {
       : null;
   }
 
-  const updatedConfig = await saveBlandConfig(updates);
+  const updatedConfig = await saveSarahDialerConfig(updates);
   const dispatchedCalls: any[] = [];
   let queueRemaining = 0;
 
@@ -983,7 +983,7 @@ export async function setBlandCampaignActive(active: boolean, options?: {
 }
 
 /**
- * Pull the next callable lead(s) from the CRM queue and dispatch Bland Agent AI calls.
+ * Pull the next callable lead(s) from the CRM queue and dispatch Sarah Agent AI calls.
  */
 export async function dispatchNextLeadInQueue(params: {
   user: { id: string; name: string; email?: string; role: string };
@@ -1007,7 +1007,7 @@ export async function dispatchNextLeadInQueue(params: {
   const dispatched: any[] = [];
   for (const lead of leads) {
     try {
-      const res = await sendBlandCall({
+      const res = await sendSarahCall({
         phone: lead.phone,
         related_type: 'lead',
         related_id: lead.id,
@@ -1027,7 +1027,7 @@ export async function dispatchNextLeadInQueue(params: {
         allowed_appointment_types: res.allowed_appointment_types,
       });
     } catch (err: any) {
-      console.error(`Failed to dispatch Bland call for lead ${lead.id}:`, err.message);
+      console.error(`Failed to dispatch Sarah call for lead ${lead.id}:`, err.message);
     }
   }
 
@@ -1044,7 +1044,7 @@ export async function dispatchNextLeadInQueue(params: {
   };
 }
 
-export interface SendBlandCallOptions {
+export interface SendSarahCallOptions {
   phone: string;
   related_type?: 'lead' | 'client';
   related_id?: string;
@@ -1157,8 +1157,8 @@ export async function dispatchAiWhisperTransfer(params: {
   };
 }
 
-export async function sendBlandCall(opts: SendBlandCallOptions) {
-  const config = await getBlandConfig();
+export async function sendSarahCall(opts: SendSarahCallOptions) {
+  const config = await getSarahDialerConfig();
   const e164 = toE164(opts.phone);
   if (!e164) {
     throw Object.assign(new Error('Invalid phone number for Sarah Outbound Caller call'), { status: 400 });
@@ -1195,14 +1195,14 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
   const prospectName = rawProspectName || 'Valued Medicare Beneficiary';
   const firstName = prospectName.split(' ')[0] || 'there';
   const callerName = 'Sarah';
-  const pathwayId = rawPathwayId || config.pathway_id || DEFAULT_BLAND_PATHWAY_ID;
+  const pathwayId = rawPathwayId || config.pathway_id || DEFAULT_SARAH_PATHWAY_ID;
   const transferNumber = rawTransferNumber || config.transfer_phone_number || '+16024569681';
 
   const warmTransferStatusText = isOnWarmTransfer
     ? 'ACTIVE — King Amen Ra is currently on a live Warm Transfer call with another client. DO NOT live-transfer this call. Instead, inform the caller that King Amen Ra is on a warm transfer call and ONLY offer/select a Telephone, In-Person, or Video appointment, book their preferred date/time, and continue making calls!'
     : 'AVAILABLE — King Amen Ra is available for an immediate automatic AI whisper warm transfer if the caller agrees to learn about the 2027 changes or speak with a licensed advisor right now, or you may schedule a Telephone, In-Person, or Video appointment.';
 
-  const prompt = (customPrompt || config.prompt_template || DEFAULT_BLAND_PROMPT)
+  const prompt = (customPrompt || config.prompt_template || DEFAULT_SARAH_PROMPT)
     .replace(/\{prospect_name\}/g, prospectName)
     .replace(/\{first_name\}/g, firstName)
     .replace(/\{caller_name\}/g, callerName)
@@ -1236,7 +1236,7 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
   const voice = opts.voice || config.default_voice || 'maya';
 
   // Route ALL outbound calls through Google Voice on (480) 331-9455 (+14803319455) + Sarah Voice AI (Gemini Live)
-  const blandCallId = `gv_sarah_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const sarahCallId = `gv_sarah_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const isSimulated = true;
   const gvWebUrl = googleVoiceWebUrl(e164, callerUser.email);
   const gvAppUrl = telUrl(e164);
@@ -1287,12 +1287,12 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
     completed: false,
     direction: 'outbound',
     phone: e164,
-    provider: 'bland_ai',
+    provider: 'google_voice_ai',
     disposition_id: 'call_attempted',
     disposition: 'Google Voice + Sarah AI Call Active (480) 331-9455',
     duration_sec: 45,
     meta: {
-      bland_call_id: blandCallId,
+      sarah_call_id: sarahCallId,
       pathway_id: pathwayId,
       voice,
       simulated: isSimulated,
@@ -1308,7 +1308,7 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
       started_at: new Date().toISOString(),
       prompt_used: prompt,
       first_sentence: firstSentence,
-      bland_response: apiResponse,
+      sarah_response: apiResponse,
     },
   });
 
@@ -1330,7 +1330,7 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
     ok: true,
     success: true,
     answered: true,
-    call_id: blandCallId,
+    call_id: sarahCallId,
     activity_id: activity.id,
     pathway_id: pathwayId,
     telephony_provider: 'google_voice',
@@ -1350,18 +1350,18 @@ export async function sendBlandCall(opts: SendBlandCallOptions) {
     allowed_appointment_types: ['Telephone', 'In-Person', 'Video'],
     message: `Google Voice + Sarah AI outbound call dispatched on (480) 331-9455 to ${prospectName} (${e164}).`,
     activity,
-    bland_response: apiResponse,
+    sarah_response: apiResponse,
   };
 }
 
 /**
- * Stop an active Bland AI call and/or stop all active Bland AI outbound calls & campaign queue.
+ * Stop an active Sarah Voice Engine call and/or stop all active Sarah Voice Engine outbound calls & campaign queue.
  */
-export async function stopBlandOutboundCalls(params?: {
+export async function stopSarahOutboundCalls(params?: {
   call_id?: string;
   stop_all?: boolean;
 }) {
-  const config = await saveBlandConfig({
+  const config = await saveSarahDialerConfig({
     is_campaign_active: false,
   });
 
@@ -1374,14 +1374,14 @@ export async function stopBlandOutboundCalls(params?: {
       await q(
         `UPDATE activities
          SET status = 'Stopped', completed = true, disposition = 'Google Voice + Sarah AI Call Stopped'
-         WHERE provider = 'bland_ai' AND meta->>'bland_call_id' = $1`,
+         WHERE provider = 'google_voice_ai' AND meta->>'sarah_call_id' = $1`,
         [params.call_id]
       );
     } else {
       await q(
         `UPDATE activities
          SET status = 'Stopped', completed = true, disposition = 'Google Voice + Sarah AI Call Stopped'
-         WHERE provider = 'bland_ai' AND status = 'In Progress'`
+         WHERE provider = 'google_voice_ai' AND status = 'In Progress'`
       );
     }
   } catch {
@@ -1403,18 +1403,18 @@ export async function stopBlandOutboundCalls(params?: {
 }
 
 /**
- * Fetch live call status and transcript from Bland AI API
+ * Fetch live call status and transcript from Sarah Voice Engine API
  */
-export async function getBlandCallDetails(blandCallId: string) {
-  const config = await getBlandConfig();
+export async function getSarahCallDetails(sarahCallId: string) {
+  const config = await getSarahDialerConfig();
   const localActivity = await one(
-    `SELECT * FROM activities WHERE type = 'call' AND meta->>'bland_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
-    [blandCallId],
+    `SELECT * FROM activities WHERE type = 'call' AND meta->>'sarah_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
+    [sarahCallId],
   );
 
   const wasOnWarmTransfer = Boolean(localActivity?.meta?.on_warm_transfer || config.is_on_warm_transfer);
   return {
-    call_id: blandCallId,
+    call_id: sarahCallId,
     status: 'completed',
     completed: true,
     simulated: true,
@@ -1440,9 +1440,9 @@ export async function getBlandCallDetails(blandCallId: string) {
 }
 
 /**
- * Process incoming Bland AI Webhook when an autonomous call finishes
+ * Process incoming Sarah Voice Engine Webhook when an autonomous call finishes
  */
-export async function handleBlandWebhook(payload: any) {
+export async function handleSarahWebhook(payload: any) {
   const callId = payload.call_id || payload.c_id;
   if (!callId) return { ok: false, reason: 'missing_call_id' };
 
@@ -1501,7 +1501,7 @@ export async function handleBlandWebhook(payload: any) {
   }
 
   let activity = await one(
-    `SELECT * FROM activities WHERE meta->>'bland_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
+    `SELECT * FROM activities WHERE meta->>'sarah_call_id' = $1 ORDER BY created_at DESC LIMIT 1`,
     [callId],
   );
 
@@ -1549,13 +1549,13 @@ export async function handleBlandWebhook(payload: any) {
       completed: true,
       direction: 'outbound',
       phone: toE164(payload.to || payload.phone_number || ''),
-      provider: 'bland_ai',
+      provider: 'google_voice_ai',
       disposition_id: dispositionId,
       disposition: dispositionLabel,
       duration_sec: durationSec || 30,
       ai_summary: summary || null,
       meta: {
-        bland_call_id: callId,
+        sarah_call_id: callId,
         recording_url: recordingUrl,
         answered_by: answeredBy,
         transcript,
@@ -1637,7 +1637,7 @@ export async function handleBlandWebhook(payload: any) {
         customer_address: customerAddress,
         confirmed: true,
         text_reminder_submitted: true,
-        bland_call_id: callId,
+        sarah_call_id: callId,
         booked_during_warm_transfer: Boolean(metadata.on_warm_transfer),
         master_calendar_email: 'info@iwillglobal.com',
       },
@@ -1724,18 +1724,18 @@ export async function handleBlandWebhook(payload: any) {
     }
   }
 
-  // CONTINUOUS DIALING: the moment a call ends, immediately dial the next prospect assigned to Bland AI
+  // CONTINUOUS DIALING: the moment a call ends, immediately dial the next prospect assigned to Sarah Voice Engine
   // (respects Mon–Fri 9–7 / Sat–Sun 9–6 Arizona hours, daily limit and concurrent-line limit).
   let nextDispatched: any = null;
   try {
-    const tick = await runBlandAutoDialerTick({ reason: 'call_completed' });
+    const tick = await runSarahAutoDialerTick({ reason: 'call_completed' });
     nextDispatched = tick.dispatched?.[0] || null;
   } catch (err: any) {
-    console.error('Bland auto-dialer (webhook) error:', err?.message);
+    console.error('Sarah auto-dialer (webhook) error:', err?.message);
   }
 
   const { publish } = await import('../realtime.ts');
-  publish('inbox', 'bland_call_completed', {
+  publish('inbox', 'sarah_call_completed', {
     call_id: callId,
     activity_id: activity?.id || null,
     related_id: relatedId,

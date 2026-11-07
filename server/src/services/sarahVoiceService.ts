@@ -5,10 +5,10 @@ import { one, q } from '../db/index.ts';
 import {
   IWG_TEAM_DIRECTORY,
   buildAiWhisperScripts,
-  getBlandConfig,
+  getSarahDialerConfig,
   AGENCY_MAIN_LINE_E164,
   TRANSFER_DESK_E164,
-} from './bland.ts';
+} from './sarahDialer.ts';
 import { googleVoiceWebUrl } from './phone.ts';
 
 /**
@@ -911,7 +911,7 @@ export async function executeSarahTool(
     const holdMessage = `Wonderful! Please hold for just a moment while I call ${recipientName} on the line and connect to them first. I will let you know as soon as we are connected.`;
 
     // 2. Initiate a 100% FREE Google Voice outbound transfer call from (480) 331-9455 (+14803319455) to recipientPhone (+16024569681)
-    //    using our own cloned app (zero Bland API calls, zero credits required!).
+    //    using our own cloned app (zero Sarah API calls, zero credits required!).
     const transferId = crypto.randomUUID();
     const gvCallId = `gv_transfer_${transferId}`;
     const dialedAtMs = Date.now();
@@ -951,10 +951,10 @@ export async function executeSarahTool(
             line_number: SARAH_MAIN_LINE_E164,
             from_number: SARAH_MAIN_LINE_E164,
             gv_call_id: gvCallId,
-            bland_call_id: gvCallId,
+            sarah_call_id: gvCallId,
             dialed_at_ms: dialedAtMs,
-            bland_dial_status: isAlreadyVerified ? 'connected' : 'ringing_google_voice',
-            bland_dial_error: null,
+            sarah_dial_status: isAlreadyVerified ? 'connected' : 'ringing_google_voice',
+            sarah_dial_error: null,
             telephony_provider: 'google_voice',
             recipient_name: recipientName,
             recipient_phone: recipientPhone,
@@ -976,10 +976,10 @@ export async function executeSarahTool(
     return {
       success: true,
       transfer_id: transferId,
-      bland_call_id: gvCallId,
+      sarah_call_id: gvCallId,
       gv_call_id: gvCallId,
-      bland_dial_status: isAlreadyVerified ? 'connected' : 'ringing_google_voice',
-      bland_dial_error: null,
+      sarah_dial_status: isAlreadyVerified ? 'connected' : 'ringing_google_voice',
+      sarah_dial_error: null,
       transfer_status: isAlreadyVerified ? 'connected_and_merged' : 'calling_transfer_line_waiting_for_answer',
       telephony_provider: 'google_voice',
       work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
@@ -1001,7 +1001,7 @@ export async function executeSarahTool(
       verification: {
         transline_dialed: true,
         transline_number: recipientPhone,
-        bland_call_id: gvCallId,
+        sarah_call_id: gvCallId,
         transline_connected: isAlreadyVerified,
         transline_connected_at: isAlreadyVerified ? nowIso : null,
         whisper_delivered: isAlreadyVerified,
@@ -1105,7 +1105,7 @@ export async function executeSarahTool(
 
 /**
  * Checks the live Google Voice transfer call status for a warm transfer call placed from (480) 331-9455 (+14803319455)
- * to +16024569681 (602-456-9681) or directory number using our 100% free cloned app (zero Bland API calls).
+ * to +16024569681 (602-456-9681) or directory number using our 100% free cloned app (zero Sarah API calls).
  * Returns `connected: true` ONLY AFTER the Google Voice transfer line has dialed and connected to 602-456-9681,
  * so the Receptionist never tells the customer they are connected before 602-456-9681 is called and connected.
  */
@@ -1150,7 +1150,7 @@ export async function checkLiveTransferCallStatus(params: {
     try {
       actRow = await one(
         `SELECT id, status, completed, meta, created_at FROM activities
-         WHERE id::text = $1 OR meta->>'gv_call_id' = $1 OR meta->>'bland_call_id' = $1
+         WHERE id::text = $1 OR meta->>'gv_call_id' = $1 OR meta->>'sarah_call_id' = $1
          ORDER BY created_at DESC LIMIT 1`,
         [callId]
       );
@@ -1204,7 +1204,7 @@ export async function checkLiveTransferCallStatus(params: {
       verification: {
         transline_dialed: true,
         transline_number: recipientPhone,
-        bland_call_id: callId,
+        sarah_call_id: callId,
         gv_call_id: callId,
         originating_line: SARAH_MAIN_LINE_E164,
         transline_connected: isConnected,
@@ -1327,8 +1327,8 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
   // Check live warm transfer state from DB config if not explicitly passed
   let dbWarmTransfer = false;
   try {
-    const blandCfg = await getBlandConfig();
-    dbWarmTransfer = Boolean(blandCfg.is_on_warm_transfer);
+    const sarahCfg = await getSarahDialerConfig();
+    dbWarmTransfer = Boolean(sarahCfg.is_on_warm_transfer);
   } catch {
     // ignore
   }
@@ -1451,7 +1451,7 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
             {
               text:
                 buildSarahSystemInstruction(sessionContext) +
-                '\n\nVOICE DELIVERY STYLE: Speak in the calm, relaxed, warm, unhurried, and deeply human Vindemiatrix voice—just like our cloned Bland agent.',
+                '\n\nVOICE DELIVERY STYLE: Speak in the calm, relaxed, warm, unhurried, and deeply human Vindemiatrix voice—just like our cloned Sarah agent.',
             },
           ],
         },
@@ -1750,7 +1750,7 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
 }
 
 /**
- * Ultra-Realistic Human Neural Voice Synthesizer (Cloned Bland Voice Engine).
+ * Ultra-Realistic Human Neural Voice Synthesizer (Cloned Sarah Voice Engine).
  * Uses Gemini TTS (`Vindemiatrix` calm, relaxed, warm human female voice) to produce standard 24kHz RIFF WAV audio.
  */
 const SARAH_VOICE_NAME = 'Vindemiatrix';
@@ -2146,11 +2146,11 @@ export function detectAppointmentBookingIntent(
 }
 
 /**
- * Exact Cloned Bland Agent Scenario Engine (`bland.json` Format 3).
+ * Exact Cloned Sarah Agent Scenario Engine (`sarah.json` Format 3).
  * Executes all 10 scenarios, 6 product funnels, 2027 CMS cost rules, 3 fiduciary objections,
- * 42-member directory whisper transfers, and step-by-step appointment setting identically to `bland.json`.
+ * 42-member directory whisper transfers, and step-by-step appointment setting identically to `sarah.json`.
  */
-async function runClonedBlandScenario(
+async function runClonedSarahScenario(
   userText: string,
   history: Array<{ speaker: 'sarah' | 'user'; text: string }>,
   sessionContext: SarahSessionContext
@@ -2252,7 +2252,7 @@ async function runClonedBlandScenario(
     };
   }
 
-  // 2B. Scenario: Individual & Family Health Insurance (ACA / Private PPO) (`bland.json` line 148)
+  // 2B. Scenario: Individual & Family Health Insurance (ACA / Private PPO) (`sarah.json` line 148)
   if (/\b(individual|family|aca|marketplace|obamacare|ppo|subsidy|tax credit|under 65|kids|dental|vision)\b/i.test(lower)) {
     return {
       scenario: 'Individual Health Quote',
@@ -2260,7 +2260,7 @@ async function runClonedBlandScenario(
     };
   }
 
-  // 2C. Scenario: Group Health Plans (`bland.json` line 209)
+  // 2C. Scenario: Group Health Plans (`sarah.json` line 209)
   if (/\b(group|business|employer|employee|company health|ichra|level-funded|level funded|small business)\b/i.test(lower)) {
     return {
       scenario: 'Group Health Plans',
@@ -2268,7 +2268,7 @@ async function runClonedBlandScenario(
     };
   }
 
-  // 2D. Scenario: Long-Term Care (`bland.json` line 289)
+  // 2D. Scenario: Long-Term Care (`sarah.json` line 289)
   if (/\b(long-term care|long term care|ltc|nursing|home health|assisted living|hybrid)\b/i.test(lower)) {
     return {
       scenario: 'Long-Term Care',
@@ -2323,7 +2323,7 @@ async function runClonedBlandScenario(
     };
   }
 
-  // 4. Empathy-First Fiduciary Objection Handling (`bland.json` Section 4)
+  // 4. Empathy-First Fiduciary Objection Handling (`sarah.json` Section 4)
   if (
     /\b(happy with my|keep my plan|don't want to change|already have a plan|already have an agent|already have a broker|satisfied with my)\b/i.test(
       lower
@@ -2373,7 +2373,7 @@ async function runClonedBlandScenario(
     };
   }
 
-  // 6. Scenario: 2027 Medicare Costs & Specific Parts (`bland.json` Scenario "2027 Medicare Costs" & "Medicare Plan Help")
+  // 6. Scenario: 2027 Medicare Costs & Specific Parts (`sarah.json` Scenario "2027 Medicare Costs" & "Medicare Plan Help")
   if (/\b(part a|part b|part c|part d|medigap|plan g|plan n|coinsurance|2027|insulin|prescription|medicare)\b/i.test(lower)) {
     return {
       scenario: '2027 Medicare Costs & Plan Help',
@@ -2381,7 +2381,7 @@ async function runClonedBlandScenario(
     };
   }
 
-  // 7. Scenario: Company & Carrier Info (`bland.json` line 383)
+  // 7. Scenario: Company & Carrier Info (`sarah.json` line 383)
   if (/\b(who are you|what is i will global|fiduciary|carriers|which companies|states|where do you operate|about us)\b/i.test(lower)) {
     return {
       scenario: 'Company & Carrier Info',
@@ -2412,7 +2412,7 @@ async function runClonedBlandScenario(
 
 /**
  * Serverless HTTP Voice Turn handler (`POST /api/sarah/turn`) for Vercel (`iwillglobal.com`) & local CRM.
- * Clones the complete Bland Agent Model (`bland.json`) and synthesizes realistic human neural audio (`Vindemiatrix`).
+ * Clones the complete Sarah Agent Model (`sarah.json`) and synthesizes realistic human neural audio (`Vindemiatrix`).
  */
 export async function handleSarahHttpTurn(params: {
   message?: string;
@@ -2467,8 +2467,8 @@ export async function handleSarahHttpTurn(params: {
   let dbWarmTransfer = false;
   if (params.context?.on_warm_transfer === undefined) {
     try {
-      const blandCfg = await getBlandConfig();
-      dbWarmTransfer = Boolean(blandCfg.is_on_warm_transfer);
+      const sarahCfg = await getSarahDialerConfig();
+      dbWarmTransfer = Boolean(sarahCfg.is_on_warm_transfer);
     } catch {
       // ignore
     }
@@ -2622,7 +2622,7 @@ export async function handleSarahHttpTurn(params: {
 
   // 3. Explicit Script Tree Directive button click -> run exact deterministic step
   if (userText.toLowerCase().includes('[script tree directive]')) {
-    const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
+    const clonedMatch = await runClonedSarahScenario(userText, params.history || [], sessionContext);
     const tts = await resolveTts(clonedMatch.reply);
     return {
       ok: true,
@@ -2853,8 +2853,8 @@ export async function handleSarahHttpTurn(params: {
     }
   }
 
-  // 5. Deterministic Cloned Bland Scenario fallback if AI is offline
-  const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
+  // 5. Deterministic Cloned Sarah Scenario fallback if AI is offline
+  const clonedMatch = await runClonedSarahScenario(userText, params.history || [], sessionContext);
   const tts = await resolveTts(clonedMatch.reply);
   return {
     ok: true,

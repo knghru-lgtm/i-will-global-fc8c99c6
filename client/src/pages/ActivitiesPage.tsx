@@ -1175,7 +1175,7 @@ export const ActivitiesPage: React.FC = () => {
                       </span>
                     )}
 
-                    {(a.provider === 'bland_ai' || a.meta?.source === 'bland_ai') && (
+                    {(a.provider === 'google_voice_ai' || a.meta?.source === 'google_voice_ai') && (
                       <span
                         style={{
                           fontSize: '0.74rem',

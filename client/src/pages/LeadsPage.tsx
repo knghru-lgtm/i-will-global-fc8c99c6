@@ -85,57 +85,57 @@ export const LeadsPage: React.FC = () => {
   // Row selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  // Bland AI Live Outbound Start / Stop State
-  const [isBlandActive, setIsBlandActive] = useState<boolean>(false);
-  const [blandBusy, setBlandBusy] = useState<boolean>(false);
-  const [blandBannerMsg, setBlandBannerMsg] = useState<string>('');
-  const [blandWindow, setBlandWindow] = useState<{ open: boolean; today?: string; schedule?: string; next_open?: string } | null>(null);
-  const [blandAssigned, setBlandAssigned] = useState<{ assigned_total: number; remaining_today: number }>({ assigned_total: 0, remaining_today: 0 });
+  // Sarah Voice Engine Live Outbound Start / Stop State
+  const [isSarahActive, setIsSarahActive] = useState<boolean>(false);
+  const [sarahBusy, setSarahBusy] = useState<boolean>(false);
+  const [sarahBannerMsg, setSarahBannerMsg] = useState<string>('');
+  const [sarahWindow, setSarahWindow] = useState<{ open: boolean; today?: string; schedule?: string; next_open?: string } | null>(null);
+  const [sarahAssigned, setSarahAssigned] = useState<{ assigned_total: number; remaining_today: number }>({ assigned_total: 0, remaining_today: 0 });
 
-  const loadBlandStatus = async () => {
+  const loadSarahStatus = async () => {
     try {
-      const cfg = await api.get('/bland/config');
+      const cfg = await api.get('/sarah/config');
       if (cfg) {
-        setIsBlandActive(Boolean(cfg.is_campaign_active));
-        if (cfg.calling_window) setBlandWindow(cfg.calling_window);
-        if (cfg.bland_assigned) setBlandAssigned(cfg.bland_assigned);
+        setIsSarahActive(Boolean(cfg.is_campaign_active));
+        if (cfg.calling_window) setSarahWindow(cfg.calling_window);
+        if (cfg.sarah_assigned) setSarahAssigned(cfg.sarah_assigned);
       }
     } catch {
       // ignore
     }
   };
 
-  const handleAssignToBland = async (targetLeadIds: string[]) => {
+  const handleAssignToSarah = async (targetLeadIds: string[]) => {
     if (!targetLeadIds.length) return;
-    setBlandBusy(true);
+    setSarahBusy(true);
     try {
-      const res = await api.post('/bland/assign', { lead_ids: targetLeadIds });
-      setBlandBannerMsg(res.message || `📞 ${targetLeadIds.length} prospect(s) assigned to Sarah Outbound Caller.`);
+      const res = await api.post('/sarah/assign', { lead_ids: targetLeadIds });
+      setSarahBannerMsg(res.message || `📞 ${targetLeadIds.length} prospect(s) assigned to Sarah Outbound Caller.`);
       setSelectedIds([]);
-      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      window.dispatchEvent(new CustomEvent('iwg-sarah-status-changed'));
       loadLeads();
       loadPoolStats();
-      loadBlandStatus();
+      loadSarahStatus();
     } catch (err: any) {
       alert(err.message || 'Failed to assign prospects to Sarah Outbound Caller');
     } finally {
-      setBlandBusy(false);
+      setSarahBusy(false);
     }
   };
 
-  const handleStartBlandOutboundCalls = async (targetLeadIds?: string[]) => {
-    setBlandBusy(true);
-    setBlandBannerMsg('');
+  const handleStartSarahOutboundCalls = async (targetLeadIds?: string[]) => {
+    setSarahBusy(true);
+    setSarahBannerMsg('');
     try {
       const idsToCall = targetLeadIds && targetLeadIds.length > 0
         ? targetLeadIds
         : (selectedIds.length > 0 ? selectedIds : undefined);
-      const res = await api.post('/bland/activate', {
+      const res = await api.post('/sarah/activate', {
         lead_ids: idsToCall,
         continue_queue: true,
       });
-      setIsBlandActive(true);
-      setBlandBannerMsg(res.message || '📞 Sarah Outbound Caller + Google Voice (480) 331-9455 activated! Outbound calls have started.');
+      setIsSarahActive(true);
+      setSarahBannerMsg(res.message || '📞 Sarah Outbound Caller + Google Voice (480) 331-9455 activated! Outbound calls have started.');
       const firstDispatched = res.dispatched?.[0];
       const firstLead = idsToCall?.length ? leads.find((l) => l.id === idsToCall[0]) : leads[0];
       const dialPhone = firstDispatched?.phone || firstLead?.phone || '';
@@ -152,31 +152,31 @@ export const LeadsPage: React.FC = () => {
           },
         })
       );
-      if (res.calling_window) setBlandWindow(res.calling_window);
+      if (res.calling_window) setSarahWindow(res.calling_window);
       if (idsToCall) setSelectedIds([]);
-      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      window.dispatchEvent(new CustomEvent('iwg-sarah-status-changed'));
       loadLeads();
       loadPoolStats();
-      loadBlandStatus();
+      loadSarahStatus();
     } catch (err: any) {
       alert(err.message || 'Failed to start Sarah Outbound Caller calls');
     } finally {
-      setBlandBusy(false);
+      setSarahBusy(false);
     }
   };
 
-  const handleStopBlandOutboundCalls = async () => {
-    setBlandBusy(true);
+  const handleStopSarahOutboundCalls = async () => {
+    setSarahBusy(true);
     try {
-      const res = await api.post('/bland/stop', { stop_all: true });
-      setIsBlandActive(false);
-      setBlandBannerMsg(res.message || '🛑 Sarah Outbound Caller calls and queue dialing have been stopped.');
-      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      const res = await api.post('/sarah/stop', { stop_all: true });
+      setIsSarahActive(false);
+      setSarahBannerMsg(res.message || '🛑 Sarah Outbound Caller calls and queue dialing have been stopped.');
+      window.dispatchEvent(new CustomEvent('iwg-sarah-status-changed'));
       loadLeads();
     } catch (err: any) {
       alert(err.message || 'Failed to stop Sarah Outbound Caller calls');
     } finally {
-      setBlandBusy(false);
+      setSarahBusy(false);
     }
   };
 
@@ -221,18 +221,18 @@ export const LeadsPage: React.FC = () => {
   useEffect(() => {
     loadLeads();
     loadPoolStats();
-    loadBlandStatus();
+    loadSarahStatus();
 
     const handleLeadUpdated = () => {
       loadLeads();
       loadPoolStats();
-      loadBlandStatus();
+      loadSarahStatus();
     };
     window.addEventListener('iwg-lead-updated', handleLeadUpdated);
-    window.addEventListener('iwg-bland-status-changed', loadBlandStatus);
+    window.addEventListener('iwg-sarah-status-changed', loadSarahStatus);
     return () => {
       window.removeEventListener('iwg-lead-updated', handleLeadUpdated);
-      window.removeEventListener('iwg-bland-status-changed', loadBlandStatus);
+      window.removeEventListener('iwg-sarah-status-changed', loadSarahStatus);
     };
   }, [statusFilter, sourceFilter, callerFilter, t65Filter, searchQuery]);
 
@@ -823,7 +823,7 @@ export const LeadsPage: React.FC = () => {
             </button>
           )}
 
-          {/* Bland AI Start / Stop Outbound Calls Control Group */}
+          {/* Sarah Voice Engine Start / Stop Outbound Calls Control Group */}
           <div
             style={{
               display: 'inline-flex',
@@ -831,15 +831,15 @@ export const LeadsPage: React.FC = () => {
               gap: '0.4rem',
               padding: '0.25rem 0.4rem',
               borderRadius: '10px',
-              background: isBlandActive ? 'rgba(16, 185, 129, 0.14)' : 'rgba(139, 92, 246, 0.12)',
-              border: `1.5px solid ${isBlandActive ? '#10b981' : '#8b5cf6'}`,
+              background: isSarahActive ? 'rgba(16, 185, 129, 0.14)' : 'rgba(139, 92, 246, 0.12)',
+              border: `1.5px solid ${isSarahActive ? '#10b981' : '#8b5cf6'}`,
             }}
           >
             <button
               type="button"
               className="btn"
-              disabled={blandBusy}
-              onClick={() => handleStartBlandOutboundCalls()}
+              disabled={sarahBusy}
+              onClick={() => handleStartSarahOutboundCalls()}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -851,17 +851,17 @@ export const LeadsPage: React.FC = () => {
                 borderColor: '#10b981',
                 color: '#fff',
                 boxShadow: '0 3px 10px rgba(16, 185, 129, 0.35)',
-                cursor: blandBusy ? 'not-allowed' : 'pointer',
+                cursor: sarahBusy ? 'not-allowed' : 'pointer',
               }}
               title="Start Sarah Voice AI autonomous outbound calls right now"
             >
-              <span>▶</span> {blandBusy ? 'Working...' : (selectedIds.length > 0 ? `Start Sarah AI (${selectedIds.length})` : 'Start Sarah AI Calls')}
+              <span>▶</span> {sarahBusy ? 'Working...' : (selectedIds.length > 0 ? `Start Sarah AI (${selectedIds.length})` : 'Start Sarah AI Calls')}
             </button>
             <button
               type="button"
               className="btn"
-              disabled={blandBusy}
-              onClick={handleStopBlandOutboundCalls}
+              disabled={sarahBusy}
+              onClick={handleStopSarahOutboundCalls}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -872,7 +872,7 @@ export const LeadsPage: React.FC = () => {
                 background: 'rgba(239, 68, 68, 0.22)',
                 borderColor: '#ef4444',
                 color: '#fca5a5',
-                cursor: blandBusy ? 'not-allowed' : 'pointer',
+                cursor: sarahBusy ? 'not-allowed' : 'pointer',
               }}
               title="Stop all active Sarah Voice AI outbound calls and halt queue dialing"
             >
@@ -957,8 +957,8 @@ export const LeadsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Live Bland AI Status Banner */}
-      {(blandBannerMsg || isBlandActive) && (
+      {/* Live Sarah Voice Engine Status Banner */}
+      {(sarahBannerMsg || isSarahActive) && (
         <div
           style={{
             display: 'flex',
@@ -968,30 +968,30 @@ export const LeadsPage: React.FC = () => {
             gap: '0.75rem',
             padding: '0.75rem 1.1rem',
             borderRadius: '10px',
-            background: isBlandActive ? 'rgba(16, 185, 129, 0.14)' : 'rgba(245, 158, 11, 0.14)',
-            border: `1.5px solid ${isBlandActive ? '#10b981' : '#f59e0b'}`,
-            color: isBlandActive ? '#6ee7b7' : '#fde68a',
+            background: isSarahActive ? 'rgba(16, 185, 129, 0.14)' : 'rgba(245, 158, 11, 0.14)',
+            border: `1.5px solid ${isSarahActive ? '#10b981' : '#f59e0b'}`,
+            color: isSarahActive ? '#6ee7b7' : '#fde68a',
             fontSize: '0.86rem',
             fontWeight: 700,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>{isBlandActive ? '🟢' : '🛑'}</span>
+            <span>{isSarahActive ? '🟢' : '🛑'}</span>
             <span>
-              {blandBannerMsg || `🎙️ Sarah Voice AI (480) 331-9455 is ACTIVE — automatically calling every prospect assigned to Sarah AI (${blandAssigned.remaining_today} of ${blandAssigned.assigned_total} still to call today).`}
+              {sarahBannerMsg || `🎙️ Sarah Voice AI (480) 331-9455 is ACTIVE — automatically calling every prospect assigned to Sarah AI (${sarahAssigned.remaining_today} of ${sarahAssigned.assigned_total} still to call today).`}
               <span style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: '#cbd5e1', marginTop: '0.2rem' }}>
                 🕘 Outbound hours: Mon–Fri 9:00 AM–7:00 PM · Sat–Sun 9:00 AM–6:00 PM (Arizona time)
-                {blandWindow ? (blandWindow.open ? ` · Calling now (${blandWindow.today})` : ` · Closed now — ${blandWindow.next_open || ''}`) : ''}
+                {sarahWindow ? (sarahWindow.open ? ` · Calling now (${sarahWindow.today})` : ` · Closed now — ${sarahWindow.next_open || ''}`) : ''}
                 {' '}· 📞 Inbound calls answered immediately 24/7
               </span>
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            {isBlandActive ? (
+            {isSarahActive ? (
               <button
                 type="button"
-                disabled={blandBusy}
-                onClick={handleStopBlandOutboundCalls}
+                disabled={sarahBusy}
+                onClick={handleStopSarahOutboundCalls}
                 style={{
                   padding: '0.35rem 0.85rem',
                   borderRadius: '6px',
@@ -1008,8 +1008,8 @@ export const LeadsPage: React.FC = () => {
             ) : (
               <button
                 type="button"
-                disabled={blandBusy}
-                onClick={() => handleStartBlandOutboundCalls()}
+                disabled={sarahBusy}
+                onClick={() => handleStartSarahOutboundCalls()}
                 style={{
                   padding: '0.35rem 0.85rem',
                   borderRadius: '6px',
@@ -1024,10 +1024,10 @@ export const LeadsPage: React.FC = () => {
                 ▶ Start Outbound Calls Again
               </button>
             )}
-            {blandBannerMsg && (
+            {sarahBannerMsg && (
               <button
                 type="button"
-                onClick={() => setBlandBannerMsg('')}
+                onClick={() => setSarahBannerMsg('')}
                 style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: '0.9rem' }}
               >
                 ✕
@@ -1060,7 +1060,7 @@ export const LeadsPage: React.FC = () => {
               const isKing = c.id === 'u_principal' || c.email?.toLowerCase() === 'king@iwillglobal.com';
               return (
                 <option key={c.id} value={c.id}>
-                  {isKing ? `👑 King Amen Ra — Principal & Broker (${c.assigned_leads_count || 0} leads)` : c.id === 'u_bland_ai' ? `🎙️ Sarah Voice AI (480) 331-9455 — Auto-Dialer Queue (${c.assigned_leads_count || 0} leads)` : `👤 ${c.name} (${c.assigned_leads_count || 0} leads)`}
+                  {isKing ? `👑 King Amen Ra — Principal & Broker (${c.assigned_leads_count || 0} leads)` : c.id === 'u_sarah_ai' ? `🎙️ Sarah Voice AI (480) 331-9455 — Auto-Dialer Queue (${c.assigned_leads_count || 0} leads)` : `👤 ${c.name} (${c.assigned_leads_count || 0} leads)`}
                 </option>
               );
             })}
@@ -1425,8 +1425,8 @@ export const LeadsPage: React.FC = () => {
             <button
               type="button"
               className="btn"
-              disabled={blandBusy}
-              onClick={() => handleStartBlandOutboundCalls(selectedIds)}
+              disabled={sarahBusy}
+              onClick={() => handleStartSarahOutboundCalls(selectedIds)}
               style={{
                 padding: '0.45rem 0.85rem',
                 fontSize: '0.85rem',
@@ -1446,8 +1446,8 @@ export const LeadsPage: React.FC = () => {
             <button
               type="button"
               className="btn"
-              disabled={blandBusy}
-              onClick={() => handleAssignToBland(selectedIds)}
+              disabled={sarahBusy}
+              onClick={() => handleAssignToSarah(selectedIds)}
               style={{
                 padding: '0.45rem 0.85rem',
                 fontSize: '0.85rem',
@@ -1467,8 +1467,8 @@ export const LeadsPage: React.FC = () => {
             <button
               type="button"
               className="btn"
-              disabled={blandBusy}
-              onClick={handleStopBlandOutboundCalls}
+              disabled={sarahBusy}
+              onClick={handleStopSarahOutboundCalls}
               style={{
                 padding: '0.45rem 0.85rem',
                 fontSize: '0.85rem',

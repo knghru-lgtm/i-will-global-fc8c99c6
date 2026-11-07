@@ -67,7 +67,7 @@ export const PublicTeamDirectorySection: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   useEffect(() => {
-    fetch('/api/bland/public-directory')
+    fetch('/api/sarah/public-directory')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data && Array.isArray(data.directory) && data.directory.length > 0) {

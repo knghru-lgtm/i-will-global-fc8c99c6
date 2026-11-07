@@ -111,7 +111,7 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
 
     Promise.all([
       api.get(`/appointments/available-agents?state=${encodeURIComponent(contactState)}`).catch(() => []),
-      api.get('/bland/directory').catch(() => ({ directory: [] })),
+      api.get('/sarah/directory').catch(() => ({ directory: [] })),
     ])
       .then(([res, dirRes]) => {
         const kingMatches = (res || []).filter((a: any) =>
@@ -207,7 +207,7 @@ export const WarmTransferModal: React.FC<WarmTransferModalProps> = ({
     if (autoAiWhisper) {
       speakAiWhisper(whisperBriefingText);
       setAiWhisperStatus(`🤖 Sarah AI is automatically whispering the briefing to ${selectedAgent?.name || 'King Amen Ra'}...`);
-      api.post('/bland/whisper-transfer', {
+      api.post('/sarah/whisper-transfer', {
         recipient_name: selectedAgent?.name || 'King Amen Ra',
         recipient_phone: agentPhone,
         prospect_name: contactName,

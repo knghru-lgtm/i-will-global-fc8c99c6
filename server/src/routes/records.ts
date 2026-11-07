@@ -279,10 +279,10 @@ records.post('/batch-import/leads', async (req, res) => {
 
     const result = await batchInsertLeads(rawLeads, caller_id || null, guard_duplicates !== false);
 
-    // Imported straight to Bland AI => start dialing immediately (inside calling hours, if the campaign is active)
-    if (caller_id === 'u_bland_ai' && result.imported > 0) {
-      const { runBlandAutoDialerTick } = await import('../services/bland.ts');
-      await runBlandAutoDialerTick({ reason: 'import' }).catch(() => {});
+    // Imported straight to Sarah Voice Engine => start dialing immediately (inside calling hours, if the campaign is active)
+    if (caller_id === 'u_sarah_ai' && result.imported > 0) {
+      const { runSarahAutoDialerTick } = await import('../services/sarahDialer.ts');
+      await runSarahAutoDialerTick({ reason: 'import' }).catch(() => {});
     }
     await audit(req.user!.id, 'bulk_import', 'leads', '', {
       count: result.imported,
@@ -385,7 +385,7 @@ records.get('/leads/pool-stats', async (req, res) => {
       LEFT JOIN leads l ON l.owner_id = u.id AND l.status != 'DNC'
       WHERE u.active = true AND u.role IN ('scheduler', 'licensed_agent', 'admin', 'manager')
       GROUP BY u.id, u.name, u.email, u.role, u.title
-      ORDER BY (CASE WHEN u.id = 'u_principal' OR lower(u.email) = 'king@iwillglobal.com' THEN 0 WHEN u.id = 'u_bland_ai' THEN 1 ELSE 2 END), u.role DESC, u.name ASC
+      ORDER BY (CASE WHEN u.id = 'u_principal' OR lower(u.email) = 'king@iwillglobal.com' THEN 0 WHEN u.id = 'u_sarah_ai' THEN 1 ELSE 2 END), u.role DESC, u.name ASC
     `);
 
     res.json({
@@ -479,10 +479,10 @@ records.post('/leads/assign-bulk', async (req, res) => {
     const updated = await q(sql, params);
     const assignedCount = updated.length;
 
-    // Prospects assigned to Bland AI are dialed right away (inside calling hours, if the campaign is active)
-    if (caller.id === 'u_bland_ai' && assignedCount > 0) {
-      const { runBlandAutoDialerTick } = await import('../services/bland.ts');
-      await runBlandAutoDialerTick({ reason: 'assign_bulk' }).catch(() => {});
+    // Prospects assigned to Sarah Voice Engine are dialed right away (inside calling hours, if the campaign is active)
+    if (caller.id === 'u_sarah_ai' && assignedCount > 0) {
+      const { runSarahAutoDialerTick } = await import('../services/sarahDialer.ts');
+      await runSarahAutoDialerTick({ reason: 'assign_bulk' }).catch(() => {});
     }
 
     const remaining = await one<{ n: number }>(
@@ -540,10 +540,10 @@ records.post('/leads/assign-selected', async (req, res) => {
 
     await q(`UPDATE leads SET owner_id = $1, updated_at = now() WHERE id = ANY($2)`, [caller_id, lead_ids]);
 
-    // Prospects assigned to Bland AI are dialed right away (inside calling hours, if the campaign is active)
-    if (caller_id === 'u_bland_ai') {
-      const { runBlandAutoDialerTick } = await import('../services/bland.ts');
-      await runBlandAutoDialerTick({ reason: 'assign_selected' }).catch(() => {});
+    // Prospects assigned to Sarah Voice Engine are dialed right away (inside calling hours, if the campaign is active)
+    if (caller_id === 'u_sarah_ai') {
+      const { runSarahAutoDialerTick } = await import('../services/sarahDialer.ts');
+      await runSarahAutoDialerTick({ reason: 'assign_selected' }).catch(() => {});
     }
 
     await audit(req.user!.id, 'selected_assign', 'leads', '', {

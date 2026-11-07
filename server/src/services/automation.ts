@@ -310,14 +310,14 @@ export async function applyDisposition(ctx: ApplyCtx): Promise<{ actions: string
                    ctx.user.email?.toLowerCase() === 'king@iwillglobal.com' ||
                    ctx.user.name?.toLowerCase().includes('king');
     if (isKing || ctx.user.role === 'licensed_agent' || ctx.user.role === 'admin' || ctx.user.role === 'manager') {
-      const { getBlandConfig, setBlandCallingPause } = await import('./bland.ts');
-      const bCfg = await getBlandConfig();
+      const { getSarahDialerConfig, setSarahCallingPause } = await import('./sarahDialer.ts');
+      const bCfg = await getSarahDialerConfig();
       if (bCfg.is_calling_paused) {
-        await setBlandCallingPause(false, null);
+        await setSarahCallingPause(false, null);
         actions.push('Resumed Sarah Outbound Caller following lead disposition');
       }
     }
-  } catch (blandErr) {
+  } catch (sarahErr) {
     // Non-blocking
   }
 

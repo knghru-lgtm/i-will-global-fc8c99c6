@@ -30,8 +30,8 @@ export const TeamPage: React.FC = () => {
   const [formActive, setFormActive] = useState(true);
 
   const isSarahRow = (u: any) =>
-    u?.id === 'u_bland_ai' ||
-    /sarah.*voice ai|bland/i.test(`${u?.name || ''} ${u?.email || ''} ${u?.title || ''}`);
+    u?.id === 'u_sarah_ai' ||
+    /sarah.*voice ai|sarah/i.test(`${u?.name || ''} ${u?.email || ''} ${u?.title || ''}`);
 
   const fetchTeam = async () => {
     try {
@@ -64,7 +64,7 @@ export const TeamPage: React.FC = () => {
     setActivatingSarah(true);
     setSarahBannerMsg('');
     try {
-      const res = await api.post('/bland/activate', {
+      const res = await api.post('/sarah/activate', {
         phone_number: targetPhone || undefined,
       });
       const firstDispatched = res?.dispatched?.[0];

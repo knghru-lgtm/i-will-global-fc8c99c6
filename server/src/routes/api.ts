@@ -381,22 +381,22 @@ api.get('/team', async (req, res) => {
   if (req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Access denied: Team Directory is only available to Admins' });
   }
-  // Ensure Sarah Voice AI (u_bland_ai) is always labeled with her live (480) 331-9455 reception & outbound identity
+  // Ensure Sarah Voice AI (u_sarah_ai) is always labeled with her live (480) 331-9455 reception & outbound identity
   await q(
     `UPDATE users
         SET name = 'Sarah — Voice AI Receptionist & Outbound Caller',
             title = 'Autonomous Voice AI Outbound Caller & Receptionist (480) 331-9455',
             phone = '(480) 331-9455',
             active = true
-      WHERE id = 'u_bland_ai'
-         OR lower(email) IN ('bland@iwillglobal.com', 'bland-ai@iwillglobal.com', 'sarah@iwillglobal.com')`
+      WHERE id = 'u_sarah_ai'
+         OR lower(email) IN ('receptionist@iwillglobal.com', 'voice@iwillglobal.com', 'sarah@iwillglobal.com')`
   );
   const users = await q(`
     SELECT id, name, email, role, title, phone, npn, states, avatar_color, active, google_meet_url
       FROM users
      ORDER BY
        CASE
-         WHEN id = 'u_bland_ai' OR lower(email) IN ('sarah@iwillglobal.com', 'bland@iwillglobal.com', 'bland-ai@iwillglobal.com') THEN 0
+         WHEN id = 'u_sarah_ai' OR lower(email) IN ('sarah@iwillglobal.com', 'receptionist@iwillglobal.com', 'voice@iwillglobal.com') THEN 0
          WHEN id = 'u_principal' OR lower(email) = 'king@iwillglobal.com' THEN 1
          WHEN id = 'u_coo' OR lower(email) = 'aneesha@iwillglobal.com' THEN 2
          ELSE 3

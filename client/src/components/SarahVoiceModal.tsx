@@ -577,7 +577,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const recipientName = transferObj?.recipient_name || 'King Amen Ra';
     const recipientPhone = transferObj?.recipient_phone || '+16024569681';
     const activeCtx = sessionCtxRef.current;
-    const liveCallId = transferObj?.bland_call_id || null;
+    const liveCallId = transferObj?.sarah_call_id || null;
 
     // Step 1: Place the customer on hold and dial 602-456-9681 FIRST (never announce connection yet!)
     setTranslineStage('dialing_transline');
@@ -1086,7 +1086,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     if (dialGoogleVoice && lead.phone) {
       openGoogleVoiceWindow(lead.phone);
       api
-        .post('/bland/call', {
+        .post('/sarah/call', {
           phone: lead.phone,
           lead_id: lead.id,
           prospect_name: fullName,
@@ -1109,10 +1109,10 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     if (!isAdmin) return;
     setIsWorkdayActive(true);
     try {
-      const res: any = await api.post('/bland/activate', {
+      const res: any = await api.post('/sarah/activate', {
         phone: prospectPhone || undefined,
       });
-      window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+      window.dispatchEvent(new CustomEvent('iwg-sarah-status-changed'));
       window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
       if (leadQueue.length > 0) {
         selectQueueLead(queueIndex, true);
@@ -1777,7 +1777,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 onClick={() => {
                   if (prospectPhone) {
                     openGoogleVoiceWindow(prospectPhone);
-                    api.post('/bland/call', {
+                    api.post('/sarah/call', {
                       phone: prospectPhone,
                       lead_id: leadId || undefined,
                       prospect_name: prospectName,

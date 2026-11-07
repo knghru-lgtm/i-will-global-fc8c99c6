@@ -7,20 +7,20 @@ export const DashboardPage: React.FC = () => {
   const { isScheduler } = useAuth();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [blandConfig, setBlandConfig] = useState<any>(null);
-  const [activatingBland, setActivatingBland] = useState(false);
-  const [blandQuickPhone, setBlandQuickPhone] = useState('');
-  const [blandBannerMsg, setBlandBannerMsg] = useState('');
+  const [sarahConfig, setSarahDialerConfig] = useState<any>(null);
+  const [activatingSarah, setActivatingSarah] = useState(false);
+  const [sarahQuickPhone, setSarahQuickPhone] = useState('');
+  const [sarahBannerMsg, setSarahBannerMsg] = useState('');
 
   useEffect(() => {
     api.get('/dashboard')
       .then((res) => setData(res))
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
-    const loadBland = () => api.get('/bland/config').then((c) => setBlandConfig(c)).catch(() => { });
-    loadBland();
-    window.addEventListener('iwg-bland-status-changed', loadBland);
-    return () => window.removeEventListener('iwg-bland-status-changed', loadBland);
+    const loadSarah = () => api.get('/sarah/config').then((c) => setSarahDialerConfig(c)).catch(() => { });
+    loadSarah();
+    window.addEventListener('iwg-sarah-status-changed', loadSarah);
+    return () => window.removeEventListener('iwg-sarah-status-changed', loadSarah);
   }, []);
 
   if (loading) return <div style={{ color: 'var(--text-muted)', padding: '2rem' }}>Loading dashboard...</div>;
@@ -78,13 +78,13 @@ export const DashboardPage: React.FC = () => {
         </div>
       ) : null}
 
-      {/* Bland Agent AI Activation & Warm Transfer Appointment-Only Control Bar */}
+      {/* Sarah Agent AI Activation & Warm Transfer Appointment-Only Control Bar */}
       <div
         style={{
-          background: blandConfig?.is_on_warm_transfer
+          background: sarahConfig?.is_on_warm_transfer
             ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(88, 28, 135, 0.35))'
             : 'linear-gradient(135deg, rgba(124, 58, 237, 0.22), rgba(15, 23, 42, 0.95))',
-          border: blandConfig?.is_on_warm_transfer ? '2px solid #f59e0b' : '1.5px solid #8b5cf6',
+          border: sarahConfig?.is_on_warm_transfer ? '2px solid #f59e0b' : '1.5px solid #8b5cf6',
           borderRadius: '16px',
           padding: '1.25rem 1.5rem',
           display: 'flex',
@@ -95,7 +95,7 @@ export const DashboardPage: React.FC = () => {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-            <div style={{ fontSize: '2rem' }}>{blandConfig?.is_on_warm_transfer ? '🔥🤖' : '🤖'}</div>
+            <div style={{ fontSize: '2rem' }}>{sarahConfig?.is_on_warm_transfer ? '🔥🤖' : '🤖'}</div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', margin: 0 }}>
@@ -107,20 +107,20 @@ export const DashboardPage: React.FC = () => {
                     fontWeight: 800,
                     padding: '2px 9px',
                     borderRadius: '999px',
-                    background: blandConfig?.is_on_warm_transfer ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 185, 129, 0.2)',
-                    border: `1px solid ${blandConfig?.is_on_warm_transfer ? '#f59e0b' : '#10b981'}`,
-                    color: blandConfig?.is_on_warm_transfer ? '#fcd34d' : '#34d399',
+                    background: sarahConfig?.is_on_warm_transfer ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 185, 129, 0.2)',
+                    border: `1px solid ${sarahConfig?.is_on_warm_transfer ? '#f59e0b' : '#10b981'}`,
+                    color: sarahConfig?.is_on_warm_transfer ? '#fcd34d' : '#34d399',
                   }}
                 >
-                  {blandConfig?.is_on_warm_transfer
+                  {sarahConfig?.is_on_warm_transfer
                     ? '🔥 ON WARM TRANSFER: BOOKING TELEPHONE / IN-PERSON / VIDEO APPTS ONLY & CONTINUING CALLS'
-                    : blandConfig?.is_campaign_active
+                    : sarahConfig?.is_campaign_active
                       ? '● ACTIVE & MAKING CALLS'
                       : '● READY TO CALL'}
                 </span>
               </div>
               <div style={{ fontSize: '0.83rem', color: '#cbd5e1', marginTop: '0.25rem' }}>
-                {blandConfig?.is_on_warm_transfer
+                {sarahConfig?.is_on_warm_transfer
                   ? 'Sarah knows you are on a warm transfer call — she will ONLY select Telephone (30m), In-Person (60m), or Video (30m) appointments and continue dialing.'
                   : 'Activate Sarah Voice AI on (480) 331-9455 to begin making calls, warm-transferring to +1 (602) 456-9681, or booking Telephone, In-Person, or Video appointments.'}
               </div>
@@ -130,8 +130,8 @@ export const DashboardPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
             <input
               type="text"
-              value={blandQuickPhone}
-              onChange={(e) => setBlandQuickPhone(e.target.value)}
+              value={sarahQuickPhone}
+              onChange={(e) => setSarahQuickPhone(e.target.value)}
               placeholder="4803345557"
               style={{
                 width: '145px',
@@ -147,15 +147,15 @@ export const DashboardPage: React.FC = () => {
             />
             <button
               type="button"
-              disabled={activatingBland}
+              disabled={activatingSarah}
               onClick={async () => {
-                setActivatingBland(true);
-                setBlandBannerMsg('');
-                const manualPhone = blandQuickPhone.trim();
+                setActivatingSarah(true);
+                setSarahBannerMsg('');
+                const manualPhone = sarahQuickPhone.trim();
                 try {
-                  const res = await api.post('/bland/activate', {
+                  const res = await api.post('/sarah/activate', {
                     phone: manualPhone || undefined,
-                    on_warm_transfer: Boolean(blandConfig?.is_on_warm_transfer),
+                    on_warm_transfer: Boolean(sarahConfig?.is_on_warm_transfer),
                     continue_queue: true,
                   });
                   const firstDispatched = res.dispatched?.[0];
@@ -170,16 +170,16 @@ export const DashboardPage: React.FC = () => {
                         prospect_name: dialName,
                         phone: dialPhone,
                         state: 'AZ',
-                        on_warm_transfer: Boolean(blandConfig?.is_on_warm_transfer),
+                        on_warm_transfer: Boolean(sarahConfig?.is_on_warm_transfer),
                       },
                     })
                   );
-                  setBlandBannerMsg(res.message || 'Sarah Outbound Caller + Google Voice (480) 331-9455 activated!');
-                  window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+                  setSarahBannerMsg(res.message || 'Sarah Outbound Caller + Google Voice (480) 331-9455 activated!');
+                  window.dispatchEvent(new CustomEvent('iwg-sarah-status-changed'));
                 } catch (err: any) {
-                  setBlandBannerMsg('⚠️ ' + (err.message || 'Failed to activate Sarah Outbound Caller'));
+                  setSarahBannerMsg('⚠️ ' + (err.message || 'Failed to activate Sarah Outbound Caller'));
                 } finally {
-                  setActivatingBland(false);
+                  setActivatingSarah(false);
                 }
               }}
               style={{
@@ -194,33 +194,33 @@ export const DashboardPage: React.FC = () => {
                 boxShadow: '0 4px 14px rgba(139, 92, 246, 0.45)',
               }}
             >
-              {activatingBland ? 'Dialing...' : `🚀 Activate Sarah AI & Call ${blandQuickPhone || 'Queue'}`}
+              {activatingSarah ? 'Dialing...' : `🚀 Activate Sarah AI & Call ${sarahQuickPhone || 'Queue'}`}
             </button>
             <button
               type="button"
               onClick={async () => {
-                const nextWarm = !blandConfig?.is_on_warm_transfer;
+                const nextWarm = !sarahConfig?.is_on_warm_transfer;
                 try {
-                  const res = await api.post('/bland/warm-transfer-mode', { on_warm_transfer: nextWarm });
-                  setBlandConfig((prev: any) => ({ ...(prev || {}), is_on_warm_transfer: nextWarm }));
-                  setBlandBannerMsg(res.message);
-                  window.dispatchEvent(new CustomEvent('iwg-bland-status-changed'));
+                  const res = await api.post('/sarah/warm-transfer-mode', { on_warm_transfer: nextWarm });
+                  setSarahDialerConfig((prev: any) => ({ ...(prev || {}), is_on_warm_transfer: nextWarm }));
+                  setSarahBannerMsg(res.message);
+                  window.dispatchEvent(new CustomEvent('iwg-sarah-status-changed'));
                 } catch (err: any) {
-                  setBlandBannerMsg('⚠️ ' + err.message);
+                  setSarahBannerMsg('⚠️ ' + err.message);
                 }
               }}
               style={{
                 padding: '0.6rem 0.95rem',
                 borderRadius: '8px',
-                border: blandConfig?.is_on_warm_transfer ? '1.5px solid #10b981' : '1.5px solid #f59e0b',
-                background: blandConfig?.is_on_warm_transfer ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.18)',
-                color: blandConfig?.is_on_warm_transfer ? '#6ee7b7' : '#fcd34d',
+                border: sarahConfig?.is_on_warm_transfer ? '1.5px solid #10b981' : '1.5px solid #f59e0b',
+                background: sarahConfig?.is_on_warm_transfer ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.18)',
+                color: sarahConfig?.is_on_warm_transfer ? '#6ee7b7' : '#fcd34d',
                 fontWeight: 800,
                 fontSize: '0.82rem',
                 cursor: 'pointer',
               }}
             >
-              {blandConfig?.is_on_warm_transfer ? '✅ End Warm Transfer Mode' : '🔥 I Am On Warm Transfer (Appt-Only Mode)'}
+              {sarahConfig?.is_on_warm_transfer ? '✅ End Warm Transfer Mode' : '🔥 I Am On Warm Transfer (Appt-Only Mode)'}
             </button>
             <button
               type="button"
@@ -240,9 +240,9 @@ export const DashboardPage: React.FC = () => {
             </button>
           </div>
         </div>
-        {blandBannerMsg && (
+        {sarahBannerMsg && (
           <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#6ee7b7', background: 'rgba(0,0,0,0.25)', padding: '0.45rem 0.75rem', borderRadius: '8px' }}>
-            {blandBannerMsg}
+            {sarahBannerMsg}
           </div>
         )}
       </div>

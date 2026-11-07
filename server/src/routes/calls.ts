@@ -8,7 +8,7 @@ import { buildWhere } from './records.ts';
 import { isManager, isAdminUser } from '../auth.ts';
 import { summarizeCall } from '../services/ai/index.ts';
 import { TPMO_DISCLAIMER } from '../config.ts';
-import { setWarmTransferStatus, buildAiWhisperScripts } from '../services/bland.ts';
+import { setWarmTransferStatus, buildAiWhisperScripts } from '../services/sarahDialer.ts';
 
 export const calls = Router();
 

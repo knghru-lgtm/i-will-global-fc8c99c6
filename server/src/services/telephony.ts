@@ -46,20 +46,20 @@ export const GoogleVoiceProvider: TelephonyProvider = {
   },
 };
 
-export const BlandAIProvider: TelephonyProvider = {
-  id: 'bland_ai',
+export const SarahVoiceProvider: TelephonyProvider = {
+  id: 'google_voice_ai',
   label: 'Sarah Outbound Caller & Receptionist — Google Voice (480) 331-9455',
   prepareDial(phone) {
     const e164 = toE164(phone);
     if (!e164) return null;
     return {
-      provider: 'bland_ai',
+      provider: 'google_voice_ai',
       e164,
       callerIdName: 'Medicare Helpline by IWG',
       cnam: 'MEDICARE BY IWG',
       stirShakenLevel: 'A',
       brandedCalling: true,
-      webUrl: `/dialer?bland_call=${encodeURIComponent(e164)}`,
+      webUrl: `/dialer?sarah_call=${encodeURIComponent(e164)}`,
       mobileUrl: telUrl(e164),
       autoLogs: true,
       records: true,
@@ -245,6 +245,6 @@ export async function placeCarrierTrunkCall(params: {
 
 export function getProvider(id = 'google_voice'): TelephonyProvider {
   if (id === 'enterprise_trunk') return EnterpriseTrunkProvider;
-  if (id === 'bland_ai') return BlandAIProvider;
+  if (id === 'google_voice_ai') return SarahVoiceProvider;
   return GoogleVoiceProvider;
 }

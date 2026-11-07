@@ -25,7 +25,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const [isQuotingMenuOpen, setIsQuotingMenuOpen] = useState(false);
   const [copilotDispositionContact, setCopilotDispositionContact] = useState<any>(null);
   const [isWarmTransferOpen, setIsWarmTransferOpen] = useState(false);
-  const [blandStatus, setBlandStatus] = useState<{ is_campaign_active: boolean; is_on_warm_transfer: boolean }>({ is_campaign_active: false, is_on_warm_transfer: false });
+  const [sarahStatus, setSarahStatus] = useState<{ is_campaign_active: boolean; is_on_warm_transfer: boolean }>({ is_campaign_active: false, is_on_warm_transfer: false });
   const headerScrollRef = React.useRef<HTMLDivElement | null>(null);
 
   const scrollHeaderToolbar = (direction: 'left' | 'right') => {
@@ -37,11 +37,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   };
 
   React.useEffect(() => {
-    const refreshBland = () => {
-      api.get('/bland/config')
+    const refreshSarah = () => {
+      api.get('/sarah/config')
         .then((res) => {
           if (res) {
-            setBlandStatus({
+            setSarahStatus({
               is_campaign_active: Boolean(res.is_campaign_active),
               is_on_warm_transfer: Boolean(res.is_on_warm_transfer),
             });
@@ -49,12 +49,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         })
         .catch(() => {});
     };
-    refreshBland();
+    refreshSarah();
     const openSarahOutbound = () => {
       window.dispatchEvent(new CustomEvent('iwg-open-sarah-voice', { detail: { mode: 'outbound' } }));
     };
-    window.addEventListener('iwg-bland-status-changed', refreshBland);
-    window.addEventListener('open-bland-ai-control', openSarahOutbound);
+    window.addEventListener('iwg-sarah-status-changed', refreshSarah);
+    window.addEventListener('open-sarah-ai-control', openSarahOutbound);
 
     // Subscribe to real-time inbound call events on (480) 331-9455 so Receptionist answers immediately
     let es: EventSource | null = null;
@@ -84,8 +84,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     } catch {}
 
     return () => {
-      window.removeEventListener('iwg-bland-status-changed', refreshBland);
-      window.removeEventListener('open-bland-ai-control', openSarahOutbound);
+      window.removeEventListener('iwg-sarah-status-changed', refreshSarah);
+      window.removeEventListener('open-sarah-ai-control', openSarahOutbound);
       if (es) {
         try {
           es.close();
@@ -94,12 +94,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     };
   }, []);
 
-  // Optional Bland AI dialer nudge while the CRM happens to be open. NOT required: the server dials on its own
+  // Optional Sarah Voice Engine dialer nudge while the CRM happens to be open. NOT required: the server dials on its own
   // (call-completion webhook chain + Vercel Cron every 15 minutes), so no one needs to be logged in.
   React.useEffect(() => {
-    if (!blandStatus.is_campaign_active) return;
+    if (!sarahStatus.is_campaign_active) return;
     const beat = () => {
-      api.post('/bland/tick', {})
+      api.post('/sarah/tick', {})
         .then((res: any) => {
           if (res?.dispatched?.length) {
             window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
@@ -110,7 +110,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     beat();
     const interval = setInterval(beat, 60_000);
     return () => clearInterval(interval);
-  }, [blandStatus.is_campaign_active]);
+  }, [sarahStatus.is_campaign_active]);
 
   // Close mobile drawer and quoting menu on route navigation
   React.useEffect(() => {
@@ -374,22 +374,22 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 }
                 title="Admin Only: Launch Receptionist & Outbound Caller on (480) 331-9455"
                 style={{
-                  background: blandStatus.is_on_warm_transfer
+                  background: sarahStatus.is_on_warm_transfer
                     ? 'linear-gradient(135deg, #f59e0b, #7c3aed)'
-                    : blandStatus.is_campaign_active
+                    : sarahStatus.is_campaign_active
                     ? 'linear-gradient(135deg, #059669, #7c3aed)'
                     : 'linear-gradient(135deg, #7c3aed, #9333ea)',
-                  borderColor: blandStatus.is_on_warm_transfer ? '#fbbf24' : '#a855f7',
+                  borderColor: sarahStatus.is_on_warm_transfer ? '#fbbf24' : '#a855f7',
                   color: '#ffffff',
                   fontWeight: 800,
                   boxShadow: '0 0 14px rgba(139, 92, 246, 0.45)',
                 }}
               >
-                <span>{blandStatus.is_on_warm_transfer ? '🔥🎙️' : '🚀'}</span>
+                <span>{sarahStatus.is_on_warm_transfer ? '🔥🎙️' : '🚀'}</span>
                 <span className="btn-text">
-                  {blandStatus.is_on_warm_transfer
+                  {sarahStatus.is_on_warm_transfer
                     ? 'Sarah AI (Warm Transfer: Appt Only)'
-                    : blandStatus.is_campaign_active
+                    : sarahStatus.is_campaign_active
                     ? 'Sarah Workday Active'
                     : 'Activate Sarah AI'}
                 </span>

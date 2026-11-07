@@ -12,7 +12,7 @@ import { calls } from './routes/calls.ts';
 import { appointments, publicAppointments } from './routes/appointments.ts';
 import { auth, api, googleCallback } from './routes/api.ts';
 import { ai, inbox, publicApi } from './routes/ai.ts';
-import { blandPublic, blandAuth } from './routes/bland.ts';
+import { sarahPublic, sarahAuth } from './routes/sarahDialer.ts';
 import { subscribe } from './realtime.ts';
 import {
   handleSarahVoiceSession,
@@ -74,7 +74,7 @@ export function createApp() {
     try {
       const {
         call_id,
-        bland_call_id,
+        sarah_call_id,
         recipient_name,
         recipient_phone,
         prospect_name,
@@ -87,7 +87,7 @@ export function createApp() {
         force_live_connect,
       } = req.body || {};
 
-      const activeCallId = call_id || bland_call_id;
+      const activeCallId = call_id || sarah_call_id;
       if (activeCallId) {
         const liveStatus = await checkLiveTransferCallStatus({
           call_id: String(activeCallId),
@@ -152,9 +152,8 @@ export function createApp() {
   app.use('/api/public', publicApi);
   app.use('/api/public', publicAppointments);
   app.use('/api/google', googleCallback);
-  app.use('/api/bland', blandPublic);
-  app.use('/api/sarah', blandPublic);
-  app.use('/api/telephony/twiml', blandPublic);
+  app.use('/api/sarah', sarahPublic);
+  app.use('/api/telephony/twiml', sarahPublic);
   app.use('/widget', express.static(fileURLToPath(new URL('../public', import.meta.url))));
 
   // Authenticated API
@@ -166,7 +165,7 @@ export function createApp() {
   app.use('/api/appointments', appointments);
   app.use('/api/ai', ai);
   app.use('/api/inbox', inbox);
-  app.use('/api/bland', blandAuth);
+  app.use('/api/sarah', sarahAuth);
   app.use('/api', api);
 
   // Serve the built web app (production / Cloud Run single container / iwillglobal.com)
@@ -242,14 +241,14 @@ if (isMain) {
     console.log(`  Google Workspace: ${isGoogleEnabled() ? 'configured' : 'not configured (Gmail actions are logged only)'}\n`);
   });
 }
-// Long-lived server (local / Cloud Run): run the Bland AI autonomous dialer every 60 seconds.
-// It only dials Bland-assigned prospects while the campaign is active and inside calling hours
+// Long-lived server (local / Cloud Run): run the Sarah Voice Engine autonomous dialer every 60 seconds.
+// It only dials Sarah-assigned prospects while the campaign is active and inside calling hours
 // (Mon–Fri 9 AM–7 PM, Sat–Sun 9 AM–6 PM Arizona time). Serverless deployments use the call-completion
 // webhook chain plus Vercel Cron every 15 minutes — no CRM login is ever required.
 if (isMain) {
-  const { runBlandAutoDialerTick } = await import('./services/bland.ts');
+  const { runSarahAutoDialerTick } = await import('./services/sarahDialer.ts');
   setInterval(() => {
-    runBlandAutoDialerTick({ reason: 'interval' }).catch((err) => console.error('Bland auto-dialer error:', err?.message));
+    runSarahAutoDialerTick({ reason: 'interval' }).catch((err) => console.error('Sarah auto-dialer error:', err?.message));
   }, 60_000);
 }
 

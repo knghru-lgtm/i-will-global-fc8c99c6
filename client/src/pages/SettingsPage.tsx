@@ -86,23 +86,23 @@ export const SettingsPage: React.FC = () => {
   const [trunkSuccess, setTrunkSuccess] = useState<string>('');
   const [trunkError, setTrunkError] = useState<string>('');
 
-  // Bland AI Voice Agent State
-  const [blandEnabled, setBlandEnabled] = useState<boolean>(true);
-  const [blandPathwayId, setBlandPathwayId] = useState<string>('3b13b658-e85d-4d14-a24a-868b61040c42');
-  const [blandGithubRepo, setBlandGithubRepo] = useState<string>('');
-  const [blandDefaultVoice, setBlandDefaultVoice] = useState<string>('maya');
-  const [blandModel, setBlandModel] = useState<string>('enhanced');
-  const [blandFromNumber, setBlandFromNumber] = useState<string>('+14803319455');
-  const [blandTransferNumber, setBlandTransferNumber] = useState<string>('+16024569681');
-  const [blandPrompt, setBlandPrompt] = useState<string>('');
-  const [blandWebhookUrl, setBlandWebhookUrl] = useState<string>('https://iwillglobal.com/api/bland/webhook');
-  const [blandVoices, setBlandVoices] = useState<any[]>([]);
-  const [blandSaving, setBlandSaving] = useState<boolean>(false);
-  const [blandSuccess, setBlandSuccess] = useState<string>('');
-  const [blandError, setBlandError] = useState<string>('');
-  const [blandTestPhone, setBlandTestPhone] = useState<string>('');
-  const [blandTesting, setBlandTesting] = useState<boolean>(false);
-  const [blandTestResult, setBlandTestResult] = useState<string>('');
+  // Sarah Voice Engine Voice Agent State
+  const [sarahEnabled, setSarahEnabled] = useState<boolean>(true);
+  const [sarahPathwayId, setSarahPathwayId] = useState<string>('3b13b658-e85d-4d14-a24a-868b61040c42');
+  const [sarahGithubRepo, setSarahGithubRepo] = useState<string>('');
+  const [sarahDefaultVoice, setSarahDefaultVoice] = useState<string>('maya');
+  const [sarahModel, setSarahModel] = useState<string>('enhanced');
+  const [sarahFromNumber, setSarahFromNumber] = useState<string>('+14803319455');
+  const [sarahTransferNumber, setSarahTransferNumber] = useState<string>('+16024569681');
+  const [sarahPrompt, setSarahPrompt] = useState<string>('');
+  const [sarahWebhookUrl, setSarahWebhookUrl] = useState<string>('https://iwillglobal.com/api/sarah/webhook');
+  const [sarahVoices, setSarahVoices] = useState<any[]>([]);
+  const [sarahSaving, setSarahSaving] = useState<boolean>(false);
+  const [sarahSuccess, setSarahSuccess] = useState<string>('');
+  const [sarahError, setSarahError] = useState<string>('');
+  const [sarahTestPhone, setSarahTestPhone] = useState<string>('');
+  const [sarahTesting, setSarahTesting] = useState<boolean>(false);
+  const [sarahTestResult, setSarahTestResult] = useState<string>('');
 
   // Password Management State
   const [curPassword, setCurPassword] = useState('');
@@ -244,84 +244,84 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const fetchBlandConfig = async () => {
+  const fetchSarahDialerConfig = async () => {
     try {
       const [cfg, voicesRes] = await Promise.all([
-        api.get('/bland/config').catch(() => null),
-        api.get('/bland/voices').catch(() => ({ voices: [] })),
+        api.get('/sarah/config').catch(() => null),
+        api.get('/sarah/voices').catch(() => ({ voices: [] })),
       ]);
       if (cfg) {
-        setBlandEnabled(cfg.enabled !== false);
-        if (cfg.pathway_id) setBlandPathwayId(cfg.pathway_id);
-        if (cfg.github_repo) setBlandGithubRepo(cfg.github_repo);
-        setBlandDefaultVoice(cfg.default_voice || 'maya');
-        setBlandModel(cfg.model || 'enhanced');
-        setBlandFromNumber(cfg.from_number || '+14803319455');
-        setBlandTransferNumber(cfg.transfer_phone_number || '+16024569681');
-        setBlandPrompt(cfg.prompt_template || '');
-        setBlandWebhookUrl(cfg.webhook_url || 'https://iwillglobal.com/api/bland/webhook');
+        setSarahEnabled(cfg.enabled !== false);
+        if (cfg.pathway_id) setSarahPathwayId(cfg.pathway_id);
+        if (cfg.github_repo) setSarahGithubRepo(cfg.github_repo);
+        setSarahDefaultVoice(cfg.default_voice || 'maya');
+        setSarahModel(cfg.model || 'enhanced');
+        setSarahFromNumber(cfg.from_number || '+14803319455');
+        setSarahTransferNumber(cfg.transfer_phone_number || '+16024569681');
+        setSarahPrompt(cfg.prompt_template || '');
+        setSarahWebhookUrl(cfg.webhook_url || 'https://iwillglobal.com/api/sarah/webhook');
       }
       if (voicesRes?.voices) {
-        setBlandVoices(voicesRes.voices);
+        setSarahVoices(voicesRes.voices);
       }
     } catch (err: any) {
       console.error('Failed to load Sarah Outbound Caller configuration:', err);
     }
   };
 
-  const handleSaveBlandConfig = async (e: React.FormEvent) => {
+  const handleSaveSarahDialerConfig = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBlandError('');
-    setBlandSuccess('');
-    setBlandSaving(true);
+    setSarahError('');
+    setSarahSuccess('');
+    setSarahSaving(true);
     try {
-      const res = await api.post('/bland/config', {
-        enabled: blandEnabled,
-        pathway_id: blandPathwayId,
-        github_repo: blandGithubRepo,
-        default_voice: blandDefaultVoice,
-        model: blandModel,
-        from_number: blandFromNumber,
-        transfer_phone_number: blandTransferNumber,
-        prompt_template: blandPrompt,
-        webhook_url: blandWebhookUrl,
+      const res = await api.post('/sarah/config', {
+        enabled: sarahEnabled,
+        pathway_id: sarahPathwayId,
+        github_repo: sarahGithubRepo,
+        default_voice: sarahDefaultVoice,
+        model: sarahModel,
+        from_number: sarahFromNumber,
+        transfer_phone_number: sarahTransferNumber,
+        prompt_template: sarahPrompt,
+        webhook_url: sarahWebhookUrl,
       });
-      setBlandSuccess(res.message || 'Sarah Outbound Caller & Receptionist configuration saved!');
-      await fetchBlandConfig();
+      setSarahSuccess(res.message || 'Sarah Outbound Caller & Receptionist configuration saved!');
+      await fetchSarahDialerConfig();
     } catch (err: any) {
-      setBlandError(err.message || 'Failed to save Sarah Outbound Caller configuration');
+      setSarahError(err.message || 'Failed to save Sarah Outbound Caller configuration');
     } finally {
-      setBlandSaving(false);
+      setSarahSaving(false);
     }
   };
 
-  const handleBlandTestCall = async () => {
-    if (!blandTestPhone) return;
-    setBlandTesting(true);
-    setBlandTestResult('');
-    setBlandError('');
-    openGoogleVoiceWindow(blandTestPhone);
+  const handleSarahTestCall = async () => {
+    if (!sarahTestPhone) return;
+    setSarahTesting(true);
+    setSarahTestResult('');
+    setSarahError('');
+    openGoogleVoiceWindow(sarahTestPhone);
     window.dispatchEvent(
       new CustomEvent('iwg-open-sarah-voice', {
         detail: {
           mode: 'outbound',
           prospect_name: 'Medicare Beneficiary',
-          phone: blandTestPhone,
+          phone: sarahTestPhone,
           state: 'AZ',
         },
       })
     );
     try {
-      const res = await api.post('/bland/test-call', {
-        test_phone: blandTestPhone,
-        voice: blandDefaultVoice,
-        pathway_id: blandPathwayId,
+      const res = await api.post('/sarah/test-call', {
+        test_phone: sarahTestPhone,
+        voice: sarahDefaultVoice,
+        pathway_id: sarahPathwayId,
       });
-      setBlandTestResult(`✅ Google Voice + Sarah AI Call Dispatched! Call ID: ${res.call_id} (Line: (480) 331-9455 → ${blandTestPhone})`);
+      setSarahTestResult(`✅ Google Voice + Sarah AI Call Dispatched! Call ID: ${res.call_id} (Line: (480) 331-9455 → ${sarahTestPhone})`);
     } catch (err: any) {
-      setBlandError(err.message || 'Test call failed');
+      setSarahError(err.message || 'Test call failed');
     } finally {
-      setBlandTesting(false);
+      setSarahTesting(false);
     }
   };
 
@@ -330,7 +330,7 @@ export const SettingsPage: React.FC = () => {
     runSpamTest();
     fetchCallerIdRegistry();
     fetchTrunkConfig();
-    fetchBlandConfig();
+    fetchSarahDialerConfig();
   }, []);
 
   const runSpamTest = async () => {
@@ -952,37 +952,37 @@ export const SettingsPage: React.FC = () => {
               ● 100% Free Google Voice (480) 331-9455 Active
             </span>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '4px 10px', borderRadius: '12px', background: 'rgba(139, 92, 246, 0.15)', border: '1px solid #8b5cf6', color: '#c084fc' }}>
-              Voice: {blandDefaultVoice.toUpperCase()}
+              Voice: {sarahDefaultVoice.toUpperCase()}
             </span>
           </div>
         </div>
 
-        {blandError && (
+        {sarahError && (
           <div style={{ padding: '0.75rem 1rem', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', borderRadius: '8px', color: '#fca5a5', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>⚠️</span> <span>{blandError}</span>
+            <span>⚠️</span> <span>{sarahError}</span>
           </div>
         )}
 
-        {blandSuccess && (
+        {sarahSuccess && (
           <div style={{ padding: '0.75rem 1rem', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10b981', borderRadius: '8px', color: '#34d399', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
-            <span>✅</span> <span>{blandSuccess}</span>
+            <span>✅</span> <span>{sarahSuccess}</span>
           </div>
         )}
 
         {/* Sarah Outbound & Receptionist Configuration Form */}
-        <form onSubmit={handleSaveBlandConfig} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '1.75rem' }}>
+        <form onSubmit={handleSaveSarahDialerConfig} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '1.75rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
             <div>
               <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#e2e8f0', display: 'block', marginBottom: '0.35rem' }}>
                 Default Voice Persona
               </label>
               <select
-                value={blandDefaultVoice}
-                onChange={(e) => setBlandDefaultVoice(e.target.value)}
+                value={sarahDefaultVoice}
+                onChange={(e) => setSarahDefaultVoice(e.target.value)}
                 style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
               >
-                {blandVoices.length > 0 ? (
-                  blandVoices.map((v) => (
+                {sarahVoices.length > 0 ? (
+                  sarahVoices.map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.name} ({v.gender}, {v.accent}) {v.is_recommended ? '★ Recommended' : ''}
                     </option>
@@ -1008,8 +1008,8 @@ export const SettingsPage: React.FC = () => {
               </label>
               <input
                 type="text"
-                value={blandFromNumber}
-                onChange={(e) => setBlandFromNumber(e.target.value)}
+                value={sarahFromNumber}
+                onChange={(e) => setSarahFromNumber(e.target.value)}
                 placeholder="+14803319455"
                 style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
               />
@@ -1024,8 +1024,8 @@ export const SettingsPage: React.FC = () => {
               </label>
               <input
                 type="text"
-                value={blandGithubRepo}
-                onChange={(e) => setBlandGithubRepo(e.target.value)}
+                value={sarahGithubRepo}
+                onChange={(e) => setSarahGithubRepo(e.target.value)}
                 placeholder="https://github.com/your-org/iwg-crm"
                 style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
               />
@@ -1040,8 +1040,8 @@ export const SettingsPage: React.FC = () => {
               </label>
               <input
                 type="text"
-                value={blandTransferNumber}
-                onChange={(e) => setBlandTransferNumber(e.target.value)}
+                value={sarahTransferNumber}
+                onChange={(e) => setSarahTransferNumber(e.target.value)}
                 placeholder="+16024569681"
                 style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
               />
@@ -1057,8 +1057,8 @@ export const SettingsPage: React.FC = () => {
             </label>
             <textarea
               rows={6}
-              value={blandPrompt}
-              onChange={(e) => setBlandPrompt(e.target.value)}
+              value={sarahPrompt}
+              onChange={(e) => setSarahPrompt(e.target.value)}
               placeholder="System prompt instructing the voice agent..."
               style={{ width: '100%', padding: '0.75rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.82rem', fontFamily: 'monospace', resize: 'vertical' }}
             />
@@ -1074,25 +1074,25 @@ export const SettingsPage: React.FC = () => {
                 Call Completion Webhook URL (For Transcripts, Recordings & Dispositions)
               </div>
               <div style={{ fontSize: '0.82rem', color: '#38bdf8', fontFamily: 'monospace', marginTop: '0.15rem' }}>
-                {blandWebhookUrl}
+                {sarahWebhookUrl}
               </div>
             </div>
             <button
               type="button"
-              onClick={() => copyToClipboard(blandWebhookUrl, 'bland_webhook')}
+              onClick={() => copyToClipboard(sarahWebhookUrl, 'sarah_webhook')}
               style={{ padding: '0.35rem 0.75rem', borderRadius: '6px', background: 'rgba(139, 92, 246, 0.15)', border: '1px solid #8b5cf6', color: '#c084fc', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700 }}
             >
-              {copiedKey === 'bland_webhook' ? '✓ Copied' : '📋 Copy Webhook URL'}
+              {copiedKey === 'sarah_webhook' ? '✓ Copied' : '📋 Copy Webhook URL'}
             </button>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
             <button
               type="submit"
-              disabled={blandSaving}
+              disabled={sarahSaving}
               style={{ padding: '0.65rem 1.5rem', borderRadius: '8px', fontWeight: 700, fontSize: '0.88rem', background: '#8b5cf6', border: 'none', color: '#fff', cursor: 'pointer' }}
             >
-              {blandSaving ? 'Saving...' : '💾 Save Receptionist & Outbound Settings'}
+              {sarahSaving ? 'Saving...' : '💾 Save Receptionist & Outbound Settings'}
             </button>
           </div>
         </form>
@@ -1109,15 +1109,15 @@ export const SettingsPage: React.FC = () => {
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               type="tel"
-              value={blandTestPhone}
-              onChange={(e) => setBlandTestPhone(e.target.value)}
+              value={sarahTestPhone}
+              onChange={(e) => setSarahTestPhone(e.target.value)}
               placeholder="+1 (602) 456-9681"
               style={{ flex: '1', minWidth: '220px', padding: '0.6rem 0.85rem', borderRadius: '8px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
             />
             <button
               type="button"
-              onClick={handleBlandTestCall}
-              disabled={blandTesting || !blandTestPhone}
+              onClick={handleSarahTestCall}
+              disabled={sarahTesting || !sarahTestPhone}
               style={{
                 padding: '0.6rem 1.25rem',
                 borderRadius: '8px',
@@ -1126,19 +1126,19 @@ export const SettingsPage: React.FC = () => {
                 background: 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)',
                 border: 'none',
                 color: '#fff',
-                cursor: blandTesting ? 'not-allowed' : 'pointer',
+                cursor: sarahTesting ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.4rem',
               }}
             >
-              {blandTesting ? 'Calling Phone...' : '🚀 Dispatch Test Call'}
+              {sarahTesting ? 'Calling Phone...' : '🚀 Dispatch Test Call'}
             </button>
           </div>
 
-          {blandTestResult && (
+          {sarahTestResult && (
             <div style={{ marginTop: '0.85rem', padding: '0.65rem 0.85rem', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid #10b981', borderRadius: '6px', color: '#34d399', fontSize: '0.82rem', fontWeight: 600 }}>
-              {blandTestResult}
+              {sarahTestResult}
             </div>
           )}
         </div>

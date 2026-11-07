@@ -100,10 +100,10 @@ export async function ensureSeeded(force = false) {
 
   // Sarah Voice AI autonomous outbound caller & 24/7 receptionist on (480) 331-9455 — every prospect assigned to this user is dialed automatically
   // Mon–Fri 9 AM–7 PM and Sat–Sun 9 AM–6 PM (Arizona time). Login is disabled via an unguessable password.
-  const blandAiUser = await one('SELECT id FROM users WHERE id=$1 OR lower(email) IN (lower($2), lower($3), lower($4))', ['u_bland_ai', 'sarah@iwillglobal.com', 'bland-ai@iwillglobal.com', 'bland@iwillglobal.com']);
-  if (!blandAiUser) {
+  const sarahAiUser = await one('SELECT id FROM users WHERE id=$1 OR lower(email) IN (lower($2), lower($3), lower($4))', ['u_sarah_ai', 'sarah@iwillglobal.com', 'voice@iwillglobal.com', 'receptionist@iwillglobal.com']);
+  if (!sarahAiUser) {
     await insert('users', {
-      id: 'u_bland_ai',
+      id: 'u_sarah_ai',
       name: 'Sarah — Voice AI Receptionist & Outbound Caller',
       email: 'sarah@iwillglobal.com',
       password_hash: hashPassword(randomUUID() + randomUUID()),
@@ -121,7 +121,7 @@ export async function ensureSeeded(force = false) {
         'Sarah — Voice AI Receptionist & Outbound Caller',
         'Autonomous Voice AI Outbound Caller & Receptionist (480) 331-9455',
         '(480) 331-9455',
-        blandAiUser.id,
+        sarahAiUser.id,
       ]
     );
   }
