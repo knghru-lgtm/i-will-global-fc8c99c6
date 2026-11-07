@@ -10649,11 +10649,7 @@ async function handleSarahHttpTurn(params) {
     sessionContext.prospect_name = nameIntroMatch[1];
   }
   const activeFirstName = (sessionContext.prospect_name || firstName || "there").split(/\s+/)[0] || "there";
-  const lastSarahTurnText = [...params.history || []].reverse().find((h) => h.speaker === "sarah")?.text?.toLowerCase() || "";
-  const isFastPathBlandTurn = userText.toLowerCase().includes("[script tree directive]") || lastSarahTurnText.includes("how are you today") && userText.split(/\s+/).length <= 14 || lastSarahTurnText.includes("changes for 2027") && /^(yes|yeah|yep|sure|okay|ok|please|tell me|what are they|go ahead|absolutely)\b/i.test(userText.trim()) || /\b(happy with my|keep my plan|don't want to change|how much does (this|it) cost|is this free|mail me|send me something|part a|part b|part c|part d|medigap|plan g|plan n|deductible|premium|coinsurance|2027|insulin|prescription|cap|medicare|individual|family|aca|marketplace|obamacare|ppo|subsidy|tax credit|group|business|employer|ichra|level-funded|life insurance|iul|indexed universal|7702|term life|living benefits|long-term care|long term care|ltc|nursing|home health|assisted living|who are you|what is i will global|fiduciary|carriers|telephone|in-person|in person|video|tomorrow|morning|afternoon)\b/i.test(
-    userText
-  );
-  if (isFastPathBlandTurn) {
+  if (userText.toLowerCase().includes("[script tree directive]")) {
     const clonedMatch2 = await runClonedBlandScenario(userText, params.history || [], sessionContext);
     const tts2 = await resolveTts(clonedMatch2.reply);
     return {
@@ -10709,7 +10705,7 @@ async function handleSarahHttpTurn(params) {
         parts: [{ text: userText }]
       });
     }
-    const baseTextModels = ["gemini-2.5-flash", config.gemini.model || "gemini-3.5-flash"];
+    const baseTextModels = ["gemini-3.5-flash-lite", config.gemini.model || "gemini-3.5-flash"];
     const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
       try {
@@ -10802,6 +10798,70 @@ CRITICAL CONVERSATIONAL LISTENING RULE:
     disposition: clonedMatch.disposition || null,
     mode: sessionContext.mode,
     line: SARAH_MAIN_LINE_DISPLAY
+  };
+}
+function getSarahDirectLiveSessionConfig(params = {}) {
+  const mode = params.mode === "outbound" ? "outbound" : "inbound";
+  const sessionContext = {
+    mode,
+    lead_id: params.lead_id,
+    prospect_name: params.prospect_name || "Medicare Beneficiary",
+    prospect_phone: params.prospect_phone || "+16232230165",
+    state: params.state || "Arizona",
+    address: params.address || "",
+    caller_name: params.caller_name || "Sarah",
+    on_warm_transfer: Boolean(params.on_warm_transfer)
+  };
+  const firstName = (sessionContext.prospect_name || "there").split(/\s+/)[0] || "there";
+  const initialGreetingPrompt = mode === "outbound" ? `[OUTBOUND CALL CONNECTED ON ${SARAH_MAIN_LINE_DISPLAY} TO PROSPECT: ${sessionContext.prospect_name} (First Name: ${firstName}, Phone: ${sessionContext.prospect_phone}, State: ${sessionContext.state})]. Begin Step 1 of the Unified Outbound Script immediately by greeting ${firstName} warmly: "Hello ${firstName}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"` : `[INBOUND CALL RINGING ON ${SARAH_MAIN_LINE_DISPLAY}]. Answer immediately as the Virtual Receptionist with your required opening greeting: "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"`;
+  const wsUrl = config.gemini.apiKey ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(
+    config.gemini.apiKey
+  )}` : "";
+  return {
+    ok: Boolean(wsUrl),
+    ws_url: wsUrl,
+    voice: SARAH_VOICE_NAME,
+    model: "models/gemini-3.8-live",
+    initial_greeting_prompt: initialGreetingPrompt,
+    setup: {
+      setup: {
+        model: "models/gemini-3.8-live",
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: SARAH_VOICE_NAME
+              }
+            }
+          }
+        },
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+            endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+            prefixPaddingMs: 100,
+            silenceDurationMs: 220
+          }
+        },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+        systemInstruction: {
+          parts: [
+            {
+              text: buildSarahSystemInstruction(sessionContext) + `
+
+CRITICAL LIVE CONVERSATIONAL RULES:
+- Speak in a calm, relaxed, warm, natural human tone (Vindemiatrix voice).
+- Listen carefully to the caller's exact question and answer it directly and concisely in 1 to 2 sentences so there is never any lag or rambling.
+- Never repeat your opening greeting after the call has started.`
+            }
+          ]
+        },
+        tools: SARAH_TOOLS
+      }
+    }
   };
 }
 
@@ -11471,6 +11531,14 @@ function createApp() {
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
   app.get("/api/health", (_req, res) => res.json({ ok: true, ai: isAIEnabled() ? "gemini" : "demo", google: isGoogleEnabled() }));
+  app.post("/api/sarah/live-session", (req, res) => {
+    try {
+      const cfg = getSarahDirectLiveSessionConfig(req.body || {});
+      res.json(cfg);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err?.message || "Failed to create live session config" });
+    }
+  });
   app.post("/api/sarah/turn", async (req, res) => {
     try {
       const result = await handleSarahHttpTurn(req.body || {});

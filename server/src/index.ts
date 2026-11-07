@@ -19,6 +19,7 @@ import {
   handleSarahHttpTurn,
   executeSarahTool,
   synthesizeSarahNeuralAudio,
+  getSarahDirectLiveSessionConfig,
 } from './services/sarahVoiceService.ts';
 
 export function createApp() {
@@ -28,6 +29,16 @@ export function createApp() {
   app.use(express.json({ limit: '2mb' }));
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, ai: isAIEnabled() ? 'gemini' : 'demo', google: isGoogleEnabled() }));
+
+  // Direct sub-second Gemini 3.8 Live WebSocket session bootstrap for iwillglobal.com & local CRM
+  app.post('/api/sarah/live-session', (req, res) => {
+    try {
+      const cfg = getSarahDirectLiveSessionConfig(req.body || {});
+      res.json(cfg);
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to create live session config' });
+    }
+  });
 
   // Public Sarah Voice AI HTTP endpoints for Vercel Serverless (iwillglobal.com) & Browser Voice fallback
   app.post('/api/sarah/turn', async (req, res) => {

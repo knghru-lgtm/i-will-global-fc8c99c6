@@ -1557,22 +1557,8 @@ export async function handleSarahHttpTurn(params: {
   }
   const activeFirstName = (sessionContext.prospect_name || firstName || 'there').split(/\s+/)[0] || 'there';
 
-  // 3. Sub-5ms Cloned Bland Fast-Path for all 10 `bland.json` Scenarios, Script Tree Directives, Outbound Steps, Appointments & Objections
-  const lastSarahTurnText =
-    [...(params.history || [])]
-      .reverse()
-      .find((h) => h.speaker === 'sarah')
-      ?.text?.toLowerCase() || '';
-  const isFastPathBlandTurn =
-    userText.toLowerCase().includes('[script tree directive]') ||
-    (lastSarahTurnText.includes('how are you today') && userText.split(/\s+/).length <= 14) ||
-    (lastSarahTurnText.includes('changes for 2027') &&
-      /^(yes|yeah|yep|sure|okay|ok|please|tell me|what are they|go ahead|absolutely)\b/i.test(userText.trim())) ||
-    /\b(happy with my|keep my plan|don't want to change|how much does (this|it) cost|is this free|mail me|send me something|part a|part b|part c|part d|medigap|plan g|plan n|deductible|premium|coinsurance|2027|insulin|prescription|cap|medicare|individual|family|aca|marketplace|obamacare|ppo|subsidy|tax credit|group|business|employer|ichra|level-funded|life insurance|iul|indexed universal|7702|term life|living benefits|long-term care|long term care|ltc|nursing|home health|assisted living|who are you|what is i will global|fiduciary|carriers|telephone|in-person|in person|video|tomorrow|morning|afternoon)\b/i.test(
-      userText
-    );
-
-  if (isFastPathBlandTurn) {
+  // 3. Explicit Script Tree Directive button click -> run exact deterministic step
+  if (userText.toLowerCase().includes('[script tree directive]')) {
     const clonedMatch = await runClonedBlandScenario(userText, params.history || [], sessionContext);
     const tts = await resolveTts(clonedMatch.reply);
     return {
@@ -1593,7 +1579,7 @@ export async function handleSarahHttpTurn(params: {
     };
   }
 
-  // 4. Primary Conversational Brain: Run Gemini (`workingTextModel` -> `gemini-3.5-flash` -> `gemini-2.5-flash`) for custom open-ended questions
+  // 4. Primary Conversational Brain: Run Gemini (`gemini-3.5-flash-lite` -> `gemini-3.5-flash`) for natural conversational answers
   if (isAIEnabled()) {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
@@ -1638,7 +1624,7 @@ export async function handleSarahHttpTurn(params: {
       });
     }
 
-    const baseTextModels = ['gemini-2.5-flash', config.gemini.model || 'gemini-3.5-flash'];
+    const baseTextModels = ['gemini-3.5-flash-lite', config.gemini.model || 'gemini-3.5-flash'];
     const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
       try {
@@ -1733,5 +1719,80 @@ export async function handleSarahHttpTurn(params: {
     disposition: clonedMatch.disposition || null,
     mode: sessionContext.mode,
     line: SARAH_MAIN_LINE_DISPLAY,
+  };
+}
+
+/**
+ * Returns direct browser-to-Gemini-3.8-Live WebSocket session configuration (`~600ms` real-time native audio).
+ * Used on both `iwillglobal.com` (Vercel) and local CRM so Sarah responds in under 1 second with the
+ * calm, relaxed `Vindemiatrix` voice and full conversational intelligence.
+ */
+export function getSarahDirectLiveSessionConfig(params: Partial<SarahSessionContext> = {}) {
+  const mode: 'inbound' | 'outbound' = params.mode === 'outbound' ? 'outbound' : 'inbound';
+  const sessionContext: SarahSessionContext = {
+    mode,
+    lead_id: params.lead_id,
+    prospect_name: params.prospect_name || 'Medicare Beneficiary',
+    prospect_phone: params.prospect_phone || '+16232230165',
+    state: params.state || 'Arizona',
+    address: params.address || '',
+    caller_name: params.caller_name || 'Sarah',
+    on_warm_transfer: Boolean(params.on_warm_transfer),
+  };
+
+  const firstName = (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there';
+  const initialGreetingPrompt =
+    mode === 'outbound'
+      ? `[OUTBOUND CALL CONNECTED ON ${SARAH_MAIN_LINE_DISPLAY} TO PROSPECT: ${sessionContext.prospect_name} (First Name: ${firstName}, Phone: ${sessionContext.prospect_phone}, State: ${sessionContext.state})]. Begin Step 1 of the Unified Outbound Script immediately by greeting ${firstName} warmly: "Hello ${firstName}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?"`
+      : `[INBOUND CALL RINGING ON ${SARAH_MAIN_LINE_DISPLAY}]. Answer immediately as the Virtual Receptionist with your required opening greeting: "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"`;
+
+  const wsUrl = config.gemini.apiKey
+    ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(
+        config.gemini.apiKey
+      )}`
+    : '';
+
+  return {
+    ok: Boolean(wsUrl),
+    ws_url: wsUrl,
+    voice: SARAH_VOICE_NAME,
+    model: 'models/gemini-3.8-live',
+    initial_greeting_prompt: initialGreetingPrompt,
+    setup: {
+      setup: {
+        model: 'models/gemini-3.8-live',
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: SARAH_VOICE_NAME,
+              },
+            },
+          },
+        },
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+            endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
+            prefixPaddingMs: 100,
+            silenceDurationMs: 220,
+          },
+        },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+        systemInstruction: {
+          parts: [
+            {
+              text:
+                buildSarahSystemInstruction(sessionContext) +
+                `\n\nCRITICAL LIVE CONVERSATIONAL RULES:\n- Speak in a calm, relaxed, warm, natural human tone (Vindemiatrix voice).\n- Listen carefully to the caller's exact question and answer it directly and concisely in 1 to 2 sentences so there is never any lag or rambling.\n- Never repeat your opening greeting after the call has started.`,
+            },
+          ],
+        },
+        tools: SARAH_TOOLS,
+      },
+    },
   };
 }

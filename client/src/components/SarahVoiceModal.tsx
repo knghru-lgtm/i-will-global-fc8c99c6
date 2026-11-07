@@ -699,8 +699,8 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
             if (speechBufferTimerRef.current) {
               clearTimeout(speechBufferTimerRef.current);
             }
-            // Instant silence detection: 75ms when Chrome marks final, or 460ms when user stops speaking during interim!
-            const waitMs = cleanFinal && !cleanInterim ? 75 : 460;
+            // Wait 120ms when Chrome marks final, or 950ms during interim so we never cut off a caller mid-sentence
+            const waitMs = cleanFinal && !cleanInterim ? 120 : 950;
             speechBufferTimerRef.current = setTimeout(() => {
               const fullSpoken = [speechBufferRef.current, liveInterimRef.current].filter(Boolean).join(' ').trim();
               speechBufferRef.current = '';
@@ -951,13 +951,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       address: activeAddress,
       on_warm_transfer: Boolean(activeWT),
     };
-
-    // On serverless hosts (iwillglobal.com / vercel.app), immediately connect to Cloned Bland + Aoede Neural Voice engine
-    const host = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
-    if (host.endsWith('iwillglobal.com') || host.endsWith('.vercel.app')) {
-      await activateHttpVoiceFallback(fallbackCtx);
-      return;
-    }
+    sessionCtxRef.current = fallbackCtx;
 
     const player = new AudioPlayer({
       sampleRate: 24000,
@@ -970,18 +964,22 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     playerRef.current = player;
 
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const qs = new URLSearchParams({
+      const liveCfg: any = await api.post('/sarah/live-session', {
         mode: activeMode,
         lead_id: activeLeadId || '',
         prospect_name: activeName,
-        phone: activePhone || '',
+        prospect_phone: activePhone || '',
         state: activeState,
         address: activeAddress || '',
-        on_warm_transfer: String(Boolean(activeWT)),
+        on_warm_transfer: Boolean(activeWT),
       });
-      const wsUrl = `${protocol}//${window.location.host}/api/sarah/live?${qs.toString()}`;
-      const ws = new WebSocket(wsUrl);
+
+      if (!liveCfg?.ws_url || !liveCfg?.setup) {
+        await activateHttpVoiceFallback(fallbackCtx);
+        return;
+      }
+
+      const ws = new WebSocket(liveCfg.ws_url);
       wsRef.current = ws;
 
       let wsOpened = false;
@@ -989,13 +987,24 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
 
       ws.onopen = async () => {
         wsOpened = true;
-        setConnectionStatus('connected');
+        try {
+          ws.send(JSON.stringify(liveCfg.setup));
+        } catch (setupErr) {
+          console.error('Error sending Gemini Live setup:', setupErr);
+        }
+
         try {
           const recorder = new AudioRecorder({
             sampleRate: 16000,
             onAudioData: (base64) => {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'audio', data: base64 }));
+              if (ws.readyState === WebSocket.OPEN && !isMutedRef.current) {
+                ws.send(
+                  JSON.stringify({
+                    realtimeInput: {
+                      audio: { data: base64, mimeType: 'audio/pcm;rate=16000' },
+                    },
+                  })
+                );
               }
             },
             onVolumeChange: (vol) => setUserVolume(vol),
@@ -1005,6 +1014,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
           });
           recorderRef.current = recorder;
           await recorder.start();
+          setIsMicListening(true);
         } catch (micErr: any) {
           console.warn('Microphone access denied or unavailable, continuing in text/listen mode:', micErr);
           setTranscripts((prev) => [
@@ -1019,24 +1029,49 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         }
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
-          const data = JSON.parse(event.data);
+          const rawText = typeof event.data === 'string' ? event.data : await (event.data as Blob).text();
+          const msg = JSON.parse(rawText);
 
-          if (data.type === 'ready') {
+          if (msg.setupComplete !== undefined) {
             setConnectionStatus('connected');
             const topicToUse = initialPayload?.initialTopic || initialTopic;
-            if (topicToUse) {
-              sendTextMessage(topicToUse);
+            const greetingPrompt = topicToUse
+              ? `${liveCfg.initial_greeting_prompt} Then immediately address: ${topicToUse}`
+              : liveCfg.initial_greeting_prompt;
+            if (ws.readyState === WebSocket.OPEN && greetingPrompt) {
+              ws.send(
+                JSON.stringify({
+                  clientContent: {
+                    turns: [{ role: 'user', parts: [{ text: greetingPrompt }] }],
+                    turnComplete: true,
+                  },
+                })
+              );
             }
-          } else if (data.type === 'audio' && data.data) {
-            receivedAudioTurn = true;
-            player.enqueueChunk(data.data);
-          } else if (data.type === 'transcript') {
-            appendOrUpdateTranscript(data.speaker, data.text);
-            // Automatically advance script step tracker when Sarah speaks key phrases
-            if (data.speaker === 'sarah' && typeof data.text === 'string') {
-              const lower = data.text.toLowerCase();
+          }
+
+          if (msg.serverContent) {
+            const { modelTurn, turnComplete, interrupted, inputTranscription, outputTranscription } = msg.serverContent;
+
+            if (interrupted) {
+              player.stop();
+            }
+
+            if (modelTurn?.parts) {
+              for (const part of modelTurn.parts) {
+                if (part.inlineData?.data) {
+                  receivedAudioTurn = true;
+                  player.enqueueChunk(part.inlineData.data);
+                }
+              }
+            }
+
+            if (outputTranscription?.text) {
+              const spokenText = outputTranscription.text;
+              appendOrUpdateTranscript('sarah', spokenText);
+              const lower = spokenText.toLowerCase();
               if (lower.includes('$1,788') || lower.includes('$2,400') || lower.includes('20%')) {
                 setActiveScriptStep(2);
               } else if (
@@ -1048,61 +1083,93 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 setActiveScriptStep(3);
               }
             }
-          } else if (data.type === 'interrupted') {
-            player.stop();
-          } else if (data.type === 'appointment_confirmed') {
-            setConfirmedAppt(data.appointment);
-            setActiveScriptStep(3);
-            setTranscripts((prev) => [
-              ...prev,
-              {
-                id: 'appt_' + Date.now(),
-                speaker: 'system',
-                text: `📅 Official Appointment Confirmed on (480) 331-9455: ${data.appointment.customer_name} (${data.appointment.appointment_type}) — ${data.appointment.confirmed_datetime}`,
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                isAction: true,
-              },
-            ]);
-            window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
-          } else if (data.type === 'whisper_transfer_initiated') {
-            setWhisperTransfer(data.transfer);
-            setActiveScriptStep(3);
-            if (data.transfer?.recipient_phone) {
-              openGoogleVoiceWindow(data.transfer.recipient_phone);
-            }
-            setTranscripts((prev) => [
-              ...prev,
-              {
-                id: 'wt_' + Date.now(),
-                speaker: 'system',
-                text: `⚡ Google Voice Automatic AI Whisper Transfer to ${data.transfer.recipient_name} (${data.transfer.recipient_phone}) — Whisper Briefing Delivered & 3-Way Call Merged!`,
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                isAction: true,
-              },
-            ]);
-            window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
-          } else if (data.type === 'error' || data.type === 'closed') {
-            if (!receivedAudioTurn) {
-              if (recorderRef.current) {
-                recorderRef.current.stop();
-                recorderRef.current = null;
+
+            if (inputTranscription?.text) {
+              const userText = inputTranscription.text.trim();
+              if (userText) {
+                appendOrUpdateTranscript('user', userText);
               }
-              activateHttpVoiceFallback(fallbackCtx);
+            }
+
+            if (turnComplete) {
+              setSarahVolume(0);
+            }
+          }
+
+          if (msg.toolCall?.functionCalls) {
+            const functionResponses: any[] = [];
+            for (const call of msg.toolCall.functionCalls) {
+              try {
+                const toolRes: any = await api.post('/sarah/tool', {
+                  name: call.name,
+                  args: call.args || {},
+                  context: fallbackCtx,
+                });
+                const resultObj = toolRes?.result || { success: true };
+
+                if (call.name === 'book_appointment' && resultObj?.success) {
+                  setConfirmedAppt(resultObj);
+                  setActiveScriptStep(3);
+                  setTranscripts((prev) => [
+                    ...prev,
+                    {
+                      id: 'appt_' + Date.now(),
+                      speaker: 'system',
+                      text: `📅 Official Appointment Confirmed on (480) 331-9455: ${resultObj.customer_name} (${resultObj.appointment_type}) — ${resultObj.confirmed_datetime}`,
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                      isAction: true,
+                    },
+                  ]);
+                  window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
+                } else if (call.name === 'whisper_warm_transfer' && resultObj?.success) {
+                  executeVerifiedTranslineBridge(resultObj);
+                }
+
+                functionResponses.push({
+                  id: call.id,
+                  name: call.name,
+                  response: { result: resultObj },
+                });
+              } catch (toolErr: any) {
+                functionResponses.push({
+                  id: call.id,
+                  name: call.name,
+                  response: { error: toolErr?.message || 'Tool execution error' },
+                });
+              }
+            }
+
+            if (ws.readyState === WebSocket.OPEN && functionResponses.length > 0) {
+              ws.send(
+                JSON.stringify({
+                  toolResponse: {
+                    functionResponses,
+                  },
+                })
+              );
             }
           }
         } catch (e) {
-          console.error('Error parsing WS message:', e);
+          console.error('Error parsing Gemini Live WS message:', e);
         }
       };
 
       ws.onerror = () => {
         if (!wsOpened || !receivedAudioTurn) {
+          if (recorderRef.current) {
+            recorderRef.current.stop();
+            recorderRef.current = null;
+          }
           activateHttpVoiceFallback(fallbackCtx);
         }
       };
 
       ws.onclose = () => {
         if (!wsOpened || !receivedAudioTurn) {
+          if (recorderRef.current) {
+            recorderRef.current.stop();
+            recorderRef.current = null;
+          }
           activateHttpVoiceFallback(fallbackCtx);
         } else if (!httpModeRef.current) {
           setConnectionStatus('closed');
@@ -1207,8 +1274,14 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     playerRef.current?.stop();
     stopAllSarahAudio();
     resumeSpeechRecognitionSafe();
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'end_turn' }));
+    if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
+      wsRef.current.send(
+        JSON.stringify({
+          realtimeInput: {
+            activityEnd: {},
+          },
+        })
+      );
     }
   };
 
@@ -1217,8 +1290,16 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     if (!text) return;
 
     if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
-      wsRef.current.send(JSON.stringify({ type: 'text', text }));
-      appendOrUpdateTranscript('user', text);
+      playerRef.current?.stop();
+      wsRef.current.send(
+        JSON.stringify({
+          clientContent: {
+            turns: [{ role: 'user', parts: [{ text }] }],
+            turnComplete: true,
+          },
+        })
+      );
+      appendNewTranscript('user', text);
       if (!textToSend) setTextInput('');
     } else {
       appendNewTranscript('user', text);
@@ -1242,7 +1323,23 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       },
     ]);
     if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
-      wsRef.current.send(JSON.stringify({ type: 'script_step', prompt: directiveText }));
+      wsRef.current.send(
+        JSON.stringify({
+          clientContent: {
+            turns: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text: `[SCRIPT TREE DIRECTIVE]: Immediately speak this exact script section naturally and warmly in your voice right now: "${directiveText}"`,
+                  },
+                ],
+              },
+            ],
+            turnComplete: true,
+          },
+        })
+      );
     } else {
       sendHttpTurn(`[SCRIPT TREE DIRECTIVE]: ${directiveText}`);
     }
@@ -1252,21 +1349,32 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     setActiveScriptStep(3);
     playerRef.current?.stop();
     stopAllSarahAudio();
+    executeVerifiedTranslineBridge({
+      recipient_name: recipientName,
+      recipient_phone: '+16024569681',
+      prospect_name: prospectName || 'Caller',
+      whisper_briefing: `Whisper to ${recipientName}: I have ${prospectName || 'a beneficiary'} (${prospectPhone || 'Inbound Caller'}) from ${prospectState || 'AZ'} on the line ready to speak with you. Connecting you now.`,
+      merge_introduction: `Thank you for holding! I have verified ${recipientName} is on the line with us now.`,
+    });
     if (wsRef.current?.readyState === WebSocket.OPEN && !httpModeRef.current) {
       wsRef.current.send(
         JSON.stringify({
-          type: 'execute_whisper_transfer',
-          recipient_name: recipientName,
+          clientContent: {
+            turns: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text: `[URGENT TRANSFER DIRECTIVE]: Call whisper_warm_transfer for ${recipientName} right now and tell the caller: "Please hold one brief moment while I dial ${recipientName}'s line, verify the connection, deliver a quick whisper briefing, and merge us into a 3-way call."`,
+                  },
+                ],
+              },
+            ],
+            turnComplete: true,
+          },
         })
       );
     } else {
-      executeVerifiedTranslineBridge({
-        recipient_name: recipientName,
-        recipient_phone: '+16024569681',
-        prospect_name: prospectName || 'Caller',
-        whisper_briefing: `Whisper to ${recipientName}: I have ${prospectName || 'a beneficiary'} (${prospectPhone || 'Inbound Caller'}) from ${prospectState || 'AZ'} on the line ready to speak with you. Connecting you now.`,
-        merge_introduction: `Thank you for holding! I have verified ${recipientName} is on the line with us now.`,
-      });
       sendHttpTurn(`Please transfer me to ${recipientName} right now.`);
     }
   };
