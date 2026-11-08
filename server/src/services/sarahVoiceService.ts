@@ -2,6 +2,7 @@ import { GoogleGenAI, Modality, Type, type Tool } from '@google/genai';
 import type { WebSocket as WsWebSocket } from 'ws';
 import { config, isAIEnabled } from '../config.ts';
 import { one, q } from '../db/index.ts';
+import sarahGreetingAudioJson from './sarahGreetingAudio.json' with { type: 'json' };
 import {
   IWG_TEAM_DIRECTORY,
   buildAiWhisperScripts,
@@ -1839,6 +1840,17 @@ export function splitIntoFastSpeechChunks(text: string): { firstChunk: string; r
   return { firstChunk: clean, restChunk: '' };
 }
 
+// Pre-seed Sarah's natural Vindemiatrix voice cache with the opening greeting chunks (0ms latency, 0 quota used)
+for (const [k, b64] of Object.entries(sarahGreetingAudioJson as Record<string, string>)) {
+  if (k && b64) {
+    SARAH_TTS_CACHE.set(k.trim(), {
+      audio_base64: b64,
+      audio_mime: 'audio/wav',
+      voice: SARAH_VOICE_NAME,
+    });
+  }
+}
+
 export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   audio_base64: string | null;
   audio_mime: string;
@@ -1849,13 +1861,17 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
     .replace(/\[[^\]]+\]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!cleanText || !isAIEnabled()) {
+  if (!cleanText) {
     return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
   }
 
   const cached = SARAH_TTS_CACHE.get(cleanText);
   if (cached) {
     return cached;
+  }
+
+  if (!isAIEnabled()) {
+    return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
   }
 
   const inflight = SARAH_TTS_INFLIGHT.get(cleanText);
@@ -1865,7 +1881,12 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
 
   const runPromise = (async () => {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    const baseModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts', 'gemini-3.1-flash-tts-preview'];
+    const baseModels = [
+      'gemini-2.5-flash-preview-tts',
+      'gemini-3.8-flash-lite-tts',
+      'gemini-3.8-flash-tts',
+      'gemini-3.1-flash-tts-preview',
+    ];
     const ttsModels = workingTtsModel ? [workingTtsModel, ...baseModels] : baseModels;
 
     for (const modelName of [...new Set(ttsModels)]) {
@@ -1890,7 +1911,7 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
               },
             },
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('TTS timeout')), 5500)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('TTS timeout')), 3500)),
         ]);
         const inline = r?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
         if (inline?.data) {
@@ -1901,17 +1922,86 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
             audio_mime: 'audio/wav',
             voice: SARAH_VOICE_NAME,
           };
-          if (SARAH_TTS_CACHE.size > 120) {
+          if (SARAH_TTS_CACHE.size > 150) {
             const oldestKey = SARAH_TTS_CACHE.keys().next().value;
-            if (oldestKey) SARAH_TTS_CACHE.delete(oldestKey);
+            if (oldestKey && !( oldestKey in (sarahGreetingAudioJson as Record<string, string>) )) {
+              SARAH_TTS_CACHE.delete(oldestKey);
+            }
           }
           SARAH_TTS_CACHE.set(cleanText, entry);
           return entry;
         }
       } catch {
-        // try next Gemini 3.8 TTS model
+        // try next TTS model or Gemini 3.1 Live Vindemiatrix fallback
       }
     }
+
+    // Fallback to Gemini 3.1 Flash Live WebSocket using Vindemiatrix voice (unlimited quota!)
+    try {
+      const chunks: Buffer[] = [];
+      await new Promise<void>(async (resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Live TTS timeout')), 9500);
+        try {
+          const session = await ai.live.connect({
+            model: 'gemini-3.1-flash-live-preview',
+            config: {
+              responseModalities: [Modality.AUDIO],
+              systemInstruction: {
+                parts: [{ text: 'Repeat the exact text the user sends verbatim with zero changes.' }],
+              },
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: SARAH_VOICE_NAME,
+                  },
+                },
+              },
+            },
+            callbacks: {
+              onmessage: (msg: any) => {
+                for (const p of msg?.serverContent?.modelTurn?.parts || []) {
+                  if (p?.inlineData?.data) {
+                    chunks.push(Buffer.from(p.inlineData.data, 'base64'));
+                  }
+                }
+                if (msg?.serverContent?.turnComplete) {
+                  clearTimeout(timer);
+                  try {
+                    session.close();
+                  } catch {}
+                  resolve();
+                }
+              },
+              onerror: (err: any) => {
+                clearTimeout(timer);
+                reject(err);
+              },
+            },
+          });
+          session.sendClientContent({
+            turns: [{ role: 'user', parts: [{ text: `Say verbatim: ${cleanText}` }] }],
+            turnComplete: true,
+          });
+        } catch (err) {
+          clearTimeout(timer);
+          reject(err);
+        }
+      });
+
+      if (chunks.length > 0) {
+        const wavBase64 = ensureRiffWavBase64(Buffer.concat(chunks).toString('base64'), 24000);
+        const entry = {
+          audio_base64: wavBase64,
+          audio_mime: 'audio/wav',
+          voice: SARAH_VOICE_NAME,
+        };
+        SARAH_TTS_CACHE.set(cleanText, entry);
+        return entry;
+      }
+    } catch {
+      // ignore
+    }
+
     return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
   })();
 
@@ -1921,15 +2011,6 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   } finally {
     SARAH_TTS_INFLIGHT.delete(cleanText);
   }
-}
-
-// Pre-warm Sarah's natural Vindemiatrix voice cache for the inbound opening greeting on startup
-if (config.gemini.apiKey) {
-  const defaultGreeting =
-    'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
-  const { firstChunk, restChunk } = splitIntoFastSpeechChunks(defaultGreeting);
-  if (firstChunk) synthesizeSarahNeuralAudio(firstChunk).catch(() => {});
-  if (restChunk) synthesizeSarahNeuralAudio(restChunk).catch(() => {});
 }
 
 const NON_NAME_WORDS_RE =

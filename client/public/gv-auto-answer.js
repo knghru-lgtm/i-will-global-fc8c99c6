@@ -135,9 +135,6 @@
       }
       const rect = el.getBoundingClientRect();
       if (rect.width < 14 || rect.height < 14) return false;
-      if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) {
-        return false;
-      }
       return true;
     } catch {
       return false;
