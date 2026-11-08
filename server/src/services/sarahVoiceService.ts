@@ -1933,7 +1933,7 @@ if (config.gemini.apiKey) {
 }
 
 const NON_NAME_WORDS_RE =
-  /^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|telephone|phone|video|in-person|person|appointment|schedule|book|confirm|yes|yeah|yep|okay|ok|please|thank|thanks|hello|hi|hey|my|the|and|for|with|about|want|need|would|like|can|you|help|me|set|up|an|at|on|in|to|from|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale|peoria|tucson)$/i;
+  /^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|telephone|phone|video|in-person|person|appointment|schedule|book|confirm|yes|yeah|yep|okay|ok|please|thank|thanks|hello|hi|hey|my|the|and|for|with|about|want|need|would|like|can|you|help|me|set|up|an|at|on|in|to|from|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale|peoria|tucson|your|receptionist|speaking|sarah|insurance|financial|services|fiduciary|advisory|carrier|carriers|broker|fees|direct|call|today|how|may|iwg)$/i;
 
 function toTitleCaseWords(input: string): string {
   return String(input || '')

@@ -11189,7 +11189,7 @@ if (config.gemini.apiKey) {
   if (restChunk) synthesizeSarahNeuralAudio(restChunk).catch(() => {
   });
 }
-var NON_NAME_WORDS_RE = /^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|telephone|phone|video|in-person|person|appointment|schedule|book|confirm|yes|yeah|yep|okay|ok|please|thank|thanks|hello|hi|hey|my|the|and|for|with|about|want|need|would|like|can|you|help|me|set|up|an|at|on|in|to|from|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale|peoria|tucson)$/i;
+var NON_NAME_WORDS_RE = /^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|telephone|phone|video|in-person|person|appointment|schedule|book|confirm|yes|yeah|yep|okay|ok|please|thank|thanks|hello|hi|hey|my|the|and|for|with|about|want|need|would|like|can|you|help|me|set|up|an|at|on|in|to|from|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale|peoria|tucson|your|receptionist|speaking|sarah|insurance|financial|services|fiduciary|advisory|carrier|carriers|broker|fees|direct|call|today|how|may|iwg)$/i;
 function toTitleCaseWords(input) {
   return String(input || "").trim().split(/\s+/).map((w) => w.length <= 2 && /^[A-Z]{2}$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 }

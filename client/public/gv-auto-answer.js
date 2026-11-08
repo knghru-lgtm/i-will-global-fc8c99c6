@@ -14,6 +14,7 @@
   let isSpeaking = false;
   let turnInFlight = false;
   let lastAnswerClickTs = 0;
+  let lastCallStartTs = 0;
   let lastAutoDialTs = 0;
   let callHistory = [];
   let activeAudio = null;
@@ -29,11 +30,83 @@
   let recognition = null;
   let recRunning = false;
 
+  // Web Audio mixer so Sarah's Vindemiatrix voice is injected directly into Google Voice's WebRTC call stream AND speakers!
+  let sarahAudioCtx = null;
+  let sarahStreamDest = null;
+  const activePeerConnections = new Set();
+
+  function ensureAudioMixer() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      if (!sarahAudioCtx || sarahAudioCtx.state === 'closed') {
+        sarahAudioCtx = new AudioCtx();
+        sarahStreamDest = sarahAudioCtx.createMediaStreamDestination();
+        // Keep-alive silent oscillator so Chrome NEVER throttles this Google Voice tab in the background
+        const osc = sarahAudioCtx.createOscillator();
+        const silentGain = sarahAudioCtx.createGain();
+        silentGain.gain.value = 0.00001;
+        osc.connect(silentGain);
+        silentGain.connect(sarahAudioCtx.destination);
+        osc.start();
+      }
+      if (sarahAudioCtx.state === 'suspended') {
+        sarahAudioCtx.resume().catch(() => {});
+      }
+      return sarahAudioCtx;
+    } catch {
+      return null;
+    }
+  }
+
+  // Hook RTCPeerConnection & getUserMedia so Sarah's voice feeds directly into the Google Voice phone line
+  try {
+    if (window.RTCPeerConnection && !window.__IWG_RTC_HOOKED__) {
+      window.__IWG_RTC_HOOKED__ = true;
+      const OrigPeerConnection = window.RTCPeerConnection;
+      window.RTCPeerConnection = function (...args) {
+        const pc = new OrigPeerConnection(...args);
+        activePeerConnections.add(pc);
+        pc.addEventListener('connectionstatechange', () => {
+          if (pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+            activePeerConnections.delete(pc);
+          }
+        });
+        return pc;
+      };
+      window.RTCPeerConnection.prototype = OrigPeerConnection.prototype;
+    }
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && !window.__IWG_GUM_HOOKED__) {
+      window.__IWG_GUM_HOOKED__ = true;
+      const origGum = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = async function (constraints) {
+        const stream = await origGum(constraints);
+        if (constraints && constraints.audio && stream.getAudioTracks().length > 0) {
+          try {
+            const ctx = ensureAudioMixer();
+            if (ctx && sarahStreamDest) {
+              const micSource = ctx.createMediaStreamSource(stream);
+              micSource.connect(sarahStreamDest);
+              const mixedStream = new MediaStream();
+              sarahStreamDest.stream.getAudioTracks().forEach((t) => mixedStream.addTrack(t));
+              stream.getVideoTracks().forEach((t) => mixedStream.addTrack(t));
+              return mixedStream;
+            }
+          } catch {}
+        }
+        return stream;
+      };
+    }
+  } catch {}
+
   function queryAllDeep(root = document) {
     const out = [];
     const walk = (node) => {
       if (!node) return;
-      const els = node.querySelectorAll ? node.querySelectorAll('button, [role="button"], input, [aria-label]') : [];
+      const els = node.querySelectorAll
+        ? node.querySelectorAll('button, [role="button"], a[role="button"], input, [aria-label], [gv-test-id], [mattooltip]')
+        : [];
       for (const el of els) {
         out.push(el);
         if (el.shadowRoot) walk(el.shadowRoot);
@@ -43,9 +116,38 @@
     return out;
   }
 
+  // Strict visibility check: NEVER click hidden pre-rendered buttons in Google Voice's DOM!
+  function isElementVisible(el) {
+    if (!el || typeof el.getBoundingClientRect !== 'function') return false;
+    if (el.disabled || el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('hidden')) return false;
+    if (el.closest && el.closest('[aria-hidden="true"], [hidden], #iwg-gv-receptionist-badge')) return false;
+    try {
+      const style = window.getComputedStyle(el);
+      if (
+        !style ||
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.visibility === 'collapse' ||
+        style.pointerEvents === 'none' ||
+        parseFloat(style.opacity || '1') < 0.05
+      ) {
+        return false;
+      }
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 14 || rect.height < 14) return false;
+      if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) {
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function clickElement(el) {
     if (!el) return;
     try {
+      ensureAudioMixer();
       el.focus?.();
       ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((evtName) => {
         el.dispatchEvent(
@@ -61,6 +163,7 @@
   }
 
   function updateStatusBanner(text, color = '#10b981') {
+    if (typeof document === 'undefined' || !document.body) return;
     let badge = document.getElementById('iwg-gv-receptionist-badge');
     if (!badge) {
       badge = document.createElement('div');
@@ -124,6 +227,16 @@
   }
   preloadSarahNaturalGreeting();
 
+  function base64ToArrayBuffer(base64) {
+    const binary = window.atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
   function playSingleWavBase64(base64, mime = 'audio/wav', maxMs = 15000) {
     return new Promise((resolve) => {
       if (!base64) return resolve(false);
@@ -134,6 +247,27 @@
           } catch {}
           activeAudio = null;
         }
+
+        // Also feed decoded audio into sarahStreamDest so the WebRTC phone line hears Sarah directly!
+        const ctx = ensureAudioMixer();
+        if (ctx && sarahStreamDest) {
+          try {
+            const bufCopy = base64ToArrayBuffer(base64);
+            ctx.decodeAudioData(
+              bufCopy,
+              (audioBuffer) => {
+                try {
+                  const src = ctx.createBufferSource();
+                  src.buffer = audioBuffer;
+                  src.connect(sarahStreamDest);
+                  src.start(0);
+                } catch {}
+              },
+              () => {}
+            );
+          } catch {}
+        }
+
         const audio = new Audio(`data:${mime};base64,${base64}`);
         activeAudio = audio;
         let settled = false;
@@ -160,7 +294,7 @@
   function speakEmergencyFemaleFallback(text, onDone) {
     if (!text || !('speechSynthesis' in window)) {
       isSpeaking = false;
-      startListening();
+      setTimeout(startListening, 350);
       onDone?.();
       return;
     }
@@ -185,7 +319,7 @@
         if (finished) return;
         finished = true;
         isSpeaking = false;
-        startListening();
+        setTimeout(startListening, 350);
         onDone?.();
       };
       const watchdog = setTimeout(finish, Math.min(14000, Math.max(3500, text.length * 65)));
@@ -200,7 +334,7 @@
       window.speechSynthesis.speak(utter);
     } catch {
       isSpeaking = false;
-      startListening();
+      setTimeout(startListening, 350);
       onDone?.();
     }
   }
@@ -239,7 +373,7 @@
           await playSingleWavBase64(restTts.audio_base64, restTts.audio_mime || 'audio/wav');
         }
         isSpeaking = false;
-        startListening();
+        setTimeout(startListening, 350);
         onDone?.();
         return;
       }
@@ -270,6 +404,10 @@
         }
         const clean = finalTranscript.trim();
         if (!clean || clean.length < 2) return;
+        // Ignore echo if speaker output leaked into mic
+        if (/thank you for calling iwg|100% free fiduciary|this is sarah speaking|how may i direct your call/i.test(clean)) {
+          return;
+        }
 
         turnInFlight = true;
         updateStatusBanner(`🎧 Caller: "${clean.slice(0, 42)}..." — Sarah Replying`, '#38bdf8');
@@ -332,48 +470,53 @@
     } catch {}
   }
 
-  function extractCallerInfoFromDom() {
-    const bodyText = document.body?.innerText || '';
-    const matches = bodyText.match(/(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/g) || [];
-    let phone = '';
-    for (const m of matches) {
-      const digits = m.replace(/\D/g, '').slice(-10);
-      if (digits && digits !== '4803319455') {
-        phone = m.trim();
-        break;
+  function extractActiveCallerPhone() {
+    // Look only inside the active incoming/ongoing call container on the right-hand call panel
+    const callContainers = document.querySelectorAll(
+      '[class*="incoming" i], [class*="active-call" i], [class*="call-panel" i], gv-call-sidebar, [aria-label*="Incoming call" i], [aria-label*="Call with" i]'
+    );
+    for (const c of callContainers) {
+      if (!isElementVisible(c)) continue;
+      const txt = c.innerText || '';
+      const matches = txt.match(/(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/g) || [];
+      for (const m of matches) {
+        const digits = m.replace(/\D/g, '').slice(-10);
+        if (digits && digits !== '4803319455') {
+          return m.trim();
+        }
       }
     }
-    return { phone, name: '' };
+    return '';
   }
 
   function onIncomingCallAnswered() {
-    if (callActive) return;
     callActive = true;
+    lastCallStartTs = Date.now();
     callHistory = [];
-    const info = extractCallerInfoFromDom();
+    const callerPhone = extractActiveCallerPhone();
     sessionContext = {
       mode: 'inbound',
       lead_id: '',
-      prospect_name: info.name || '',
-      prospect_phone: info.phone || '',
+      prospect_name: '',
+      prospect_phone: callerPhone || '',
       address: '',
       state: 'AZ',
     };
 
     callHistory.push({ speaker: 'sarah', text: OPENING_GREETING });
 
-    updateStatusBanner('🟢 Call Answered Immediately on (480) 331-9455 — Sarah Speaking', '#10b981');
+    updateStatusBanner('🟢 Call Answered on 1st Ring (480) 331-9455 — Sarah Speaking', '#10b981');
 
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       chrome.runtime.sendMessage({
         type: 'IWG_GV_CALL_ANSWERED',
-        callerPhone: info.phone,
-        callerName: info.name,
+        callerPhone: callerPhone,
+        callerName: '',
       });
-    } else {
+    } else if (callerPhone) {
       callSarahBackend('/api/sarah/inbound', {
-        from: info.phone,
-        caller_name: info.name,
+        from: callerPhone,
+        caller_name: '',
       });
     }
 
@@ -385,7 +528,49 @@
         '',
         preloadedGreeting?.rest_audio_base64 || null
       );
-    }, 300);
+    }, 250);
+  }
+
+  function findVisibleAnswerButtons(elements) {
+    const matched = [];
+    for (const el of elements) {
+      if (!isElementVisible(el)) continue;
+      const aria = String(el.getAttribute?.('aria-label') || '').trim();
+      const title = String(el.getAttribute?.('title') || el.getAttribute?.('mattooltip') || el.getAttribute?.('data-tooltip') || '').trim();
+      const testId = String(el.getAttribute?.('gv-test-id') || el.getAttribute?.('data-e2e') || '').trim();
+      const txt = String(el.textContent || '').trim();
+      const combined = `${aria} ${title} ${testId}`;
+
+      const isDeclineOrEnd =
+        /decline|reject|ignore|hang\s*up|end\s*call|leave\s*call|dismiss|voicemail|settings|auto-answer|keypad|mute|hold|transfer/i.test(
+          `${combined} ${txt}`
+        );
+      if (isDeclineOrEnd) continue;
+
+      const isAnswerBtn =
+        /\b(answer|answer call|accept|accept call)\b/i.test(aria) ||
+        /\b(answer|answer call|accept|accept call)\b/i.test(title) ||
+        /^(answer|answer call|accept|accept call)$/i.test(txt) ||
+        /answer/i.test(testId);
+
+      if (isAnswerBtn) {
+        matched.push(el);
+      }
+    }
+    return matched;
+  }
+
+  function hasVisibleHangupButton(elements) {
+    for (const el of elements) {
+      if (!isElementVisible(el)) continue;
+      const aria = String(el.getAttribute?.('aria-label') || '').trim();
+      const title = String(el.getAttribute?.('title') || el.getAttribute?.('mattooltip') || '').trim();
+      const testId = String(el.getAttribute?.('gv-test-id') || '').trim();
+      if (/\b(end\s*call|hang\s*up|leave\s*call|disconnect)\b/i.test(`${aria} ${title} ${testId}`)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function scanGoogleVoiceDom() {
@@ -393,33 +578,23 @@
     const now = Date.now();
     const elements = queryAllDeep(document);
 
-    // 1. Check for Incoming Call "Answer" button in Google Voice
-    for (const el of elements) {
-      if (el.disabled) continue;
-      const aria = String(el.getAttribute?.('aria-label') || '').trim();
-      const testId = String(el.getAttribute?.('gv-test-id') || el.getAttribute?.('data-e2e') || '').trim();
-      const txt = String(el.textContent || '').trim();
-
-      const isAnswerBtn =
-        /^(answer|answer call|accept|accept call)$/i.test(aria) ||
-        /^(answer|answer call|accept)$/i.test(txt) ||
-        /answer.*call|incoming.*answer/i.test(aria) ||
-        /answer/i.test(testId);
-
-      const isDeclineOrEnd = /decline|reject|ignore|hang\s*up|end\s*call|dismiss/i.test(aria + ' ' + txt + ' ' + testId);
-
-      if (isAnswerBtn && !isDeclineOrEnd && now - lastAnswerClickTs > 2500) {
-        lastAnswerClickTs = now;
-        clickElement(el);
-        onIncomingCallAnswered();
-        return;
+    // 1. Check for VISIBLE Incoming Call "Answer" button in Google Voice
+    const answerBtns = findVisibleAnswerButtons(elements);
+    if (answerBtns.length > 0 && now - lastAnswerClickTs > 600) {
+      lastAnswerClickTs = now;
+      for (const btn of answerBtns) {
+        clickElement(btn);
       }
+      if (!callActive || now - lastCallStartTs > 4000) {
+        onIncomingCallAnswered();
+      }
+      return;
     }
 
-    // 2. Check if URL has ?a=nc,<number> outbound call request and auto-click Call button
-    if (window.location.search.includes('a=nc,') && now - lastAutoDialTs > 5000) {
+    // 2. Check if URL has ?a=nc,<number> outbound call request and auto-click visible Call button
+    if (window.location.search.includes('a=nc,') && now - lastAutoDialTs > 4000) {
       for (const el of elements) {
-        if (el.disabled) continue;
+        if (!isElementVisible(el)) continue;
         const aria = String(el.getAttribute?.('aria-label') || '').trim();
         if (/^call(\s+\+?[\d\s()-]+)?$/i.test(aria)) {
           lastAutoDialTs = now;
@@ -429,13 +604,9 @@
       }
     }
 
-    // 3. Detect if an active call has ended
-    if (callActive && now - lastAnswerClickTs > 5000) {
-      const hasHangupBtn = elements.some((el) => {
-        const aria = String(el.getAttribute?.('aria-label') || '').trim();
-        return /end\s*call|hang\s*up|disconnect/i.test(aria);
-      });
-      if (!hasHangupBtn) {
+    // 3. Detect if an active call has ended (only checks VISIBLE End Call / Hang Up button!)
+    if (callActive && now - lastCallStartTs > 4500) {
+      if (!hasVisibleHangupButton(elements)) {
         callActive = false;
         if (activeAudio) {
           try {
@@ -454,6 +625,16 @@
     }
   }
 
+  // Expose diagnostic helper for automated 5-call testing
+  window.__IWG_GV_SCAN_NOW__ = scanGoogleVoiceDom;
+  window.__IWG_GV_GET_STATE__ = () => ({
+    callActive,
+    isSpeaking,
+    lastAnswerClickTs,
+    lastCallStartTs,
+    hasPreloadedGreeting: Boolean(preloadedGreeting?.audio_base64),
+  });
+
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg && msg.type === 'IWG_GV_DIAL_NOW' && msg.phone) {
@@ -465,17 +646,34 @@
   }
 
   updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
-  const intervalId = setInterval(scanGoogleVoiceDom, 150);
+  const intervalId = setInterval(scanGoogleVoiceDom, 120);
+
+  // Unthrottled Web Worker timer so Chrome NEVER throttles background call detection
+  let worker = null;
+  try {
+    const blob = new Blob(
+      ['const id = setInterval(() => postMessage("tick"), 120); onmessage = (e) => { if (e.data === "stop") clearInterval(id); };'],
+      { type: 'application/javascript' }
+    );
+    worker = new Worker(URL.createObjectURL(blob));
+    worker.onmessage = () => scanGoogleVoiceDom();
+  } catch {}
 
   const observer = new MutationObserver(() => {
     scanGoogleVoiceDom();
   });
   if (document.body) {
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'hidden', 'aria-hidden'] });
   }
 
   window.__IWG_GV_RECEPTIONIST_CLEANUP__ = () => {
     clearInterval(intervalId);
+    if (worker) {
+      try {
+        worker.postMessage('stop');
+        worker.terminate();
+      } catch {}
+    }
     try {
       observer.disconnect();
     } catch {}

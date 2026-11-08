@@ -1654,7 +1654,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const snippet = `fetch('https://iwillglobal.com/gv-auto-answer.js').then(r=>r.text()).then(eval);`;
+                    const snippet = `fetch('https://iwillglobal.com/gv-auto-answer.js?t='+Date.now()).then(r=>r.text()).then(eval);`;
                     navigator.clipboard?.writeText(snippet);
                     alert(
                       'Copied 1-Click Auto-Answer Script!\n\nTo activate instant auto-answer inside your open Google Voice window:\n1. Click on your "Google Voice - Voice - Calls" window and press Ctrl+Shift+J (opens Console)\n2. Paste (Ctrl+V) and press Enter — OR in chrome://extensions click "Load unpacked" and select:\nc:\\Users\\Amen Ra Family\\King Amen Ra\\i-will-global-fc8c99c6\\google-voice-extension'
