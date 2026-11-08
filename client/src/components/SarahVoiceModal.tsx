@@ -744,7 +744,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
           history: historyPayload,
           context: {
             mode: activeModeForTurn,
-            source_channel: activeModeForTurn === 'outbound' ? 'outbound' : 'website_traffic',
+            source_channel: activeModeForTurn === 'outbound' ? 'outbound' : 'call_in_lead',
             lead_id: ctxOverride?.lead_id !== undefined ? ctxOverride.lead_id : activeCtx.lead_id,
             prospect_name: ctxOverride?.prospect_name !== undefined ? ctxOverride.prospect_name : activeCtx.prospect_name,
             prospect_phone: ctxOverride?.phone !== undefined ? ctxOverride.phone : activeCtx.phone,
@@ -777,6 +777,11 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       if (res?.prospect_address && res.prospect_address !== sessionCtxRef.current.address) {
         setProspectAddress(res.prospect_address);
         sessionCtxRef.current.address = res.prospect_address;
+        leadCapturedChange = true;
+      }
+      if (res?.prospect_state && res.prospect_state !== sessionCtxRef.current.state) {
+        setProspectState(res.prospect_state);
+        sessionCtxRef.current.state = res.prospect_state;
         leadCapturedChange = true;
       }
       if (leadCapturedChange) {

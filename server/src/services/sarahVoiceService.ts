@@ -50,6 +50,7 @@ export interface SarahSessionContext {
   prospect_phone?: string;
   state?: string;
   address?: string;
+  how_heard?: string;
   caller_name?: string;
   on_warm_transfer?: boolean;
   product_interest?: string;
@@ -447,6 +448,7 @@ export async function upsertReceptionistLeadFromContext(
   const rawName = String(ctx.prospect_name || '').trim();
   const rawPhone = String(ctx.prospect_phone || '').trim();
   const rawAddress = String(ctx.address || '').trim();
+  const howHeard = String(ctx.how_heard || '').trim();
   const hasName = !isPlaceholderProspectName(rawName);
   const hasPhone = !isPlaceholderProspectPhone(rawPhone, mode);
   const hasAddress = !isPlaceholderProspectAddress(rawAddress);
@@ -464,7 +466,7 @@ export async function upsertReceptionistLeadFromContext(
   const productLine = ctx.product_interest || 'Insurance & Benefits';
   const noteLine =
     extraNotes ||
-    `[${leadSource}] Added by Receptionist (${productLine})${hasName ? ` — Name: ${rawName}` : ''}${hasPhone ? `, Phone: ${rawPhone}` : ''}${hasAddress ? `, Address: ${rawAddress}` : ''}`;
+    `[${leadSource}] Added by Receptionist (${productLine})${hasName ? ` — Name: ${rawName}` : ''}${hasPhone ? `, Phone: ${rawPhone}` : ''}${hasAddress ? `, Address: ${rawAddress}` : ''}${howHeard ? `, Heard About Us: ${howHeard}` : ''}`;
 
   try {
     let existing = ctx.lead_id
@@ -502,13 +504,14 @@ export async function upsertReceptionistLeadFromContext(
              last_name = CASE WHEN $3 != 'Caller' AND $3 != 'Lead' AND $3 != 'Client' THEN $3 ELSE last_name END,
              phone = COALESCE(NULLIF($4, ''), phone),
              address = COALESCE(NULLIF($5, ''), address),
-             source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' THEN $6 ELSE source END,
+             state = CASE WHEN $9 != '' AND $9 != 'Arizona' AND $9 != 'AZ' THEN $9 ELSE COALESCE(NULLIF(state, ''), $9) END,
+             source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' OR source = 'Website Traffic' THEN $6 ELSE source END,
              interest = COALESCE(NULLIF($7, ''), interest),
              notes = CASE WHEN COALESCE(notes, '') LIKE '%' || $8 || '%' THEN notes ELSE COALESCE(notes, '') || ' | ' || $8 END,
              last_contacted_at = now(),
              updated_at = now()
          WHERE id = $1`,
-        [existing.id, firstName, lastName, phone || '', address || '', leadSource, productLine, noteLine]
+        [existing.id, firstName, lastName, phone || '', address || '', leadSource, productLine, noteLine, state]
       ).catch(() => { });
       return existing.id;
     }
@@ -538,6 +541,7 @@ export async function executeSarahTool(
     const rawAddress = String(args.address || args.customer_address || ctx?.address || '').trim();
     const hasValidAddress = !isPlaceholderProspectAddress(rawAddress);
     const state = args.state || ctx?.state || 'AZ';
+    const howHeard = String(args.how_heard || ctx?.how_heard || '').trim();
     const productLine =
       detectProductInterest(
         `${args.product_interest || ''} ${args.notes || ''} ${ctx?.product_interest || ''}`,
@@ -552,23 +556,41 @@ export async function executeSarahTool(
       if (!hasValidAddress) missingFields.push('your street address');
 
       if (missingFields.length > 0) {
-        // Save any partial lead info already collected
+        // Save any partial lead info already collected as a Call-In Lead
         if (!isGeneric || hasValidPhone) {
           const partialLeadId = await upsertReceptionistLeadFromContext({
             ...ctx,
             prospect_name: !isGeneric ? rawCustomerName : ctx?.prospect_name,
             prospect_phone: hasValidPhone ? rawPhone : ctx?.prospect_phone,
             address: hasValidAddress ? rawAddress : ctx?.address,
+            state,
+            how_heard: howHeard || ctx?.how_heard,
             product_interest: productLine,
           });
           if (partialLeadId && ctx) ctx.lead_id = partialLeadId;
         }
-        const missingListStr =
-          missingFields.length === 1
-            ? missingFields[0]
-            : missingFields.length === 2
-              ? `${missingFields[0]} and ${missingFields[1]}`
-              : `${missingFields[0]}, ${missingFields[1]}, and ${missingFields[2]}`;
+
+        const callerFirst = !isGeneric ? rawCustomerName.split(/\s+/)[0] : '';
+        const howHeardPrompt = !howHeard ? ' Also, how did you hear about us?' : '';
+        let stepPrompt = '';
+
+        if (isGeneric && !hasValidPhone && !hasValidAddress) {
+          stepPrompt = `I would be delighted to set up your ${apptType} ${productLine} appointment with our Principal Broker, King Amen Ra, for ${apptDatetime}! To get you added to our system and send your confirmation text, may I start with your full first and last name, your best phone number, and your street address?${howHeardPrompt}`;
+        } else if (!isGeneric && !hasValidPhone && !hasValidAddress) {
+          stepPrompt = `It is a pleasure to assist you, ${callerFirst}!${howHeard ? ` Thank you for reaching out to us through ${howHeard}.` : ''} To lock in ${apptDatetime} on Principal Broker King Amen Ra's calendar and send your confirmation text, what is the best phone number and street address for you?${howHeardPrompt}`;
+        } else if (!isGeneric && hasValidPhone && !hasValidAddress) {
+          stepPrompt = `Thank you so much, ${callerFirst}—I have your phone number down as ${rawPhone}. What is your street address (including city, state, and zip code) so I can finalize your ${apptDatetime} appointment with King Amen Ra and send your confirmation text?${howHeardPrompt}`;
+        } else if (!isGeneric && !hasValidPhone && hasValidAddress) {
+          stepPrompt = `Thank you so much, ${callerFirst}—I have your street address at ${rawAddress}. What is the best phone number for you so I can finalize your ${apptDatetime} appointment with King Amen Ra and send your confirmation text?${howHeardPrompt}`;
+        } else if (isGeneric && hasValidPhone && hasValidAddress) {
+          stepPrompt = `Thank you! I have your phone number (${rawPhone}) and your address (${rawAddress}) ready for ${apptDatetime} with Principal Broker King Amen Ra. May I please have your full first and last name to finalize your appointment?${howHeardPrompt}`;
+        } else {
+          const missingListStr =
+            missingFields.length === 1
+              ? missingFields[0]
+              : `${missingFields[0]} and ${missingFields[1]}`;
+          stepPrompt = `Thank you! I have ${apptDatetime} ready for your ${apptType} ${productLine} appointment with our Principal Broker, King Amen Ra. To finish setting up your appointment and send your confirmation text, may I please get ${missingListStr}?${howHeardPrompt}`;
+        }
 
         return {
           success: false,
@@ -578,7 +600,8 @@ export async function executeSarahTool(
           appointment_type: apptType,
           preferred_datetime: apptDatetime,
           product_line: productLine,
-          message: `I have ${apptDatetime} ready for your ${apptType} ${productLine} appointment with our Principal Broker, King Amen Ra! To finish setting up your appointment and send your confirmation text, may I please get ${missingListStr}?`,
+          how_heard: howHeard || null,
+          message: stepPrompt,
         };
       }
     }
@@ -592,7 +615,7 @@ export async function executeSarahTool(
     const leadSource = resolveInboundLeadSource(ctx);
     const notes =
       args.notes ||
-      `[${leadSource}] ${productLine} consultation booked via Receptionist (${SARAH_MAIN_LINE_DISPLAY}) for ${customerName}${address ? `, Address: ${address}` : ''}, Phone: ${phone}`;
+      `[${leadSource}] ${productLine} consultation booked via Receptionist (${SARAH_MAIN_LINE_DISPLAY}) for ${customerName}${address ? `, Address: ${address}` : ''}, Phone: ${phone}${howHeard ? `, Heard About Us: ${howHeard}` : ''}`;
 
     // Customer-facing initial confirmation SMS ONLY asks customer to reply YES (never mentions internal reminder texts)
     const smsText = `Hi ${isGeneric ? 'there' : firstName}, your ${productLine} ${apptType} appointment with Principal Broker King Amen Ra (NPN 16094432) at IWG Insurance & Financial Services is set for ${apptDatetime}${address ? ` (${address})` : ''}. Please reply YES to confirm your appointment! Questions? Call ${SARAH_MAIN_LINE_DISPLAY}.`;
@@ -629,7 +652,7 @@ export async function executeSarahTool(
         );
       } else {
         await q(
-          `UPDATE leads SET first_name = CASE WHEN $4 != 'Valued' THEN $4 ELSE first_name END, last_name = CASE WHEN $5 != 'Client' THEN $5 ELSE last_name END, phone = COALESCE(NULLIF($6, ''), phone), address = COALESCE(NULLIF($7, ''), address), status = 'Appointment Set', source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' THEN $8 ELSE source END, interest = COALESCE(NULLIF($9, ''), interest), notes = COALESCE(notes, '') || ' | ' || $2, last_disposition = $3, last_contacted_at = now(), updated_at = now() WHERE id = $1`,
+          `UPDATE leads SET first_name = CASE WHEN $4 != 'Valued' THEN $4 ELSE first_name END, last_name = CASE WHEN $5 != 'Client' THEN $5 ELSE last_name END, phone = COALESCE(NULLIF($6, ''), phone), address = COALESCE(NULLIF($7, ''), address), state = CASE WHEN $10 != '' AND $10 != 'Arizona' AND $10 != 'AZ' THEN $10 ELSE COALESCE(NULLIF(state, ''), $10) END, status = 'Appointment Set', source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' OR source = 'Website Traffic' THEN $8 ELSE source END, interest = COALESCE(NULLIF($9, ''), interest), notes = COALESCE(notes, '') || ' | ' || $2, last_disposition = $3, last_contacted_at = now(), updated_at = now() WHERE id = $1`,
           [
             lead.id,
             notes,
@@ -640,6 +663,7 @@ export async function executeSarahTool(
             address,
             leadSource,
             productLine,
+            state,
           ]
         ).catch(() => { });
       }
@@ -819,14 +843,16 @@ export async function executeSarahTool(
         appointment_id: appt?.id || activityId,
         lead_id: lead?.id || null,
         lead_source: leadSource,
+        how_heard: howHeard || null,
         customer_name: customerName,
         customer_address: address,
+        customer_state: state,
         product_line: productLine,
         appointment_type: apptType,
         preferred_datetime: apptDatetime,
         confirmed_datetime: apptDatetime,
         line_number: SARAH_MAIN_LINE_DISPLAY,
-        message: `Wonderful, ${isGeneric ? 'thank you' : customerName}! I have scheduled your ${apptType} ${productLine} appointment with our Principal Broker King Amen Ra for ${apptDatetime}${address ? ` with your address at ${address}` : ''}, and I have just sent a confirmation text to your phone at ${phone}. Please reply YES to that confirmation text to confirm your appointment, and we look forward to speaking with you!`,
+        message: `Wonderful, ${isGeneric ? 'thank you' : customerName}!${howHeard ? ` Thank you so much for finding us through ${howHeard}.` : ''} I have scheduled your ${apptType} ${productLine} appointment with our Principal Broker King Amen Ra for ${apptDatetime}${address ? ` with your address at ${address}` : ''}, and I have just sent a confirmation text to your phone at ${phone}. Please reply YES to that confirmation text to confirm your appointment${howHeard ? ', and we look forward to speaking with you!' : '! Before I let you go, how did you hear about IWG Insurance and Financial Services?'}`,
       };
     } catch (err: any) {
       console.error('Error booking appointment in Sarah Voice Service:', err);
@@ -842,8 +868,10 @@ export async function executeSarahTool(
         day_before_sms_text: dayBeforeSmsText,
         same_day_sms_text: sameDaySmsText,
         lead_source: leadSource,
+        how_heard: howHeard || null,
         customer_name: customerName,
         customer_address: address,
+        customer_state: state,
         product_line: productLine,
         appointment_type: apptType,
         preferred_datetime: apptDatetime,
@@ -1182,7 +1210,7 @@ export async function checkLiveTransferCallStatus(params: {
                updated_at = now()
            WHERE id = $1`,
           [actRow.id, `Connected to ${recipientName} (${recipientPhone}) via Google Voice (480) 331-9455 — Whisper Delivered & Merged`]
-        ).catch(() => {});
+        ).catch(() => { });
       }
     }
 
@@ -1924,7 +1952,7 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
           };
           if (SARAH_TTS_CACHE.size > 150) {
             const oldestKey = SARAH_TTS_CACHE.keys().next().value;
-            if (oldestKey && !( oldestKey in (sarahGreetingAudioJson as Record<string, string>) )) {
+            if (oldestKey && !(oldestKey in (sarahGreetingAudioJson as Record<string, string>))) {
               SARAH_TTS_CACHE.delete(oldestKey);
             }
           }
@@ -1968,7 +1996,7 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
                   clearTimeout(timer);
                   try {
                     session.close();
-                  } catch {}
+                  } catch { }
                   resolve();
                 }
               },
@@ -2014,7 +2042,19 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
 }
 
 const NON_NAME_WORDS_RE =
-  /^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|telephone|phone|video|in-person|person|appointment|schedule|book|confirm|yes|yeah|yep|okay|ok|please|thank|thanks|hello|hi|hey|my|the|and|for|with|about|want|need|would|like|can|you|help|me|set|up|an|at|on|in|to|from|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale|peoria|tucson|your|receptionist|speaking|sarah|insurance|financial|services|fiduciary|advisory|carrier|carriers|broker|fees|direct|call|today|how|may|iwg)$/i;
+  /^(good|doing|fine|well|calling|looking|interested|happy|ready|busy|wondering|asking|here|not|sure|term|life|whole|health|group|long|medicare|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|telephone|phone|video|in-person|person|appointment|schedule|book|confirm|yes|yeah|yep|okay|ok|please|thank|thanks|hello|hi|hey|my|the|and|for|with|about|want|need|would|like|can|you|help|me|set|up|an|at|on|in|to|from|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale|peoria|tucson|ohio|canton|cleveland|columbus|cincinnati|akron|toledo|dayton|california|texas|florida|illinois|pennsylvania|georgia|michigan|virginia|washington|massachusetts|indiana|tennessee|missouri|maryland|wisconsin|minnesota|colorado|alabama|louisiana|kentucky|oregon|oklahoma|connecticut|utah|iowa|nevada|arkansas|mississippi|kansas|nebraska|idaho|hawaii|maine|montana|delaware|alaska|vermont|wyoming|street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|way|court|ct|circle|cir|place|pl|parkway|pkwy|trail|trl|loop|hwy|highway|terrace|ter|address|number|cell|mobile|zip|code|state|city|website|google|online|friend|referral|referred|colleague|coworker|heard|hear|us|your|is|am|are|was|were|live|located|receptionist|speaking|sarah|insurance|financial|services|fiduciary|advisory|carrier|carriers|broker|fees|direct|call|today|how|may|iwg)$/i;
+
+const US_STATE_MAP: Record<string, string> = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA', colorado: 'CO',
+  connecticut: 'CT', delaware: 'DE', florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID',
+  illinois: 'IL', indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA',
+  maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN', mississippi: 'MS',
+  missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+  'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', ohio: 'OH',
+  oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT', virginia: 'VA',
+  washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY',
+};
 
 function toTitleCaseWords(input: string): string {
   return String(input || '')
@@ -2037,6 +2077,28 @@ function isValidExtractedFullName(candidate: string): boolean {
   return true;
 }
 
+function extractCleanNameFromWords(rawPhrase: string): string | undefined {
+  const tokens = String(rawPhrase || '')
+    .trim()
+    .split(/\s+/)
+    .map((t) => t.replace(/^[^A-Za-z]+|[^A-Za-z'-]+$/g, ''))
+    .filter(Boolean);
+  const validTokens: string[] = [];
+  for (const tok of tokens) {
+    if (!/^[A-Za-z][A-Za-z'-]{1,20}$/.test(tok)) break;
+    if (NON_NAME_WORDS_RE.test(tok)) break;
+    validTokens.push(tok);
+    if (validTokens.length === 3) break;
+  }
+  if (validTokens.length >= 2) {
+    const candidate = validTokens.join(' ');
+    if (isValidExtractedFullName(candidate)) {
+      return toTitleCaseWords(candidate);
+    }
+  }
+  return undefined;
+}
+
 export function extractCustomerContactDetails(
   text: string,
   history?: Array<{ speaker: 'sarah' | 'user'; text: string }>
@@ -2044,6 +2106,8 @@ export function extractCustomerContactDetails(
   fullName?: string;
   phone?: string;
   address?: string;
+  state?: string;
+  howHeard?: string;
 } {
   // Build user-only text so we NEVER accidentally extract Sarah's own (480) 331-9455 number or words
   const userTurns: string[] = [];
@@ -2061,14 +2125,17 @@ export function extractCustomerContactDetails(
   let fullName: string | undefined;
   let phone: string | undefined;
   let address: string | undefined;
+  let state: string | undefined;
+  let howHeard: string | undefined;
 
-  // 1. Extract Phone Number (ignoring the agency's own 480-331-9455 and 602-456-9681 numbers)
-  const phoneRegex = /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g;
+  // 1. Extract Phone Number (supports 10-digit and 11-digit numbers like 33014122892; ignores 480-331-9455 and 602-456-9681)
+  const phoneRegex = /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4,5}\b|\b\d{10,11}\b/g;
   let pm: RegExpExecArray | null;
   while ((pm = phoneRegex.exec(s)) !== null) {
     const digits = pm[0].replace(/\D/g, '');
     if (
       digits.length >= 10 &&
+      digits.length <= 11 &&
       !digits.endsWith('4803319455') &&
       !digits.endsWith('6024569681')
     ) {
@@ -2076,32 +2143,68 @@ export function extractCustomerContactDetails(
     }
   }
 
-  // 2. Extract Street Address (case-insensitive)
-  const addrMatch =
-    s.match(
-      /\b(?:address is|live at|located at)\s+(\d{1,6}\s+[A-Za-z0-9.\s,#-]{3,55}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl|Parkway|Pkwy|Trail|Trl|Loop|Hwy|Highway|Terrace|Ter)(?:[,\s]+[A-Za-z.\s]{2,25})?(?:[,\s]+[A-Za-z]{2,15})?(?:\s+\d{5})?)\b/i
-    ) ||
-    s.match(
-      /\b(\d{1,6}\s+[A-Za-z0-9.\s]{2,40}\s+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl|Parkway|Pkwy|Trail|Trl|Loop|Hwy|Highway|Terrace|Ter)\b(?:[,\s]+[A-Za-z.\s]{2,25})?(?:[,\s]+[A-Za-z]{2,15})?(?:\s+\d{5})?)/i
-    );
+  // 2. Extract Street Address & State (supports both "123456 Street, Canton, Ohio 44705" and unpunctuated "123456 street canton ohio 44705")
+  const addrRegex =
+    /\b(\d{1,6}\s+(?:[A-Za-z0-9.#-]{1,25}\s+){0,4}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl|Parkway|Pkwy|Trail|Trl|Loop|Hwy|Highway|Terrace|Ter)\b(?:[,\s]+[A-Za-z.]{2,20}){0,4}(?:[,\s]+\d{5}(?:-\d{4})?\b)?)/i;
+
+  const addrMatch = s.match(addrRegex);
   if (addrMatch?.[1]) {
-    address = addrMatch[1].replace(/\s+\|\s+.*$/, '').trim();
+    address = addrMatch[1]
+      .replace(/\s+\|\s+.*$/, '')
+      .replace(/\b(?:and\s+my\s+phone|my\s+phone|phone\s+is|phone\s+number|phone\b|and\s+i\s+want|and\s+you\s+want|you\s+want|i\s+want|\d{10,11}).*$/i, '')
+      .replace(/[,;\s]+$/, '')
+      .trim();
   }
 
-  // 3. Extract Full Name (case-insensitive so Web Speech API lowercase transcripts work!)
-  const explicitNameMatch =
-    s.match(
-      /\b(?:my name is|my full name is|name is|this is|i am|i'm)\s+([A-Za-z][A-Za-z'-]{1,20}(?:\s+[A-Za-z][A-Za-z'-]{1,20}){1,2})\b/i
-    ) ||
-    s.match(
-      /\b([A-Za-z][A-Za-z'-]{1,20}\s+[A-Za-z][A-Za-z'-]{1,20})(?=\s*(?:,|and my|my phone|my number|my address|at\s+\d|phone|address|\(?\d{3}\)?[-.\s]?\d{3}))/i
+  // Extract State from address or user text
+  const stateSearchStr = `${address || ''} ${s}`;
+  for (const [stateName, abbr] of Object.entries(US_STATE_MAP)) {
+    if (new RegExp(`\\b${stateName}\\b`, 'i').test(stateSearchStr)) {
+      state = abbr;
+      break;
+    }
+  }
+  if (!state) {
+    const abbrZipMatch = stateSearchStr.match(/\b([A-Z]{2})\s+\d{5}\b/);
+    if (abbrZipMatch?.[1]) {
+      state = abbrZipMatch[1].toUpperCase();
+    }
+  }
+
+  // 3. Extract Full Name (stops cleanly at non-name words like "your", "my", "address", "phone" in unpunctuated speech!)
+  const explicitIntroRegex = /\b(?:my name is|my full name is|your name is|name is|this is|i am|i'm)\s+([A-Za-z][A-Za-z'-]{1,20}(?:\s+[A-Za-z][A-Za-z'-]{1,20}){1,3})/gi;
+  let nm: RegExpExecArray | null;
+  while ((nm = explicitIntroRegex.exec(s)) !== null) {
+    const candidate = extractCleanNameFromWords(nm[1]);
+    if (candidate) {
+      fullName = candidate;
+    }
+  }
+
+  if (!fullName) {
+    const beforeFieldMatch = s.match(
+      /\b([A-Za-z][A-Za-z'-]{1,20}\s+[A-Za-z][A-Za-z'-]{1,20})(?=\s*(?:,|and my|my phone|my number|my address|your address|at\s+\d|phone|address|\(?\d{3}\)?[-.\s]?\d{3}))/i
     );
-
-  if (explicitNameMatch?.[1] && isValidExtractedFullName(explicitNameMatch[1])) {
-    fullName = toTitleCaseWords(explicitNameMatch[1]);
+    if (beforeFieldMatch?.[1]) {
+      const candidate = extractCleanNameFromWords(beforeFieldMatch[1]);
+      if (candidate) fullName = candidate;
+    }
   }
 
-  // 4. Context-aware direct turn extraction (when caller answers Sarah's question directly, e.g., "John Smith" or "123 Main St")
+  // 4. Extract "How Did You Hear About Us?" (howHeard)
+  if (/\b(friend|family|neighbor|colleague|coworker|referred|referral|word of mouth|someone told me|brother|sister|recommended)\b/i.test(s)) {
+    howHeard = 'Friend / Personal Referral';
+  } else if (/\b(website|iwillglobal\.com|your site|web page|online)\b/i.test(s)) {
+    howHeard = 'Company Website (iwillglobal.com)';
+  } else if (/\b(google|search engine|searched online|bing|yahoo)\b/i.test(s)) {
+    howHeard = 'Google Search';
+  } else if (/\b(facebook|instagram|youtube|linkedin|tiktok|social media)\b/i.test(s)) {
+    howHeard = 'Social Media';
+  } else if (/\b(postcard|direct mail|mailer|flyer|brochure|letter in the mail)\b/i.test(s)) {
+    howHeard = 'Direct Mail / Postcard';
+  }
+
+  // 5. Context-aware direct turn extraction (when caller answers Sarah's question directly)
   const allTurns = [...(history || [])];
   if (text && (!allTurns.length || allTurns[allTurns.length - 1]?.text !== text)) {
     allTurns.push({ speaker: 'user', text });
@@ -2124,38 +2227,40 @@ export function extractCustomerContactDetails(
         .replace(/^(?:yes|yeah|sure|okay|ok|hi|hello)[,\s]+/i, '')
         .replace(/[,.;|].*$/, '')
         .trim();
-      const firstTwoWordsMatch = cleanedForName.match(/^([A-Za-z][A-Za-z'-]{1,20}\s+[A-Za-z][A-Za-z'-]{1,20})(?:\s+([A-Za-z][A-Za-z'-]{1,20}))?$/);
-      if (firstTwoWordsMatch) {
-        const candidate = firstTwoWordsMatch[2]
-          ? `${firstTwoWordsMatch[1]} ${firstTwoWordsMatch[2]}`
-          : firstTwoWordsMatch[1];
-        if (isValidExtractedFullName(candidate)) {
-          fullName = toTitleCaseWords(candidate);
-        }
-      } else if (/full name|first and last name|your name/i.test(prevSarah)) {
-        const leadWordsMatch = cleanedForName.match(/^([A-Za-z][A-Za-z'-]{1,20}\s+[A-Za-z][A-Za-z'-]{1,20})\b/);
-        if (leadWordsMatch?.[1] && isValidExtractedFullName(leadWordsMatch[1])) {
-          fullName = toTitleCaseWords(leadWordsMatch[1]);
-        }
+      const candidate = extractCleanNameFromWords(cleanedForName);
+      if (candidate && (cleanedForName.split(/\s+/).length <= 3 || /full name|first and last name|your name/i.test(prevSarah))) {
+        fullName = candidate;
       }
     }
 
     // Direct address answer if Sarah asked for street address
     if (!address && /street address|your address|business or street address/i.test(prevSarah)) {
-      const numStreetMatch = uText.match(/\b(\d{1,6}\s+[A-Za-z0-9.\s,#-]{4,60})\b/);
+      const numStreetMatch = uText.match(/\b(\d{1,6}\s+[A-Za-z0-9.\s,#-]{4,65})\b/);
       if (numStreetMatch?.[1]) {
         const candidateAddr = numStreetMatch[1]
-          .replace(/\b(?:and my phone|my phone|phone is|number is).*$/i, '')
+          .replace(/\b(?:and my phone|my phone|phone is|number is|\d{10,11}).*$/i, '')
           .replace(/[,;\s]+$/, '')
           .trim();
-        if (candidateAddr.length >= 6 && !/^\d{3}[-.\s]?\d{3}[-.\s]?\d{4}$/.test(candidateAddr)) {
+        if (candidateAddr.length >= 6 && !/^\d{3}[-.\s]?\d{3}[-.\s]?\d{4,5}$/.test(candidateAddr)) {
           address = candidateAddr;
         }
       }
     }
+
+    // Direct "how did you hear about us" answer when Sarah specifically asked how they heard about us after booking
+    if (
+      !howHeard &&
+      /before i let you go, how did you hear about/i.test(prevSarah) &&
+      !/\b(my name is|address is|phone is|\d{10,11}|\d{1,6}\s+\w+\s+(?:street|st|ave|road|rd|dr|blvd))\b/i.test(uText)
+    ) {
+      const cleanHow = uText.trim();
+      if (cleanHow.length >= 2 && cleanHow.length <= 80 && !extractCleanNameFromWords(cleanHow)) {
+        howHeard = cleanHow;
+      }
+    }
   }
 
-  return { fullName, phone, address };
+  return { fullName, phone, address, state, howHeard };
 }
 
 export function detectAppointmentBookingIntent(
@@ -2166,12 +2271,15 @@ export function detectAppointmentBookingIntent(
 ): {
   wantsAppointment: boolean;
   shouldBook: boolean;
+  alreadyBookedInHistory: boolean;
   appointmentType: 'Telephone' | 'In-Person' | 'Video';
   preferredDatetime: string;
   productInterest: string;
   extractedName?: string;
   extractedPhone?: string;
   extractedAddress?: string;
+  extractedState?: string;
+  extractedHowHeard?: string;
 } {
   const combined = `${historyText} ${userText} ${sarahText}`;
   const lowerUser = String(userText || '').toLowerCase();
@@ -2187,10 +2295,34 @@ export function detectAppointmentBookingIntent(
       ? 'Video'
       : 'Telephone';
 
+  // Extract preferredDatetime from USER turns first so Sarah's work-hours mention ("Monday through Friday 8:00 AM") never overrides the caller's requested time ("Thursday afternoon")!
+  const userOnlyText = [
+    ...(history || [])
+      .filter((h) => h.speaker === 'user' || (h as any).role === 'user')
+      .map((h) => h.text),
+    userText,
+  ].join(' | ');
+
+  const dayTimeRegex =
+    /\b((?:tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|next week)(?:\s+(?:morning|afternoon|evening|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?|\d{1,2}(?::\d{2})?\s*(?:am|pm)|morning|afternoon)\b/gi;
+  const userTimeMatches = [...userOnlyText.matchAll(dayTimeRegex)].map((m) => m[0]);
   const timeMatch =
-    `${userText} ${historyText} ${sarahText}`.match(
-      /\b((?:tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|next week)(?:\s+(?:morning|afternoon|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?|\d{1,2}(?::\d{2})?\s*(?:am|pm)|morning|afternoon)\b/i
-    )?.[0] || 'Tomorrow at 10:00 AM';
+    userTimeMatches.length > 0
+      ? userTimeMatches[userTimeMatches.length - 1]
+      : `${userText} ${sarahText}`.match(dayTimeRegex)?.[0] || 'Thursday afternoon';
+
+  // Check if an appointment was ALREADY booked and confirmed in an earlier Sarah turn in this conversation
+  const alreadyBookedInHistory = Boolean(
+    (history || []).some(
+      (h) =>
+        (h.speaker === 'sarah' || (h as any).role === 'sarah') &&
+        /\b(i have scheduled your .* appointment|just sent a confirmation text to your phone|please reply yes to that confirmation text)\b/i.test(
+          h.text || ''
+        )
+    )
+  );
+
+  const userAskingToReschedule = /\b(change|reschedule|different time|instead|move it)\b/i.test(lowerUser);
 
   const userGivesTimeOrFormat =
     /\b(tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|\d{1,2}\s*(?:am|pm)|telephone|phone appointment|in-person|in person|video appointment)\b/i.test(
@@ -2207,7 +2339,7 @@ export function detectAppointmentBookingIntent(
     );
 
   const userExplicitlyRequestsBookingWithTime =
-    /\b(book|schedule|set up|confirm)\b/i.test(lowerUser) &&
+    /\b(book|schedule|set up|confirm|want an appointment|need an appointment|set an appointment)\b/i.test(lowerUser) &&
     /\b(appointment|consultation|call|visit|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm))\b/i.test(
       lowerUser
     );
@@ -2217,22 +2349,27 @@ export function detectAppointmentBookingIntent(
       lowerSarah
     );
 
-  const wantsAppointment = Boolean(
+  const rawWantsAppointment = Boolean(
     userGivesTimeOrFormat ||
     userGivesContactForBooking ||
     userExplicitlyRequestsBookingWithTime ||
     sarahConfirmsBooking
   );
 
+  const wantsAppointment = alreadyBookedInHistory && !userAskingToReschedule ? false : rawWantsAppointment;
+
   return {
     wantsAppointment,
     shouldBook: wantsAppointment,
+    alreadyBookedInHistory,
     appointmentType: apptType,
     preferredDatetime: timeMatch,
     productInterest,
     extractedName: extracted.fullName,
     extractedPhone: extracted.phone,
     extractedAddress: extracted.address,
+    extractedState: extracted.state,
+    extractedHowHeard: extracted.howHeard,
   };
 }
 
@@ -2587,12 +2724,13 @@ export async function handleSarahHttpTurn(params: {
     prospect_phone: isGenericLeadPhone ? '' : rawLeadPhone,
     state: params.context?.state || params.leadState || 'Arizona',
     address: isGenericLeadAddress ? '' : rawLeadAddress,
+    how_heard: params.context?.how_heard || '',
     caller_name: params.context?.caller_name || 'Sarah',
     on_warm_transfer:
       params.context?.on_warm_transfer !== undefined ? Boolean(params.context.on_warm_transfer) : dbWarmTransfer,
     product_interest: detectedProduct,
     source_channel:
-      params.context?.source_channel || (resolvedMode === 'outbound' ? 'outbound' : 'website_traffic'),
+      params.context?.source_channel || (resolvedMode === 'outbound' ? 'outbound' : 'call_in_lead'),
     force_work_hours: params.context?.force_work_hours,
     simulated_now_iso: params.context?.simulated_now_iso,
     force_live_connect: params.context?.force_live_connect,
@@ -2629,9 +2767,93 @@ export async function handleSarahHttpTurn(params: {
   let appointmentResult: any = null;
   let dispositionResult: any = null;
 
-  // 2. Check if caller requested a warm transfer or asked to speak with anyone on the 42-member Team Directory
+  // Extract caller's spoken name, phone, street address, state, and how they heard about us strictly from USER turns
+  const extractedContact = extractCustomerContactDetails(userText, params.history || []);
+  if (extractedContact.fullName) {
+    sessionContext.prospect_name = extractedContact.fullName;
+  }
+  if (extractedContact.phone) {
+    sessionContext.prospect_phone = extractedContact.phone;
+  }
+  if (extractedContact.address) {
+    sessionContext.address = extractedContact.address;
+  }
+  if (extractedContact.state) {
+    sessionContext.state = extractedContact.state;
+  }
+  if (extractedContact.howHeard) {
+    sessionContext.how_heard = extractedContact.howHeard;
+  }
+
+  // If the caller provided their name or phone number, immediately add/update their Lead record in the CRM tagged as Call-In Lead
+  if (
+    sessionContext.mode === 'inbound' &&
+    (!isPlaceholderProspectName(sessionContext.prospect_name) ||
+      !isPlaceholderProspectPhone(sessionContext.prospect_phone, 'inbound'))
+  ) {
+    const upsertedLeadId = await upsertReceptionistLeadFromContext(sessionContext);
+    if (upsertedLeadId) {
+      sessionContext.lead_id = upsertedLeadId;
+    }
+  }
+
+  const activeFirstName = !isPlaceholderProspectName(sessionContext.prospect_name)
+    ? (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there'
+    : 'there';
+
+  // Check if an appointment was ALREADY booked in an earlier turn and the caller is now answering "How did you hear about us?" or wrapping up
+  const preBookingCheck = detectAppointmentBookingIntent(userText, '', allConvoText, params.history || []);
+  const lastSarahInHistory =
+    [...(params.history || [])]
+      .reverse()
+      .find((h) => h.speaker === 'sarah' || (h as any).role === 'sarah')?.text || '';
+
+  if (
+    preBookingCheck.alreadyBookedInHistory &&
+    !preBookingCheck.wantsAppointment &&
+    (/how did you hear about|how you heard about/i.test(lastSarahInHistory) || Boolean(extractedContact.howHeard))
+  ) {
+    const howHeardVal = sessionContext.how_heard || userText.trim();
+    sessionContext.how_heard = howHeardVal;
+    if (sessionContext.lead_id || !isPlaceholderProspectName(sessionContext.prospect_name)) {
+      await upsertReceptionistLeadFromContext(
+        sessionContext,
+        `[${resolveInboundLeadSource(sessionContext)}] Heard About Us: ${howHeardVal} (Caller: ${sessionContext.prospect_name || 'Client'}, Phone: ${sessionContext.prospect_phone || ''})`
+      );
+    }
+    const closingReply = `Thank you so much for sharing that with us, ${activeFirstName}! I have noted on your Call-In Lead profile for Principal Broker King Amen Ra that you heard about us through ${howHeardVal}. Your appointment for ${preBookingCheck.preferredDatetime} is all set—just reply YES to the confirmation text on your phone, and have a truly wonderful day!`;
+    const tts = await resolveTts(closingReply);
+    return {
+      ok: true,
+      reply: closingReply,
+      scenario: 'Appointment Confirmed — How Heard Recorded',
+      audio_base64: tts.audio_base64,
+      audio_mime: tts.audio_mime,
+      first_chunk_text: tts.first_chunk_text,
+      rest_text: tts.rest_text,
+      voice: tts.voice,
+      product_interest: detectedProduct || null,
+      lead_id: sessionContext.lead_id || null,
+      lead_source: resolveInboundLeadSource(sessionContext),
+      how_heard: sessionContext.how_heard || null,
+      prospect_name: sessionContext.prospect_name,
+      prospect_phone: sessionContext.prospect_phone,
+      prospect_address: sessionContext.address,
+      prospect_state: sessionContext.state,
+      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours_status: workHoursNow,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY,
+    };
+  }
+
+  // 2. Check if caller requested a warm transfer (and is NOT asking to schedule an appointment instead)
   const reqCheck = detectTransferRequest(userText);
-  if (reqCheck.requested && !sessionContext.on_warm_transfer) {
+  const mentionsAppointmentScheduling =
+    /\b(appointment|schedule|book|set up an appointment|monday|tuesday|wednesday|thursday|friday|tomorrow)\b/i.test(
+      userText
+    );
+  if (reqCheck.requested && !mentionsAppointmentScheduling && !sessionContext.on_warm_transfer) {
     transferResult = await executeSarahTool(
       'whisper_warm_transfer',
       {
@@ -2683,34 +2905,6 @@ export async function handleSarahHttpTurn(params: {
     };
   }
 
-  // Extract caller's spoken name, phone, and street address strictly from USER turns in the conversation
-  const extractedContact = extractCustomerContactDetails(userText, params.history || []);
-  if (extractedContact.fullName) {
-    sessionContext.prospect_name = extractedContact.fullName;
-  }
-  if (extractedContact.phone) {
-    sessionContext.prospect_phone = extractedContact.phone;
-  }
-  if (extractedContact.address) {
-    sessionContext.address = extractedContact.address;
-  }
-
-  // If the caller provided their name or phone number, immediately add/update their Lead record in the CRM tagged as Call-In Lead or Website Traffic
-  if (
-    sessionContext.mode === 'inbound' &&
-    (!isPlaceholderProspectName(sessionContext.prospect_name) ||
-      !isPlaceholderProspectPhone(sessionContext.prospect_phone, 'inbound'))
-  ) {
-    const upsertedLeadId = await upsertReceptionistLeadFromContext(sessionContext);
-    if (upsertedLeadId) {
-      sessionContext.lead_id = upsertedLeadId;
-    }
-  }
-
-  const activeFirstName = !isPlaceholderProspectName(sessionContext.prospect_name)
-    ? (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there'
-    : 'there';
-
   // 3. Explicit Script Tree Directive button click -> run exact deterministic step
   if (userText.toLowerCase().includes('[script tree directive]')) {
     const clonedMatch = await runClonedSarahScenario(userText, params.history || [], sessionContext);
@@ -2733,6 +2927,57 @@ export async function handleSarahHttpTurn(params: {
       prospect_name: sessionContext.prospect_name,
       prospect_phone: sessionContext.prospect_phone,
       prospect_address: sessionContext.address,
+      prospect_state: sessionContext.state,
+      how_heard: sessionContext.how_heard || null,
+    };
+  }
+
+  // 3B. Fast deterministic step-by-step Appointment Intake & Booking Engine (<200ms response, 100% consistent!)
+  if (preBookingCheck.shouldBook) {
+    const checkRes = await executeSarahTool(
+      'book_appointment',
+      {
+        customer_name: preBookingCheck.extractedName || sessionContext.prospect_name,
+        phone: preBookingCheck.extractedPhone || sessionContext.prospect_phone,
+        product_interest: preBookingCheck.productInterest || detectedProduct || 'Insurance & Benefits',
+        appointment_type: preBookingCheck.appointmentType,
+        preferred_datetime: preBookingCheck.preferredDatetime,
+        state: preBookingCheck.extractedState || sessionContext.state,
+        address: preBookingCheck.extractedAddress || sessionContext.address,
+        how_heard: preBookingCheck.extractedHowHeard || sessionContext.how_heard,
+        send_text_reminder: true,
+      },
+      sessionContext
+    );
+    if (checkRes.lead_id) sessionContext.lead_id = checkRes.lead_id;
+    const replyText = checkRes.message;
+    const tts = await resolveTts(replyText);
+    return {
+      ok: true,
+      reply: replyText,
+      scenario: checkRes.success ? 'Appointment Confirmed (Call-In Lead)' : 'Appointment Intake Step',
+      audio_base64: tts.audio_base64,
+      audio_mime: tts.audio_mime,
+      first_chunk_text: tts.first_chunk_text,
+      rest_text: tts.rest_text,
+      voice: tts.voice,
+      product_interest: detectedProduct || checkRes.product_line || null,
+      lead_id: sessionContext.lead_id || checkRes.lead_id || null,
+      lead_source: resolveInboundLeadSource(sessionContext),
+      how_heard: sessionContext.how_heard || checkRes.how_heard || null,
+      prospect_name: sessionContext.prospect_name,
+      prospect_phone: sessionContext.prospect_phone,
+      prospect_address: sessionContext.address,
+      prospect_state: sessionContext.state,
+      transfer: null,
+      appointment: checkRes.success ? checkRes : null,
+      needs_contact_info: Boolean(checkRes.needs_contact_info),
+      missing_fields: checkRes.missing_fields || [],
+      disposition: null,
+      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours_status: workHoursNow,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY,
     };
   }
 
