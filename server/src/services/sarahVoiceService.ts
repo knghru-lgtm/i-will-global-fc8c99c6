@@ -2692,8 +2692,12 @@ export async function handleSarahHttpTurn(params: {
     };
   };
 
+  const rawMessage = String(
+    params.message ?? params.userText ?? (params as any).user_text ?? (params as any).text ?? ''
+  ).trim();
+
   let dbWarmTransfer = false;
-  if (params.context?.on_warm_transfer === undefined) {
+  if (!params.is_initial && rawMessage && params.context?.on_warm_transfer === undefined) {
     try {
       const sarahCfg = await getSarahDialerConfig();
       dbWarmTransfer = Boolean(sarahCfg.is_on_warm_transfer);
@@ -2704,9 +2708,6 @@ export async function handleSarahHttpTurn(params: {
 
   const resolvedMode =
     params.context?.mode === 'outbound' || params.mode === 'outbound' ? 'outbound' : 'inbound';
-  const rawMessage = String(
-    params.message ?? params.userText ?? (params as any).user_text ?? (params as any).text ?? ''
-  ).trim();
   const allConvoText = [...(params.history || []).map((h) => h.text), rawMessage].join(' ');
   const detectedProduct = detectProductInterest(allConvoText, params.context?.product_interest || '');
 

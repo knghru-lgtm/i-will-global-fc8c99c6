@@ -1,4 +1,17 @@
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+// Automatically load root .env if started from server/ workspace without --env-file=..
+try {
+  for (const rel of ['../../.env', '../.env']) {
+    const p = fileURLToPath(new URL(rel, import.meta.url));
+    if (existsSync(p) && typeof (process as any).loadEnvFile === 'function') {
+      (process as any).loadEnvFile(p);
+    }
+  }
+} catch {
+  // ignore in serverless environments where env vars are injected directly
+}
 
 // Central configuration. All integrations are optional; missing keys put features into demo mode.
 export const config = {

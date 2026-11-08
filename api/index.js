@@ -14,11 +14,21 @@ var __export = (target, all) => {
 };
 
 // server/src/config.ts
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 var config, isAIEnabled, isGoogleEnabled, TPMO_DISCLAIMER;
 var init_config = __esm({
   "server/src/config.ts"() {
     "use strict";
+    try {
+      for (const rel of ["../../.env", "../.env"]) {
+        const p = fileURLToPath(new URL(rel, import.meta.url));
+        if (existsSync(p) && typeof process.loadEnvFile === "function") {
+          process.loadEnvFile(p);
+        }
+      }
+    } catch {
+    }
     config = {
       port: Number(process.env.PORT || 4e3),
       jwtSecret: process.env.JWT_SECRET || "iwg-dev-secret-change-me",
@@ -658,7 +668,7 @@ __export(google_exports, {
   sendGmail: () => sendGmail,
   syncGmail: () => syncGmail
 });
-function authUrl(state) {
+function authUrl(state2) {
   const p = new URLSearchParams({
     client_id: config.google.clientId,
     redirect_uri: redirectUri(),
@@ -666,7 +676,7 @@ function authUrl(state) {
     access_type: "offline",
     prompt: "consent",
     scope: SCOPES.join(" "),
-    state,
+    state: state2,
     hd: config.google.allowedDomain,
     include_granted_scopes: "true"
   });
@@ -899,15 +909,15 @@ function googleVoiceWebUrl(e164, emailOrIndex) {
 function telUrl(e164) {
   return `tel:${e164}`;
 }
-function timezoneForState(state) {
-  return STATE_TZ[(state || "AZ").toUpperCase()] || "America/Phoenix";
+function timezoneForState(state2) {
+  return STATE_TZ[(state2 || "AZ").toUpperCase()] || "America/Phoenix";
 }
-function localHour(state, at = /* @__PURE__ */ new Date()) {
-  const h = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: timezoneForState(state) }).format(at);
+function localHour(state2, at = /* @__PURE__ */ new Date()) {
+  const h = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: timezoneForState(state2) }).format(at);
   return Number(h) % 24;
 }
-function isWithinCallingHours(state, at = /* @__PURE__ */ new Date()) {
-  const h = localHour(state, at);
+function isWithinCallingHours(state2, at = /* @__PURE__ */ new Date()) {
+  const h = localHour(state2, at);
   return h >= 8 && h < 21;
 }
 var STATE_TZ;
@@ -1259,8 +1269,8 @@ function getCallingWindow(cfg, now = /* @__PURE__ */ new Date()) {
     start_of_day: p.startOfDay
   };
 }
-function isWithinRecipientCallingHours(state, now = /* @__PURE__ */ new Date()) {
-  const st = String(state || "AZ").trim().toUpperCase();
+function isWithinRecipientCallingHours(state2, now = /* @__PURE__ */ new Date()) {
+  const st = String(state2 || "AZ").trim().toUpperCase();
   const tz = STATE_TIMEZONES[st] || "America/Phoenix";
   try {
     const hourPart = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hourCycle: "h23" }).formatToParts(now).find((p) => p.type === "hour");
@@ -1718,9 +1728,9 @@ function buildAiWhisperScripts(params) {
   const isGenericName = !rawName || /^(medicare beneficiary|valued beneficiary|valued client|valued caller|caller|prospect|beneficiary)$/i.test(rawName);
   const prospectName = isGenericName ? "Valued Client" : rawName;
   const prospectFirst = isGenericName ? "there" : prospectName.split(" ")[0] || "there";
-  const state = params.state || "Arizona";
+  const state2 = params.state || "Arizona";
   const interestText = params.notes && params.notes.trim() ? params.notes.trim() : "reviewing their insurance and coverage options";
-  const whisperBriefing = `Hi ${recipientName}, this is Sarah AI whispering automatically on behalf of ${callerName} with IWG Insurance and Financial Services. We have ${prospectName} in ${state} on the line\u2014they are interested in ${interestText}. Bridging you in now!`;
+  const whisperBriefing = `Hi ${recipientName}, this is Sarah AI whispering automatically on behalf of ${callerName} with IWG Insurance and Financial Services. We have ${prospectName} in ${state2} on the line\u2014they are interested in ${interestText}. Bridging you in now!`;
   const mergeIntroduction = isGenericName ? `Thank you so much for your patience! It is my pleasure to introduce ${recipientName} with IWG Insurance and Financial Services. ${recipientName.split(" ")[0]}, I have shared our caller's information with you so they are in the very best hands. It has been a privilege speaking with you today\u2014${recipientName.split(" ")[0]} will take wonderful care of you from here!` : `Thank you so much for your patience, ${prospectFirst}! It is my pleasure to introduce ${recipientName} with IWG Insurance and Financial Services. ${recipientName.split(" ")[0]}, I have shared ${prospectName}'s information with you so they are in the very best hands. ${prospectFirst}, it has been a privilege speaking with you today\u2014${recipientName.split(" ")[0]} will take wonderful care of you from here!`;
   return {
     whisperBriefing,
@@ -1739,12 +1749,12 @@ async function dispatchAiWhisperTransfer(params) {
   const recipientPhone = toE164(params.recipient_phone || matchedEntry?.e164 || "+16024569681") || "+16024569681";
   const callerName = params.caller_name || params.user?.name || "Sarah";
   const prospectName = params.prospect_name || "Valued Beneficiary";
-  const state = params.state || "AZ";
+  const state2 = params.state || "AZ";
   const scripts = buildAiWhisperScripts({
     recipient_name: recipientName,
     caller_name: callerName,
     prospect_name: prospectName,
-    state,
+    state: state2,
     notes: params.notes
   });
   const gvTransferUrl = googleVoiceWebUrl(recipientPhone, params.user?.email);
@@ -1758,7 +1768,7 @@ async function dispatchAiWhisperTransfer(params) {
     google_voice_transfer_url: gvTransferUrl,
     caller_name: callerName,
     prospect_name: prospectName,
-    state,
+    state: state2,
     whisper_briefing: scripts.whisperBriefing,
     merge_introduction: scripts.mergeIntroduction,
     whisper_call_id: `gv_whisper_${Date.now()}`,
@@ -2488,8 +2498,8 @@ async function notify(userId, title, body = "", link = "") {
 async function logSystem(relatedType, relatedId, subject, body = "", userId = null) {
   return insert("activities", { type: "system", subject, body, related_type: relatedType, related_id: relatedId, user_id: userId, completed: true });
 }
-async function routeAppointment(state, at, preferredAgentId, durationMin = 30) {
-  const st = (state || "AZ").toUpperCase();
+async function routeAppointment(state2, at, preferredAgentId, durationMin = 30) {
+  const st = (state2 || "AZ").toUpperCase();
   const end = new Date(at.getTime() + durationMin * 6e4);
   const bufferMs = 30 * 60 * 1e3;
   const bufferedStart = new Date(at.getTime() - bufferMs);
@@ -3745,8 +3755,8 @@ async function getAvailableSlots(agentId, dateStr, appointmentType = "telephone"
     slots
   };
 }
-async function getAvailableAgents(state = "AZ", appointmentAt, durationMin = 30) {
-  const st = (state || "AZ").toUpperCase();
+async function getAvailableAgents(state2 = "AZ", appointmentAt, durationMin = 30) {
+  const st = (state2 || "AZ").toUpperCase();
   const at = appointmentAt ? new Date(appointmentAt) : new Date(Date.now() + 864e5);
   const end = new Date(at.getTime() + durationMin * 6e4);
   const bufferMs = APPOINTMENT_BUFFER_MINUTES * 60 * 1e3;
@@ -3812,19 +3822,19 @@ async function scheduleAppointment(params) {
   const customerName = `${customer.first_name} ${customer.last_name}`;
   const at = new Date(appointment_at);
   if (isNaN(at.getTime())) throw Object.assign(new Error("Invalid appointment date/time"), { status: 400 });
-  const state = (customer.state || "AZ").toUpperCase();
+  const state2 = (customer.state || "AZ").toUpperCase();
   let assignedAgent = null;
   if (agent_id) {
     assignedAgent = await one(`SELECT * FROM users WHERE id=$1 AND active AND role IN ('licensed_agent','manager','admin')`, [agent_id]);
     if (!assignedAgent) throw Object.assign(new Error("Selected licensed agent is invalid or inactive"), { status: 400 });
     const licensedStates = Array.isArray(assignedAgent.states) ? assignedAgent.states : [];
-    if (!licensedStates.includes(state)) {
-      throw Object.assign(new Error(`Agent ${assignedAgent.name} is not licensed in ${state}. Customer state requires a licensed agent.`), { status: 400 });
+    if (!licensedStates.includes(state2)) {
+      throw Object.assign(new Error(`Agent ${assignedAgent.name} is not licensed in ${state2}. Customer state requires a licensed agent.`), { status: 400 });
     }
   } else {
-    const candidate = await routeAppointment(state, at, customer.assigned_agent_id, finalDuration);
+    const candidate = await routeAppointment(state2, at, customer.assigned_agent_id, finalDuration);
     if (!candidate) {
-      throw Object.assign(new Error(`No active licensed agent available for state ${state} at requested time.`), { status: 400 });
+      throw Object.assign(new Error(`No active licensed agent available for state ${state2} at requested time.`), { status: 400 });
     }
     assignedAgent = await one(`SELECT * FROM users WHERE id=$1`, [candidate.id]);
   }
@@ -4940,8 +4950,8 @@ import express from "express";
 import cors from "cors";
 import http from "node:http";
 import { WebSocketServer } from "ws";
-import { existsSync } from "node:fs";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { existsSync as existsSync3 } from "node:fs";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // server/src/routes/records.ts
 init_db();
@@ -5327,7 +5337,7 @@ async function batchInsertLeads(leadsList, defaultOwnerId = null, guardDuplicate
         continue;
       }
       const city = raw.city || raw.City || raw["patient city"] || raw["Patient City"] || null;
-      const state = raw.state || raw.State || raw.ST || "AZ";
+      const state2 = raw.state || raw.State || raw.ST || "AZ";
       const zip = raw.zip || raw.Zip || raw["Zip Code"] || raw["ZIP"] || raw["patient zip"] || raw["Patient Zip"] || raw.postal || null;
       const county = raw.county || raw.County || null;
       const rawDob = raw.dob || raw.DOB || raw["Date of Birth"] || raw["Birth Date"] || raw.patientdob || raw.patient_dob || null;
@@ -5347,7 +5357,7 @@ async function batchInsertLeads(leadsList, defaultOwnerId = null, guardDuplicate
       const score = scored.score ?? 35;
       const scoreReason = scored.score_reason ?? "Batch Import";
       const id = uid();
-      params.push(id, firstName, lastName, phone, email, city, state, zip, county, address, dob, source, status, leadOwner, score, scoreReason, true);
+      params.push(id, firstName, lastName, phone, email, city, state2, zip, county, address, dob, source, status, leadOwner, score, scoreReason, true);
       valueSets.push(`($${pIdx}, $${pIdx + 1}, $${pIdx + 2}, $${pIdx + 3}, $${pIdx + 4}, $${pIdx + 5}, $${pIdx + 6}, $${pIdx + 7}, $${pIdx + 8}, $${pIdx + 9}, $${pIdx + 10}, $${pIdx + 11}, $${pIdx + 12}, $${pIdx + 13}, $${pIdx + 14}, $${pIdx + 15}, $${pIdx + 16})`);
       pIdx += 17;
     }
@@ -6161,14 +6171,14 @@ records.post("/batch-import/book-of-business", async (req, res) => {
       if (!lastName) lastName = "Policyholder";
       const email = raw.email || raw.Email || raw["Email Address"] || null;
       const city = raw.city || raw.City || null;
-      const state = String(raw.state || raw.State || raw.ST || "AZ").toUpperCase();
+      const state2 = String(raw.state || raw.State || raw.ST || "AZ").toUpperCase();
       const zip = raw.zip || raw.Zip || raw["Zip Code"] || raw["ZIP"] || null;
       const county = raw.county || raw.County || null;
       const address = raw.address || raw.Address || raw["Street Address"] || null;
       const dob = normalizeDateStr(raw.dob || raw.DOB || raw["Date of Birth"] || raw["Birth Date"]);
       const mbiRaw = raw.mbi_last4 || raw.mbi || raw.MBI || raw["Medicare Number"] || raw["MBI"] || "";
       const mbiLast4 = mbiRaw ? String(mbiRaw).slice(-4) : null;
-      const cacheKey = phone ? `p_${phone}` : email ? `e_${email}` : `n_${firstName.toLowerCase()}_${lastName.toLowerCase()}_${state}`;
+      const cacheKey = phone ? `p_${phone}` : email ? `e_${email}` : `n_${firstName.toLowerCase()}_${lastName.toLowerCase()}_${state2}`;
       let clientId = clientCache.get(cacheKey) || "";
       if (!clientId) {
         let existingClient = null;
@@ -6181,7 +6191,7 @@ records.post("/batch-import/book-of-business", async (req, res) => {
         if (!existingClient && firstName && lastName) {
           existingClient = await one(
             "SELECT id FROM clients WHERE LOWER(first_name) = LOWER($1) AND LOWER(last_name) = LOWER($2) AND state = $3 LIMIT 1",
-            [firstName, lastName, state]
+            [firstName, lastName, state2]
           );
         }
         if (existingClient) {
@@ -6197,7 +6207,7 @@ records.post("/batch-import/book-of-business", async (req, res) => {
             dob: dob || null,
             address: address || null,
             city: city || null,
-            state: state || "AZ",
+            state: state2 || "AZ",
             zip: zip || null,
             county: county || null,
             mbi_last4: mbiLast4 || null,
@@ -7888,10 +7898,10 @@ appointments.post("/auto-running-late-check", async (req, res) => {
   }
 });
 appointments.get("/available-agents", async (req, res) => {
-  const state = String(req.query.state || "AZ");
+  const state2 = String(req.query.state || "AZ");
   const at = req.query.at ? String(req.query.at) : void 0;
   const durationMin = req.query.duration ? Number(req.query.duration) : 30;
-  res.json(await getAvailableAgents(state, at, durationMin));
+  res.json(await getAvailableAgents(state2, at, durationMin));
 });
 appointments.get("/available-slots", async (req, res) => {
   try {
@@ -9017,8 +9027,8 @@ api.post("/telephony/twiml/outbound", (req, res) => {
 api.get("/google/status", async (req, res) => res.json(await googleStatus(req.user.id)));
 api.get("/google/auth-url", async (req, res) => {
   if (!isGoogleEnabled()) return res.status(400).json({ error: "Google OAuth is not configured. Add GOOGLE_CLIENT_ID/SECRET to server/.env" });
-  const state = jwt2.sign({ sub: req.user.id }, config.jwtSecret, { expiresIn: "10m" });
-  res.json({ url: authUrl(state) });
+  const state2 = jwt2.sign({ sub: req.user.id }, config.jwtSecret, { expiresIn: "10m" });
+  res.json({ url: authUrl(state2) });
 });
 api.post("/google/disconnect", async (req, res) => {
   await disconnectGoogle(req.user.id);
@@ -9686,7 +9696,7 @@ function buildSarahSystemInstruction(ctx) {
   const isGenericName = isPlaceholderProspectName(rawName);
   const prospectName = isGenericName ? "Not provided yet" : rawName;
   const firstName = isGenericName ? "there" : rawName.split(/\s+/)[0] || "there";
-  const state = ctx?.state || "Arizona";
+  const state2 = ctx?.state || "Arizona";
   const callerName = ctx?.caller_name || "Sarah";
   const onWarmTransfer = Boolean(ctx?.on_warm_transfer);
   const activeProduct = ctx?.product_interest || "";
@@ -9710,7 +9720,7 @@ CAPTURED PROSPECT DETAILS SO FAR:
 - Full Name: ${isGenericName ? "MISSING (You MUST ask the caller for their full first and last name!)" : prospectName}
 - Phone Number: ${hasValidPhone ? ctx?.prospect_phone : "MISSING (You MUST ask the caller for their best 10-digit phone number!)"}
 - Street Address: ${hasValidAddress ? ctx?.address : "MISSING (You MUST ask the caller for their street address!)"}
-${mode === "outbound" ? `ACTIVE OUTBOUND PROSPECT: ${isGenericName ? "Valued Client" : prospectName} (Address them as: "${firstName}", State: ${state}${hasValidPhone ? `, Phone: ${ctx?.prospect_phone}` : ""}${hasValidAddress ? `, Address: ${ctx?.address}` : ""})
+${mode === "outbound" ? `ACTIVE OUTBOUND PROSPECT: ${isGenericName ? "Valued Client" : prospectName} (Address them as: "${firstName}", State: ${state2}${hasValidPhone ? `, Phone: ${ctx?.prospect_phone}` : ""}${hasValidAddress ? `, Address: ${ctx?.address}` : ""})
 KING AMEN RA WARM TRANSFER STATUS: ${!workHours.isOpen ? "OUTSIDE_WORK_HOURS (Outside M\u2013F 8:00 AM to 8:00 PM \u2014 NO warm transfers! Book a Telephone, In-Person, or Video appointment during M\u2013F 8am\u20138pm!)" : onWarmTransfer ? "ON_WARM_TRANSFER (King Amen Ra is currently on a live consultation\u2014use Path B Executive Alternative-Choice Appointment Close to book a Telephone, In-Person, or Video appointment and send an initial confirmation text!)" : "AVAILABLE (Within M\u2013F 8:00 AM to 8:00 PM \u2014 King Amen Ra is available: call +16024569681 and connect first before telling customer, OR book an appointment!)"}` : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Receptionist Mode \u2014 Answer immediately right away 24/7. Work hours for live warm transfers are Monday\u2013Friday 8:00 AM to 8:00 PM Arizona time. Outside M\u2013F 8am\u20138pm, never warm transfer\u2014always book an appointment by collecting Full Name, Phone Number, Street Address, Format, and Date/Time)`}
 
 ================================================================================
@@ -9945,7 +9955,7 @@ async function upsertReceptionistLeadFromContext(ctx, extraNotes) {
   const lastName = nameParts.slice(1).join(" ") || "Lead";
   const phone = hasPhone ? rawPhone : null;
   const address = hasAddress ? rawAddress : null;
-  const state = ctx.state || "AZ";
+  const state2 = ctx.state || "AZ";
   const leadSource = resolveInboundLeadSource(ctx);
   const productLine = ctx.product_interest || "Insurance & Benefits";
   const noteLine = extraNotes || `[${leadSource}] Added by Receptionist (${productLine})${hasName ? ` \u2014 Name: ${rawName}` : ""}${hasPhone ? `, Phone: ${rawPhone}` : ""}${hasAddress ? `, Address: ${rawAddress}` : ""}${howHeard ? `, Heard About Us: ${howHeard}` : ""}`;
@@ -9963,7 +9973,7 @@ async function upsertReceptionistLeadFromContext(ctx, extraNotes) {
           lastName,
           phone,
           address,
-          state,
+          state2,
           leadSource,
           productLine,
           noteLine,
@@ -9985,7 +9995,7 @@ async function upsertReceptionistLeadFromContext(ctx, extraNotes) {
              last_contacted_at = now(),
              updated_at = now()
          WHERE id = $1`,
-        [existing.id, firstName, lastName, phone || "", address || "", leadSource, productLine, noteLine, state]
+        [existing.id, firstName, lastName, phone || "", address || "", leadSource, productLine, noteLine, state2]
       ).catch(() => {
       });
       return existing.id;
@@ -10006,7 +10016,7 @@ async function executeSarahTool(name, args, ctx) {
     const hasValidPhone = !isPlaceholderProspectPhone(rawPhone, mode);
     const rawAddress = String(args.address || args.customer_address || ctx?.address || "").trim();
     const hasValidAddress = !isPlaceholderProspectAddress(rawAddress);
-    const state = args.state || ctx?.state || "AZ";
+    const state2 = args.state || ctx?.state || "AZ";
     const howHeard = String(args.how_heard || ctx?.how_heard || "").trim();
     const productLine = detectProductInterest(
       `${args.product_interest || ""} ${args.notes || ""} ${ctx?.product_interest || ""}`,
@@ -10024,7 +10034,7 @@ async function executeSarahTool(name, args, ctx) {
             prospect_name: !isGeneric ? rawCustomerName : ctx?.prospect_name,
             prospect_phone: hasValidPhone ? rawPhone : ctx?.prospect_phone,
             address: hasValidAddress ? rawAddress : ctx?.address,
-            state,
+            state: state2,
             how_heard: howHeard || ctx?.how_heard,
             product_interest: productLine
           });
@@ -10088,7 +10098,7 @@ async function executeSarahTool(name, args, ctx) {
             lastName,
             phone,
             address || null,
-            state,
+            state2,
             leadSource,
             productLine,
             notes,
@@ -10108,7 +10118,7 @@ async function executeSarahTool(name, args, ctx) {
             address,
             leadSource,
             productLine,
-            state
+            state2
           ]
         ).catch(() => {
         });
@@ -10293,7 +10303,7 @@ Notes: ${notes}`,
         how_heard: howHeard || null,
         customer_name: customerName,
         customer_address: address,
-        customer_state: state,
+        customer_state: state2,
         product_line: productLine,
         appointment_type: apptType,
         preferred_datetime: apptDatetime,
@@ -10318,7 +10328,7 @@ Notes: ${notes}`,
         how_heard: howHeard || null,
         customer_name: customerName,
         customer_address: address,
-        customer_state: state,
+        customer_state: state2,
         product_line: productLine,
         appointment_type: apptType,
         preferred_datetime: apptDatetime,
@@ -10336,7 +10346,7 @@ Notes: ${notes}`,
     );
     const prospectName = isGeneric ? "Valued Client" : rawProspectName;
     const prospectPhone = args.prospect_phone || args.customer_phone || ctx?.prospect_phone || SARAH_MAIN_LINE_DISPLAY;
-    const state = args.state || args.customer_state || ctx?.state || "Arizona";
+    const state2 = args.state || args.customer_state || ctx?.state || "Arizona";
     const detectedProduct = detectProductInterest(
       `${args.reason || ""} ${args.reason_for_call || ""} ${ctx?.product_interest || ""}`,
       ""
@@ -10364,7 +10374,7 @@ Notes: ${notes}`,
       recipient_name: recipientName,
       caller_name: "Sarah",
       prospect_name: prospectName,
-      state,
+      state: state2,
       notes: reason
     });
     const holdMessage = `Wonderful! Please hold for just a moment while I call ${recipientName} on the line and connect to them first. I will let you know as soon as we are connected.`;
@@ -10382,7 +10392,7 @@ Notes: ${notes}`,
       recipient_phone: recipientPhone,
       prospect_name: prospectName,
       prospect_phone: prospectPhone,
-      state
+      state: state2
     });
     try {
       await q(
@@ -10415,7 +10425,7 @@ Merge Introduction (spoken ONLY after ${recipientPhone} connects): "${scripts.me
             recipient_phone: recipientPhone,
             prospect_name: prospectName,
             prospect_phone: prospectPhone,
-            state,
+            state: state2,
             reason,
             work_hours: workHours,
             hold_message: holdMessage,
@@ -10443,7 +10453,7 @@ Merge Introduction (spoken ONLY after ${recipientPhone} connects): "${scripts.me
       google_voice_transfer_url: googleVoiceWebUrl(recipientPhone),
       prospect_name: prospectName,
       prospect_phone: prospectPhone,
-      state,
+      state: state2,
       line_number: SARAH_MAIN_LINE_DISPLAY,
       originating_line: SARAH_MAIN_LINE_E164,
       hold_completed: true,
@@ -11393,7 +11403,7 @@ function extractCustomerContactDetails(text, history) {
   let fullName;
   let phone;
   let address;
-  let state;
+  let state2;
   let howHeard;
   const phoneRegex = /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4,5}\b|\b\d{10,11}\b/g;
   let pm;
@@ -11411,14 +11421,14 @@ function extractCustomerContactDetails(text, history) {
   const stateSearchStr = `${address || ""} ${s}`;
   for (const [stateName, abbr] of Object.entries(US_STATE_MAP)) {
     if (new RegExp(`\\b${stateName}\\b`, "i").test(stateSearchStr)) {
-      state = abbr;
+      state2 = abbr;
       break;
     }
   }
-  if (!state) {
+  if (!state2) {
     const abbrZipMatch = stateSearchStr.match(/\b([A-Z]{2})\s+\d{5}\b/);
     if (abbrZipMatch?.[1]) {
-      state = abbrZipMatch[1].toUpperCase();
+      state2 = abbrZipMatch[1].toUpperCase();
     }
   }
   const explicitIntroRegex = /\b(?:my name is|my full name is|your name is|name is|this is|i am|i'm)\s+([A-Za-z][A-Za-z'-]{1,20}(?:\s+[A-Za-z][A-Za-z'-]{1,20}){1,3})/gi;
@@ -11482,7 +11492,7 @@ function extractCustomerContactDetails(text, history) {
       }
     }
   }
-  return { fullName, phone, address, state, howHeard };
+  return { fullName, phone, address, state: state2, howHeard };
 }
 function detectAppointmentBookingIntent(userText, sarahText = "", historyText = "", history) {
   const combined = `${historyText} ${userText} ${sarahText}`;
@@ -11767,8 +11777,11 @@ async function handleSarahHttpTurn(params) {
       rest_text: restChunk
     };
   };
+  const rawMessage = String(
+    params.message ?? params.userText ?? params.user_text ?? params.text ?? ""
+  ).trim();
   let dbWarmTransfer = false;
-  if (params.context?.on_warm_transfer === void 0) {
+  if (!params.is_initial && rawMessage && params.context?.on_warm_transfer === void 0) {
     try {
       const sarahCfg = await getSarahDialerConfig();
       dbWarmTransfer = Boolean(sarahCfg.is_on_warm_transfer);
@@ -11776,9 +11789,6 @@ async function handleSarahHttpTurn(params) {
     }
   }
   const resolvedMode = params.context?.mode === "outbound" || params.mode === "outbound" ? "outbound" : "inbound";
-  const rawMessage = String(
-    params.message ?? params.userText ?? params.user_text ?? params.text ?? ""
-  ).trim();
   const allConvoText = [...(params.history || []).map((h) => h.text), rawMessage].join(" ");
   const detectedProduct = detectProductInterest(allConvoText, params.context?.product_interest || "");
   const rawLeadName = (params.context?.prospect_name || params.leadName || "").trim();
@@ -12721,7 +12731,7 @@ sarahAuth.post("/whisper-transfer", async (req, res) => {
       recipient_phone,
       prospect_name,
       prospect_phone,
-      state,
+      state: state2,
       notes,
       place_live_whisper_call
     } = req.body || {};
@@ -12730,7 +12740,7 @@ sarahAuth.post("/whisper-transfer", async (req, res) => {
       recipient_phone,
       prospect_name,
       prospect_phone,
-      state,
+      state: state2,
       notes,
       caller_name: req.user?.name || "Sarah",
       place_live_whisper_call: Boolean(place_live_whisper_call)
@@ -13156,6 +13166,162 @@ sarahAuth.get("/calls/:call_id", async (req, res) => {
 
 // server/src/index.ts
 init_realtime();
+
+// server/src/services/googleVoiceWatchdog.ts
+import { spawn, exec } from "node:child_process";
+import { existsSync as existsSync2 } from "node:fs";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+var CURRENT_GV_EXTENSION_BUILD = "2026-11-08-v6";
+var state = {
+  lastHeartbeatAt: 0,
+  lastLaunchAttemptAt: 0,
+  launchCount: 0,
+  extensionBuild: "",
+  url: "",
+  title: "",
+  visibilityState: "",
+  receivingCallsText: "",
+  incomingBannerText: "",
+  callActive: false,
+  isSpeaking: false,
+  hasPreloadedGreeting: false,
+  audioCtxState: "",
+  lastAnswerClickTs: 0,
+  totalCallsAnswered: 0,
+  visibleButtons: [],
+  recentEvents: [],
+  pendingCommand: null
+};
+function recordGvEvent(event, detail) {
+  state.recentEvents.unshift({
+    ts: (/* @__PURE__ */ new Date()).toISOString(),
+    event,
+    detail: detail ? String(detail).slice(0, 300) : void 0
+  });
+  if (state.recentEvents.length > 40) {
+    state.recentEvents.length = 40;
+  }
+}
+function handleGvHeartbeat(payload) {
+  const now = Date.now();
+  const wasOffline = state.lastHeartbeatAt === 0 || now - state.lastHeartbeatAt > 15e3;
+  state.lastHeartbeatAt = now;
+  if (payload?.extensionBuild) state.extensionBuild = String(payload.extensionBuild);
+  if (payload?.url) state.url = String(payload.url);
+  if (payload?.title !== void 0) state.title = String(payload.title);
+  if (payload?.visibilityState) state.visibilityState = String(payload.visibilityState);
+  if (payload?.receivingCallsText !== void 0) state.receivingCallsText = String(payload.receivingCallsText);
+  if (payload?.incomingBannerText !== void 0) state.incomingBannerText = String(payload.incomingBannerText);
+  if (typeof payload?.callActive === "boolean") state.callActive = payload.callActive;
+  if (typeof payload?.isSpeaking === "boolean") state.isSpeaking = payload.isSpeaking;
+  if (typeof payload?.hasPreloadedGreeting === "boolean") state.hasPreloadedGreeting = payload.hasPreloadedGreeting;
+  if (payload?.audioCtxState) state.audioCtxState = String(payload.audioCtxState);
+  if (typeof payload?.lastAnswerClickTs === "number") state.lastAnswerClickTs = payload.lastAnswerClickTs;
+  if (typeof payload?.totalCallsAnswered === "number") state.totalCallsAnswered = payload.totalCallsAnswered;
+  if (Array.isArray(payload?.visibleButtons)) {
+    state.visibleButtons = payload.visibleButtons.slice(0, 35);
+  }
+  if (payload?.event) {
+    recordGvEvent(String(payload.event), payload.eventDetail);
+  } else if (wasOffline) {
+    recordGvEvent("gv_heartbeat_connected", `${state.url} (build=${state.extensionBuild})`);
+  }
+  const cmd = state.pendingCommand;
+  state.pendingCommand = null;
+  const needsReload = Boolean(payload?.extensionBuild) && String(payload.extensionBuild) !== CURRENT_GV_EXTENSION_BUILD;
+  return {
+    ok: true,
+    targetBuild: CURRENT_GV_EXTENSION_BUILD,
+    reloadExtension: cmd?.reloadExtension || needsReload || false,
+    reloadTab: cmd?.reloadTab || false,
+    simulateIncomingCall: cmd?.simulateIncomingCall || false,
+    callerPhone: cmd?.callerPhone || ""
+  };
+}
+function getGvWatchdogStatus() {
+  const now = Date.now();
+  const ageMs = state.lastHeartbeatAt ? now - state.lastHeartbeatAt : null;
+  return {
+    ok: true,
+    online: ageMs !== null && ageMs < 12e3,
+    heartbeatAgeMs: ageMs,
+    targetBuild: CURRENT_GV_EXTENSION_BUILD,
+    ...state
+  };
+}
+function queueGvCommand(cmd) {
+  state.pendingCommand = { ...state.pendingCommand || {}, ...cmd };
+  recordGvEvent("gv_command_queued", JSON.stringify(state.pendingCommand));
+  return { ok: true, queued: state.pendingCommand };
+}
+function launchGoogleVoiceChromeWindow(reason = "watchdog") {
+  if (process.env.VERCEL || process.platform !== "win32") return false;
+  const chromeExe = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+  if (!existsSync2(chromeExe)) return false;
+  state.lastLaunchAttemptAt = Date.now();
+  state.launchCount += 1;
+  recordGvEvent("gv_chrome_launch", `Launching Google Voice Profile 7 (${reason})`);
+  try {
+    const desktopShortcut = "C:\\Users\\Amen Ra Family\\Desktop\\Google Voice.lnk";
+    if (existsSync2(desktopShortcut)) {
+      const child2 = spawn("explorer.exe", [desktopShortcut], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false
+      });
+      child2.unref();
+      return true;
+    }
+    const extDir = fileURLToPath2(new URL("../../../google-voice-extension", import.meta.url));
+    const args = [
+      "--profile-directory=Profile 7",
+      "--app-id=bbcbahpbnakjldhdcgiblnjnfgaejidg",
+      `--load-extension=${extDir}`,
+      "--autoplay-policy=no-user-gesture-required",
+      "--use-fake-ui-for-media-stream",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows"
+    ];
+    const child = spawn(chromeExe, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false
+    });
+    child.unref();
+    return true;
+  } catch (err) {
+    recordGvEvent("gv_chrome_launch_error", err?.message || "spawn error");
+    return false;
+  }
+}
+var watchdogTimer = null;
+function startGoogleVoiceWatchdog() {
+  if (process.env.VERCEL || process.platform !== "win32") return;
+  if (watchdogTimer) return;
+  recordGvEvent("watchdog_started", "Monitoring Google Voice (480) 331-9455 24/7");
+  setTimeout(() => {
+    const now = Date.now();
+    if (now - state.lastHeartbeatAt > 1e4 && now - state.lastLaunchAttemptAt > 2e4) {
+      launchGoogleVoiceChromeWindow("server_startup");
+    }
+  }, 4e3);
+  watchdogTimer = setInterval(() => {
+    const now = Date.now();
+    const heartbeatMissing = state.lastHeartbeatAt === 0 || now - state.lastHeartbeatAt > 15e3;
+    const cooldownElapsed = now - state.lastLaunchAttemptAt > 3e4;
+    if (heartbeatMissing && cooldownElapsed) {
+      exec('tasklist /FI "IMAGENAME eq chrome.exe" /NH', (_err, stdout) => {
+        const chromeRunning = Boolean(stdout && stdout.toLowerCase().includes("chrome.exe"));
+        if (!chromeRunning || Date.now() - state.lastHeartbeatAt > 25e3) {
+          launchGoogleVoiceChromeWindow(chromeRunning ? "heartbeat_timeout_reopen_gv" : "chrome_not_running");
+        }
+      });
+    }
+  }, 6e3);
+}
+
+// server/src/index.ts
 function createApp() {
   const app = express();
   app.set("trust proxy", true);
@@ -13206,7 +13372,7 @@ function createApp() {
         recipient_phone,
         prospect_name,
         prospect_phone,
-        state,
+        state: state2,
         lead_id,
         mode,
         force_work_hours,
@@ -13220,7 +13386,7 @@ function createApp() {
           recipient_name: recipient_name || "King Amen Ra",
           recipient_phone: recipient_phone || "+16024569681",
           prospect_name: prospect_name || "Valued Client",
-          state: state || "AZ"
+          state: state2 || "AZ"
         });
         return res.json({ ok: true, live_status: liveStatus, transfer: liveStatus });
       }
@@ -13230,7 +13396,7 @@ function createApp() {
           recipient_name: recipient_name || "King Amen Ra",
           prospect_name: prospect_name || "Valued Client",
           prospect_phone: prospect_phone || "",
-          state: state || "AZ",
+          state: state2 || "AZ",
           reason: "Automatic Transline Connection, Private Whisper Receipt, and Both-Parties-on-Line Verification",
           force_live_connect
         },
@@ -13239,7 +13405,7 @@ function createApp() {
           lead_id,
           prospect_name: prospect_name || "Valued Client",
           prospect_phone: prospect_phone || "",
-          state: state || "AZ",
+          state: state2 || "AZ",
           force_work_hours,
           simulated_now_iso,
           force_live_connect
@@ -13271,12 +13437,25 @@ function createApp() {
     });
     res.json({ ok: true, ...wh });
   });
+  app.post("/api/sarah/gv-heartbeat", (req, res) => {
+    res.json(handleGvHeartbeat(req.body || {}));
+  });
+  app.get("/api/sarah/gv-status", (_req, res) => {
+    res.json(getGvWatchdogStatus());
+  });
+  app.post("/api/sarah/gv-command", (req, res) => {
+    if (req.body?.launchChrome) {
+      const launched = launchGoogleVoiceChromeWindow("manual_api_command");
+      return res.json({ ok: true, launched, status: getGvWatchdogStatus() });
+    }
+    res.json(queueGvCommand(req.body || {}));
+  });
   app.use("/api/public", publicApi);
   app.use("/api/public", publicAppointments);
   app.use("/api/google", googleCallback);
   app.use("/api/sarah", sarahPublic);
   app.use("/api/telephony/twiml", sarahPublic);
-  app.use("/widget", express.static(fileURLToPath2(new URL("../public", import.meta.url))));
+  app.use("/widget", express.static(fileURLToPath3(new URL("../public", import.meta.url))));
   app.use("/api/auth", auth);
   app.use("/api", requireAuth);
   app.get("/api/stream", (req, res) => subscribe(res, [`user:${req.user.id}`, "inbox"]));
@@ -13287,8 +13466,8 @@ function createApp() {
   app.use("/api/inbox", inbox);
   app.use("/api/sarah", sarahAuth);
   app.use("/api", api);
-  const dist = fileURLToPath2(new URL("../../client/dist", import.meta.url));
-  if (existsSync(dist)) {
+  const dist = fileURLToPath3(new URL("../../client/dist", import.meta.url));
+  if (existsSync3(dist)) {
     app.use(express.static(dist));
     app.use((req, res, next) => req.path.startsWith("/api") ? next() : res.sendFile("index.html", { root: dist }));
   }
@@ -13337,7 +13516,7 @@ function attachSarahWebSocket(server) {
   });
   return wss;
 }
-var isMain = process.argv[1] && fileURLToPath2(import.meta.url).toLowerCase() === process.argv[1].toLowerCase();
+var isMain = process.argv[1] && fileURLToPath3(import.meta.url).toLowerCase() === process.argv[1].toLowerCase();
 if (isMain) {
   await getDb();
   const { ensureSeeded: ensureSeeded2 } = await Promise.resolve().then(() => (init_seed(), seed_exports));
@@ -13355,6 +13534,7 @@ if (isMain) {
   });
 }
 if (isMain) {
+  startGoogleVoiceWatchdog();
   const { runSarahAutoDialerTick: runSarahAutoDialerTick2 } = await Promise.resolve().then(() => (init_sarahDialer(), sarahDialer_exports));
   setInterval(() => {
     runSarahAutoDialerTick2({ reason: "interval" }).catch((err) => console.error("Sarah auto-dialer error:", err?.message));

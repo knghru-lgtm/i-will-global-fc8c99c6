@@ -23,6 +23,13 @@ import {
   checkLiveTransferCallStatus,
   checkReceptionistWorkHours,
 } from './services/sarahVoiceService.ts';
+import {
+  handleGvHeartbeat,
+  getGvWatchdogStatus,
+  queueGvCommand,
+  launchGoogleVoiceChromeWindow,
+  startGoogleVoiceWatchdog,
+} from './services/googleVoiceWatchdog.ts';
 
 export function createApp() {
   const app = express();
@@ -147,6 +154,19 @@ export function createApp() {
     });
     res.json({ ok: true, ...wh });
   });
+  app.post('/api/sarah/gv-heartbeat', (req, res) => {
+    res.json(handleGvHeartbeat(req.body || {}));
+  });
+  app.get('/api/sarah/gv-status', (_req, res) => {
+    res.json(getGvWatchdogStatus());
+  });
+  app.post('/api/sarah/gv-command', (req, res) => {
+    if (req.body?.launchChrome) {
+      const launched = launchGoogleVoiceChromeWindow('manual_api_command');
+      return res.json({ ok: true, launched, status: getGvWatchdogStatus() });
+    }
+    res.json(queueGvCommand(req.body || {}));
+  });
 
   // Public: website chat widget, SOA e-sign, appointment web confirmation, OAuth callback, Inbound Receptionist & Webhook
   app.use('/api/public', publicApi);
@@ -246,6 +266,7 @@ if (isMain) {
 // (Mon–Fri 9 AM–7 PM, Sat–Sun 9 AM–6 PM Arizona time). Serverless deployments use the call-completion
 // webhook chain plus Vercel Cron every 15 minutes — no CRM login is ever required.
 if (isMain) {
+  startGoogleVoiceWatchdog();
   const { runSarahAutoDialerTick } = await import('./services/sarahDialer.ts');
   setInterval(() => {
     runSarahAutoDialerTick({ reason: 'interval' }).catch((err) => console.error('Sarah auto-dialer error:', err?.message));

@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --watch-path=src src/index.ts",
-    "start": "node --env-file-if-exists=.env src/index.ts",
-    "seed": "node --env-file-if-exists=.env src/db/seed.ts --reset",
+    "dev": "node --env-file-if-exists=../.env --env-file-if-exists=.env src/index.ts",
+    "start": "node --env-file-if-exists=../.env --env-file-if-exists=.env src/index.ts",
+    "seed": "node --env-file-if-exists=../.env --env-file-if-exists=.env src/db/seed.ts --reset",
     "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p ."
   },
