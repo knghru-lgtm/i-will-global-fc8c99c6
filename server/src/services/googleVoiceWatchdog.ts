@@ -1,8 +1,8 @@
-import { spawn, exec } from 'node:child_process';
+import { exec } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const CURRENT_GV_EXTENSION_BUILD = '2026-11-09-v7';
+export const CURRENT_GV_EXTENSION_BUILD = '2026-11-09-v8';
 
 export interface GvButtonTelemetry {
   tag: string;
@@ -140,38 +140,36 @@ export function launchGoogleVoiceChromeWindow(reason = 'watchdog'): boolean {
 
   state.lastLaunchAttemptAt = Date.now();
   state.launchCount += 1;
-  recordGvEvent('gv_chrome_launch', `Launching Google Voice Profile 7 (${reason})`);
+  recordGvEvent('gv_chrome_launch', `Ensuring Google Voice Profile 7 with extension (${reason})`);
 
   try {
-    const desktopShortcut = 'C:\\Users\\Amen Ra Family\\Desktop\\Google Voice.lnk';
-    if (existsSync(desktopShortcut)) {
-      // Launch via explorer.exe so the Windows interactive desktop shell opens Google Voice visibly on the user's real desktop
-      const child = spawn('explorer.exe', [desktopShortcut], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: false,
-      });
-      child.unref();
-      return true;
-    }
-
     const extDir = fileURLToPath(new URL('../../../google-voice-extension', import.meta.url));
-    const args = [
-      '--profile-directory=Profile 7',
-      '--app-id=bbcbahpbnakjldhdcgiblnjnfgaejidg',
-      `--load-extension=${extDir}`,
-      '--autoplay-policy=no-user-gesture-required',
-      '--use-fake-ui-for-media-stream',
-      '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding',
-      '--disable-backgrounding-occluded-windows',
-    ];
-    const child = spawn(chromeExe, args, {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
+    // Launch via WMI Win32_Process.Create so Chrome starts outside any temporary Job Object
+    // and automatically restarts with --restore-last-session + --load-extension if regular Chrome was started without the extension flag
+    const psScript = `
+$procs = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object { $_.CommandLine -notlike '*--type=*' }
+$needsRestart = $false
+if ($procs) {
+  foreach ($p in $procs) {
+    if ($p.CommandLine -notlike '*google-voice-extension*') {
+      $needsRestart = $true
+    }
+  }
+}
+if ($needsRestart) {
+  Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 500
+}
+$cmd = '"${chromeExe}" --restore-last-session --profile-directory="Profile 7" --load-extension="${extDir}" --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows https://voice.google.com/u/0/calls'
+Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
+`.trim();
+
+    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+    exec(`powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`, (err) => {
+      if (err) {
+        recordGvEvent('gv_chrome_launch_error', err.message);
+      }
     });
-    child.unref();
     return true;
   } catch (err: any) {
     recordGvEvent('gv_chrome_launch_error', err?.message || 'spawn error');
@@ -184,5 +182,23 @@ let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 export function startGoogleVoiceWatchdog() {
   if (process.env.VERCEL || process.platform !== 'win32') return;
   if (watchdogTimer) return;
-  recordGvEvent('watchdog_started', 'Internal Cloned App Receptionist active on (480) 331-9455 (standalone mode — no unsolicited Chrome launch)');
+
+  recordGvEvent('watchdog_started', 'Monitoring Google Voice (480) 331-9455 24/7 with WebRTC Direct Audio Bridge');
+
+  setTimeout(() => {
+    const now = Date.now();
+    if (now - state.lastHeartbeatAt > 10_000 && now - state.lastLaunchAttemptAt > 15_000) {
+      launchGoogleVoiceChromeWindow('server_startup');
+    }
+  }, 3_500);
+
+  watchdogTimer = setInterval(() => {
+    const now = Date.now();
+    const heartbeatMissing = state.lastHeartbeatAt === 0 || now - state.lastHeartbeatAt > 15_000;
+    const cooldownElapsed = now - state.lastLaunchAttemptAt > 25_000;
+
+    if (heartbeatMissing && cooldownElapsed) {
+      launchGoogleVoiceChromeWindow('heartbeat_timeout_reopen_gv');
+    }
+  }, 6_000);
 }

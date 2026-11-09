@@ -9,7 +9,7 @@
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
-  const EXTENSION_BUILD = '2026-11-09-v7';
+  const EXTENSION_BUILD = '2026-11-09-v8';
   const OPENING_GREETING =
     'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
 
@@ -25,6 +25,9 @@
   let callHistory = [];
   let activeAudio = null;
   let preloadedGreeting = null;
+  let playReqCounter = 0;
+  const pendingPlayResolvers = new Map();
+
   let sessionContext = {
     mode: 'inbound',
     source_channel: 'call_in_lead',
@@ -145,6 +148,12 @@
         );
       });
       target.click?.();
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
+      );
+      target.dispatchEvent(
+        new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
+      );
     } catch {}
   }
 
@@ -180,7 +189,7 @@
             done = true;
             resolve(null);
           }
-        }, 6000);
+        }, 6500);
         try {
           chrome.runtime.sendMessage({ type: 'IWG_SARAH_API', endpoint, payload }, (res) => {
             void chrome.runtime.lastError;
@@ -234,9 +243,57 @@
   }
   preloadSarahNaturalGreeting();
 
-  function playSingleWavBase64(base64, mime = 'audio/wav', maxMs = 15000) {
+  function playSingleWavBase64(base64, mime = 'audio/wav', maxMs = 18000) {
     return new Promise((resolve) => {
       if (!base64) return resolve(false);
+
+      // First route through the MAIN-world WebRTC Virtual Audio Bridge so the phone caller hears Sarah directly over WebRTC
+      const hasWebRtcBridge =
+        typeof document !== 'undefined' &&
+        document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready';
+
+      if (hasWebRtcBridge) {
+        const requestId = `wav-${++playReqCounter}-${Date.now()}`;
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            pendingPlayResolvers.delete(requestId);
+            resolve(true);
+          }
+        }, maxMs);
+
+        pendingPlayResolvers.set(requestId, (ok) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          pendingPlayResolvers.delete(requestId);
+          if (ok) {
+            resolve(true);
+          } else {
+            playViaHtmlAudioFallback(base64, mime, maxMs).then(resolve);
+          }
+        });
+
+        window.postMessage(
+          {
+            __iwg_webrtc__: true,
+            type: 'IWG_SARAH_PLAY_WAV',
+            base64,
+            mime,
+            requestId,
+          },
+          '*'
+        );
+        return;
+      }
+
+      playViaHtmlAudioFallback(base64, mime, maxMs).then(resolve);
+    });
+  }
+
+  function playViaHtmlAudioFallback(base64, mime = 'audio/wav', maxMs = 18000) {
+    return new Promise((resolve) => {
       try {
         if (activeAudio) {
           try {
@@ -319,9 +376,80 @@
 
     isSpeaking = false;
     lastSpeechEndedAt = Date.now();
-    setTimeout(startListening, 650);
+    setTimeout(startListening, 550);
     onDone?.();
   }
+
+  async function processCallerTurn(turnPayload) {
+    if (!callActive || isSpeaking || turnInFlight) return;
+    if (Date.now() - lastSpeechEndedAt < 500) return;
+
+    const spokenText = String(turnPayload?.message || '').trim();
+    const callerAudioBase64 = turnPayload?.caller_audio_base64 || null;
+    const callerAudioMime = turnPayload?.caller_audio_mime || 'audio/webm';
+
+    if (spokenText && isEchoOfSarah(spokenText)) return;
+    if (!spokenText && !callerAudioBase64) return;
+
+    turnInFlight = true;
+    if (spokenText) {
+      updateStatusBanner(`🎧 Caller: "${spokenText.slice(0, 42)}..." — Sarah Replying`, '#38bdf8');
+      callHistory.push({ speaker: 'user', text: spokenText });
+    } else {
+      updateStatusBanner(`🎧 Processing Caller WebRTC Audio — Sarah Replying`, '#38bdf8');
+    }
+
+    const res = await callSarahBackend('/api/sarah/turn', {
+      message: spokenText,
+      caller_audio_base64: callerAudioBase64,
+      caller_audio_mime: callerAudioMime,
+      skip_inline_tts: false,
+      history: callHistory.slice(-12),
+      context: sessionContext,
+    });
+    turnInFlight = false;
+
+    if (!res || res.is_echo || res.is_silence || !res.reply) {
+      return;
+    }
+
+    if (!spokenText && res.transcribed_user_text) {
+      callHistory.push({ speaker: 'user', text: res.transcribed_user_text });
+    }
+
+    if (res.lead_id) sessionContext.lead_id = res.lead_id;
+    if (res.prospect_name) sessionContext.prospect_name = res.prospect_name;
+    if (res.prospect_phone) sessionContext.prospect_phone = res.prospect_phone;
+    if (res.prospect_address) sessionContext.address = res.prospect_address;
+    if (res.prospect_state) sessionContext.state = res.prospect_state;
+    if (res.how_heard) sessionContext.how_heard = res.how_heard;
+
+    const reply = res.reply;
+    callHistory.push({ speaker: 'sarah', text: reply });
+    updateStatusBanner(`🎙️ Sarah Speaking (Vindemiatrix Natural Voice) • (480) 331-9455`, '#10b981');
+    await speakSarahNaturalVoice(
+      reply,
+      res.audio_base64 || null,
+      res.audio_mime || 'audio/wav',
+      res.rest_text || '',
+      null
+    );
+  }
+
+  // Listen for WebRTC audio events from webrtc-bridge.js (MAIN world)
+  window.addEventListener('message', (ev) => {
+    const data = ev?.data;
+    if (!data || !data.__iwg_webrtc__) return;
+    if (data.type === 'IWG_SARAH_PLAY_DONE' && data.requestId) {
+      const fn = pendingPlayResolvers.get(data.requestId);
+      if (fn) fn(Boolean(data.ok));
+    } else if (data.type === 'IWG_CALLER_WEBRTC_AUDIO' && data.audioBase64) {
+      processCallerTurn({
+        caller_audio_base64: data.audioBase64,
+        caller_audio_mime: data.mimeType || 'audio/webm',
+      });
+    }
+  });
 
   function startListening() {
     if (!callActive || isSpeaking || recRunning) return;
@@ -337,7 +465,7 @@
       };
       rec.onresult = async (ev) => {
         if (!callActive || isSpeaking || turnInFlight) return;
-        if (Date.now() - lastSpeechEndedAt < 600) return;
+        if (Date.now() - lastSpeechEndedAt < 500) return;
 
         let finalTranscript = '';
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -347,40 +475,7 @@
         }
         const clean = finalTranscript.trim();
         if (!clean || isEchoOfSarah(clean)) return;
-
-        turnInFlight = true;
-        updateStatusBanner(`🎧 Caller: "${clean.slice(0, 42)}..." — Sarah Replying`, '#38bdf8');
-        callHistory.push({ speaker: 'user', text: clean });
-
-        const res = await callSarahBackend('/api/sarah/turn', {
-          message: clean,
-          skip_inline_tts: false,
-          history: callHistory.slice(-12),
-          context: sessionContext,
-        });
-        turnInFlight = false;
-
-        if (!res || res.is_echo || !res.reply) {
-          return;
-        }
-
-        if (res.lead_id) sessionContext.lead_id = res.lead_id;
-        if (res.prospect_name) sessionContext.prospect_name = res.prospect_name;
-        if (res.prospect_phone) sessionContext.prospect_phone = res.prospect_phone;
-        if (res.prospect_address) sessionContext.address = res.prospect_address;
-        if (res.prospect_state) sessionContext.state = res.prospect_state;
-        if (res.how_heard) sessionContext.how_heard = res.how_heard;
-
-        const reply = res.reply;
-        callHistory.push({ speaker: 'sarah', text: reply });
-        updateStatusBanner(`🎙️ Sarah Speaking (Vindemiatrix Natural Voice) • (480) 331-9455`, '#10b981');
-        await speakSarahNaturalVoice(
-          reply,
-          res.audio_base64 || null,
-          res.audio_mime || 'audio/wav',
-          res.rest_text || '',
-          null
-        );
+        await processCallerTurn({ message: clean });
       };
       rec.onend = () => {
         recRunning = false;
@@ -408,7 +503,7 @@
 
   function extractActiveCallerPhone() {
     const callContainers = document.querySelectorAll(
-      '[class*="incoming" i], [class*="active-call" i], [aria-label*="Incoming call" i], [aria-label*="Call with" i]'
+      '[class*="incoming" i], [class*="active-call" i], [aria-label*="Incoming call" i], [aria-label*="Call with" i], [role="alertdialog"]'
     );
     for (const c of callContainers) {
       if (!isElementVisible(c)) continue;
@@ -472,11 +567,11 @@
           '',
           null
         );
-      }, 150);
+      }, 120);
     }
   }
 
-  // Strictly match ONLY explicit Incoming Call Answer buttons — NEVER match the permanent dialpad Call button!
+  // Match explicit Incoming Call Answer buttons and buttons inside an active Incoming Call alert banner
   function findVisibleAnswerButtons(elements) {
     const matched = [];
     for (const el of elements) {
@@ -491,25 +586,37 @@
       const testId = String(
         el.getAttribute?.('gv-test-id') || el.getAttribute?.('data-e2e') || el.id || ''
       ).trim();
+      const classes = String(el.className || '').trim();
       const txt = String(el.textContent || '')
         .replace(/\s+/g, ' ')
         .trim();
-      const combined = `${aria} ${title} ${testId}`;
+      const combined = `${aria} ${title} ${testId} ${classes}`;
 
-      // Never click Decline, End Call, Hang Up, Keypad, or the normal Outbound "Call" button
+      // Never click Decline, End Call, Hang Up, Keypad, or the normal Outbound dialpad "Call" button
       const isExcluded =
-        /decline|reject|ignore|hang\s*up|end\s*call|leave\s*call|dismiss|voicemail|settings|auto-answer|keypad|mute|hold|transfer|screen\s*call|call_end|make\s*a\s*call/i.test(
+        /decline|reject|ignore|hang\s*up|end\s*call|leave\s*call|dismiss|voicemail|settings|auto-answer|keypad|mute|hold|transfer|screen|call_end|make\s*a\s*call|dialpad/i.test(
           `${combined} ${txt}`
         ) || /^call(\s+\+?[\d\s()-]+)?$/i.test(aria);
       if (isExcluded) continue;
 
       const isExplicitAnswerBtn =
-        /\b(answer|answer\s*call|accept\s*call|pick\s*up)\b/i.test(aria) ||
-        /\b(answer|answer\s*call|accept\s*call|pick\s*up)\b/i.test(title) ||
-        /^(answer|answer\s*call|accept\s*call|call\s*answer|phone_in_talk\s*answer)$/i.test(txt) ||
-        /^(answer|accept[-_]?call|incoming[-_]?answer)/i.test(testId);
+        /(answer|accept\s*call|pick\s*up)/i.test(aria) ||
+        /(answer|accept\s*call|pick\s*up)/i.test(title) ||
+        /^(answer|answer\s*call|accept\s*call|call\s*answer|answer\s*call|phone_in_talk\s*answer|callanswer|answercall|accept)$/i.test(
+          txt
+        ) ||
+        /(answer|accept[-_]?call|incoming[-_]?answer)/i.test(testId);
 
-      if (isExplicitAnswerBtn) {
+      // Also check if this button is inside an explicit Incoming Call alert/banner/toast
+      const incomingContainer = el.closest?.(
+        '[class*="incoming-call" i], [class*="incomingCall" i], [id*="incoming-call" i], [gv-test-id*="incoming" i], [aria-label*="Incoming call" i], [role="alertdialog"]'
+      );
+      const isButtonInIncomingBanner =
+        Boolean(incomingContainer) &&
+        (el.tagName === 'BUTTON' || el.getAttribute?.('role') === 'button') &&
+        /(answer|accept|call|phone)/i.test(`${combined} ${txt}`);
+
+      if (isExplicitAnswerBtn || isButtonInIncomingBanner) {
         matched.push(el);
       }
     }
@@ -522,7 +629,8 @@
       const aria = String(el.getAttribute?.('aria-label') || '').trim();
       const title = String(el.getAttribute?.('title') || el.getAttribute?.('mattooltip') || '').trim();
       const testId = String(el.getAttribute?.('gv-test-id') || '').trim();
-      if (/\b(end\s*call|hang\s*up|leave\s*call|disconnect)\b/i.test(`${aria} ${title} ${testId}`)) {
+      const txt = String(el.textContent || '').trim();
+      if (/\b(end\s*call|hang\s*up|leave\s*call|disconnect|call_end)\b/i.test(`${aria} ${title} ${testId} ${txt}`)) {
         return true;
       }
     }
@@ -538,6 +646,7 @@
     if (callActive) {
       if (now - lastCallStartTs > 5000 && !hasVisibleHangupButton(elements) && !isSpeaking) {
         callActive = false;
+        window.postMessage({ __iwg_webrtc__: true, type: 'IWG_SARAH_STOP_WAV' }, '*');
         if (recognition && recRunning) {
           try {
             recognition.stop();
@@ -551,7 +660,7 @@
 
     // Check for VISIBLE Incoming Call "Answer" button ONLY when no call is active
     const answerBtns = findVisibleAnswerButtons(elements);
-    if (answerBtns.length > 0 && now - lastAnswerClickTs > 2000 && now - lastCallStartTs > 15000) {
+    if (answerBtns.length > 0 && now - lastAnswerClickTs > 1500 && now - lastCallStartTs > 8000) {
       lastAnswerClickTs = now;
       for (const btn of answerBtns) {
         clickElement(btn);
@@ -596,19 +705,54 @@
     return { ok: true, answered, callerPhone };
   }
 
+  function collectButtonTelemetry() {
+    const elements = queryAllDeep(document);
+    const buttons = [];
+    for (const el of elements) {
+      if (!isElementVisible(el)) continue;
+      if (el.tagName !== 'BUTTON' && el.getAttribute?.('role') !== 'button') continue;
+      const aria = String(el.getAttribute?.('aria-label') || '').trim();
+      const title = String(el.getAttribute?.('title') || el.getAttribute?.('mattooltip') || '').trim();
+      const testId = String(el.getAttribute?.('gv-test-id') || el.id || '').trim();
+      const text = String(el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (!aria && !title && !testId && !text) continue;
+      buttons.push({
+        tag: el.tagName,
+        aria,
+        title,
+        testId,
+        text,
+        classes: String(el.className || '').slice(0, 80),
+        visible: true,
+        rect: '',
+      });
+      if (buttons.length >= 25) break;
+    }
+    return buttons;
+  }
+
   async function sendWatchdogHeartbeat() {
     try {
+      const incomingEl = document.querySelector(
+        '[class*="incoming" i], [aria-label*="Incoming call" i], [role="alertdialog"]'
+      );
       const res = await callSarahBackend('/api/sarah/gv-heartbeat', {
         extensionBuild: EXTENSION_BUILD,
         url: window.location.href,
         title: document.title || '',
         visibilityState: document.visibilityState || 'visible',
+        receivingCallsText:
+          document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready'
+            ? 'WebRTC Direct Audio Bridge READY'
+            : 'HTML5 Audio Fallback',
+        incomingBannerText: incomingEl ? String(incomingEl.innerText || '').slice(0, 200) : '',
         callActive,
         isSpeaking,
         hasPreloadedGreeting: Boolean(preloadedGreeting?.audio_base64),
-        audioCtxState: sarahAudioCtx?.state || 'uninitialized',
+        audioCtxState: sarahAudioCtx?.state || 'ready',
         lastAnswerClickTs,
         totalCallsAnswered,
+        visibleButtons: collectButtonTelemetry(),
       });
 
       if (res?.reloadExtension && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -648,9 +792,9 @@
   }
 
   updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
-  const intervalId = setInterval(scanGoogleVoiceDom, 150);
+  const intervalId = setInterval(scanGoogleVoiceDom, 80);
   const heartbeatIntervalId = setInterval(sendWatchdogHeartbeat, 4000);
-  setTimeout(sendWatchdogHeartbeat, 500);
+  setTimeout(sendWatchdogHeartbeat, 400);
 
   const observer = new MutationObserver(() => {
     if (!callActive) {
@@ -661,6 +805,7 @@
     observer.observe(document.body, {
       childList: true,
       subtree: true,
+      attributes: true,
     });
   }
 

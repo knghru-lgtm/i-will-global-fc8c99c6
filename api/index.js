@@ -11895,9 +11895,67 @@ async function handleSarahHttpTurn(params) {
       rest_text: restChunk
     };
   };
-  const rawMessage = String(
+  let rawMessage = String(
     params.message ?? params.userText ?? params.user_text ?? params.text ?? ""
   ).trim();
+  let transcribedFromWebRtcAudio = false;
+  if (!rawMessage && params.caller_audio_base64 && isAIEnabled()) {
+    try {
+      const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+      const sttRes = await Promise.race([
+        ai2.models.generateContent({
+          model: "gemini-3.8-flash",
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    data: String(params.caller_audio_base64),
+                    mimeType: String(params.caller_audio_mime || "audio/webm")
+                  }
+                },
+                {
+                  text: "Transcribe the exact words spoken by the human caller in this telephone audio clip. Output ONLY the transcribed words with no commentary or quotes. If there is no intelligible human speech, silence, or only background noise/tones, output ONLY the word SILENCE."
+                }
+              ]
+            }
+          ],
+          config: {
+            temperature: 0,
+            maxOutputTokens: 120
+          }
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("STT timeout")), 2500))
+      ]);
+      const sttText = String(sttRes?.text || "").replace(/^["']|["']$/g, "").trim();
+      if (!sttText || /^silence$/i.test(sttText) || sttText.length < 2) {
+        return {
+          ok: true,
+          is_silence: true,
+          reply: "",
+          first_chunk_text: "",
+          rest_text: "",
+          voice: SARAH_VOICE_NAME,
+          audio_base64: null,
+          audio_mime: "audio/wav"
+        };
+      }
+      rawMessage = sttText;
+      transcribedFromWebRtcAudio = true;
+    } catch {
+      return {
+        ok: true,
+        is_silence: true,
+        reply: "",
+        first_chunk_text: "",
+        rest_text: "",
+        voice: SARAH_VOICE_NAME,
+        audio_base64: null,
+        audio_mime: "audio/wav"
+      };
+    }
+  }
   const sessionKey = String(
     params.session_id || params.call_sid || params.context?.session_id || params.context?.call_sid || ""
   ).trim();
@@ -12172,6 +12230,7 @@ async function handleSarahHttpTurn(params) {
     return {
       ok: true,
       reply: replyText,
+      transcribed_user_text: transcribedFromWebRtcAudio ? rawMessage : void 0,
       scenario: checkRes.success ? "Appointment Confirmed (Call-In Lead)" : "Appointment Intake Step",
       audio_base64: tts2.audio_base64,
       audio_mime: tts2.audio_mime,
@@ -12205,6 +12264,7 @@ async function handleSarahHttpTurn(params) {
     return {
       ok: true,
       reply: fastReply,
+      transcribed_user_text: transcribedFromWebRtcAudio ? rawMessage : void 0,
       scenario: fastScenarioCheck.scenario,
       audio_base64: tts2.audio_base64,
       audio_mime: tts2.audio_mime,
@@ -12392,6 +12452,7 @@ CRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:
           return {
             ok: true,
             reply: replyText,
+            transcribed_user_text: transcribedFromWebRtcAudio ? rawMessage : void 0,
             audio_base64: tts2.audio_base64,
             audio_mime: tts2.audio_mime,
             first_chunk_text: tts2.first_chunk_text,
@@ -12426,6 +12487,7 @@ CRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:
   return {
     ok: true,
     reply: finalFallbackReply,
+    transcribed_user_text: transcribedFromWebRtcAudio ? rawMessage : void 0,
     scenario: clonedMatch.scenario,
     audio_base64: tts.audio_base64,
     audio_mime: tts.audio_mime,
@@ -13440,10 +13502,10 @@ sarahAuth.get("/calls/:call_id", async (req, res) => {
 init_realtime();
 
 // server/src/services/googleVoiceWatchdog.ts
-import { spawn } from "node:child_process";
+import { exec } from "node:child_process";
 import { existsSync as existsSync2 } from "node:fs";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-var CURRENT_GV_EXTENSION_BUILD = "2026-11-09-v7";
+var CURRENT_GV_EXTENSION_BUILD = "2026-11-09-v8";
 var state = {
   lastHeartbeatAt: 0,
   lastLaunchAttemptAt: 0,
@@ -13532,35 +13594,32 @@ function launchGoogleVoiceChromeWindow(reason = "watchdog") {
   if (!existsSync2(chromeExe)) return false;
   state.lastLaunchAttemptAt = Date.now();
   state.launchCount += 1;
-  recordGvEvent("gv_chrome_launch", `Launching Google Voice Profile 7 (${reason})`);
+  recordGvEvent("gv_chrome_launch", `Ensuring Google Voice Profile 7 with extension (${reason})`);
   try {
-    const desktopShortcut = "C:\\Users\\Amen Ra Family\\Desktop\\Google Voice.lnk";
-    if (existsSync2(desktopShortcut)) {
-      const child2 = spawn("explorer.exe", [desktopShortcut], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: false
-      });
-      child2.unref();
-      return true;
-    }
     const extDir = fileURLToPath2(new URL("../../../google-voice-extension", import.meta.url));
-    const args = [
-      "--profile-directory=Profile 7",
-      "--app-id=bbcbahpbnakjldhdcgiblnjnfgaejidg",
-      `--load-extension=${extDir}`,
-      "--autoplay-policy=no-user-gesture-required",
-      "--use-fake-ui-for-media-stream",
-      "--disable-background-timer-throttling",
-      "--disable-renderer-backgrounding",
-      "--disable-backgrounding-occluded-windows"
-    ];
-    const child = spawn(chromeExe, args, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: false
+    const psScript = `
+$procs = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object { $_.CommandLine -notlike '*--type=*' }
+$needsRestart = $false
+if ($procs) {
+  foreach ($p in $procs) {
+    if ($p.CommandLine -notlike '*google-voice-extension*') {
+      $needsRestart = $true
+    }
+  }
+}
+if ($needsRestart) {
+  Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 500
+}
+$cmd = '"${chromeExe}" --restore-last-session --profile-directory="Profile 7" --load-extension="${extDir}" --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows https://voice.google.com/u/0/calls'
+Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
+`.trim();
+    const encoded = Buffer.from(psScript, "utf16le").toString("base64");
+    exec(`powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`, (err) => {
+      if (err) {
+        recordGvEvent("gv_chrome_launch_error", err.message);
+      }
     });
-    child.unref();
     return true;
   } catch (err) {
     recordGvEvent("gv_chrome_launch_error", err?.message || "spawn error");
@@ -13571,7 +13630,21 @@ var watchdogTimer = null;
 function startGoogleVoiceWatchdog() {
   if (process.env.VERCEL || process.platform !== "win32") return;
   if (watchdogTimer) return;
-  recordGvEvent("watchdog_started", "Internal Cloned App Receptionist active on (480) 331-9455 (standalone mode \u2014 no unsolicited Chrome launch)");
+  recordGvEvent("watchdog_started", "Monitoring Google Voice (480) 331-9455 24/7 with WebRTC Direct Audio Bridge");
+  setTimeout(() => {
+    const now = Date.now();
+    if (now - state.lastHeartbeatAt > 1e4 && now - state.lastLaunchAttemptAt > 15e3) {
+      launchGoogleVoiceChromeWindow("server_startup");
+    }
+  }, 3500);
+  watchdogTimer = setInterval(() => {
+    const now = Date.now();
+    const heartbeatMissing = state.lastHeartbeatAt === 0 || now - state.lastHeartbeatAt > 15e3;
+    const cooldownElapsed = now - state.lastLaunchAttemptAt > 25e3;
+    if (heartbeatMissing && cooldownElapsed) {
+      launchGoogleVoiceChromeWindow("heartbeat_timeout_reopen_gv");
+    }
+  }, 6e3);
 }
 
 // server/src/index.ts

@@ -2795,6 +2795,8 @@ function ensureNonRepeatingSarahReply(
 export async function handleSarahHttpTurn(params: {
   message?: string;
   userText?: string;
+  caller_audio_base64?: string;
+  caller_audio_mime?: string;
   session_id?: string;
   call_sid?: string;
   history?: Array<{ speaker: 'sarah' | 'user'; text: string }>;
@@ -2873,9 +2875,70 @@ export async function handleSarahHttpTurn(params: {
     };
   };
 
-  const rawMessage = String(
+  let rawMessage = String(
     params.message ?? params.userText ?? (params as any).user_text ?? (params as any).text ?? ''
   ).trim();
+  let transcribedFromWebRtcAudio = false;
+
+  if (!rawMessage && params.caller_audio_base64 && isAIEnabled()) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+      const sttRes: any = await Promise.race([
+        ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    data: String(params.caller_audio_base64),
+                    mimeType: String(params.caller_audio_mime || 'audio/webm'),
+                  },
+                },
+                {
+                  text: 'Transcribe the exact words spoken by the human caller in this telephone audio clip. Output ONLY the transcribed words with no commentary or quotes. If there is no intelligible human speech, silence, or only background noise/tones, output ONLY the word SILENCE.',
+                },
+              ],
+            },
+          ],
+          config: {
+            temperature: 0.0,
+            maxOutputTokens: 120,
+          },
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('STT timeout')), 2500)),
+      ]);
+      const sttText = String(sttRes?.text || '')
+        .replace(/^["']|["']$/g, '')
+        .trim();
+      if (!sttText || /^silence$/i.test(sttText) || sttText.length < 2) {
+        return {
+          ok: true,
+          is_silence: true,
+          reply: '',
+          first_chunk_text: '',
+          rest_text: '',
+          voice: SARAH_VOICE_NAME,
+          audio_base64: null,
+          audio_mime: 'audio/wav',
+        };
+      }
+      rawMessage = sttText;
+      transcribedFromWebRtcAudio = true;
+    } catch {
+      return {
+        ok: true,
+        is_silence: true,
+        reply: '',
+        first_chunk_text: '',
+        rest_text: '',
+        voice: SARAH_VOICE_NAME,
+        audio_base64: null,
+        audio_mime: 'audio/wav',
+      };
+    }
+  }
 
   const sessionKey = String(
     params.session_id || params.call_sid || (params.context as any)?.session_id || (params.context as any)?.call_sid || ''
@@ -3213,6 +3276,7 @@ export async function handleSarahHttpTurn(params: {
     return {
       ok: true,
       reply: replyText,
+      transcribed_user_text: transcribedFromWebRtcAudio ? rawMessage : undefined,
       scenario: checkRes.success ? 'Appointment Confirmed (Call-In Lead)' : 'Appointment Intake Step',
       audio_base64: tts.audio_base64,
       audio_mime: tts.audio_mime,
@@ -3252,6 +3316,7 @@ export async function handleSarahHttpTurn(params: {
     return {
       ok: true,
       reply: fastReply,
+      transcribed_user_text: transcribedFromWebRtcAudio ? rawMessage : undefined,
       scenario: fastScenarioCheck.scenario,
       audio_base64: tts.audio_base64,
       audio_mime: tts.audio_mime,
@@ -3463,6 +3528,7 @@ export async function handleSarahHttpTurn(params: {
           return {
             ok: true,
             reply: replyText,
+            transcribed_user_text: transcribedFromWebRtcAudio ? rawMessage : undefined,
             audio_base64: tts.audio_base64,
             audio_mime: tts.audio_mime,
             first_chunk_text: tts.first_chunk_text,
@@ -3499,6 +3565,7 @@ export async function handleSarahHttpTurn(params: {
   return {
     ok: true,
     reply: finalFallbackReply,
+    transcribed_user_text: transcribedFromWebRtcAudio ? rawMessage : undefined,
     scenario: clonedMatch.scenario,
     audio_base64: tts.audio_base64,
     audio_mime: tts.audio_mime,
