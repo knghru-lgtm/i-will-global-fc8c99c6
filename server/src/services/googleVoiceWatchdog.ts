@@ -2,7 +2,7 @@ import { spawn, exec } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const CURRENT_GV_EXTENSION_BUILD = '2026-11-08-v6';
+export const CURRENT_GV_EXTENSION_BUILD = '2026-11-09-v7';
 
 export interface GvButtonTelemetry {
   tag: string;
@@ -184,30 +184,5 @@ let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 export function startGoogleVoiceWatchdog() {
   if (process.env.VERCEL || process.platform !== 'win32') return;
   if (watchdogTimer) return;
-
-  recordGvEvent('watchdog_started', 'Monitoring Google Voice (480) 331-9455 24/7');
-
-  // Check after 4 seconds on startup, then every 6 seconds
-  setTimeout(() => {
-    const now = Date.now();
-    if (now - state.lastHeartbeatAt > 10_000 && now - state.lastLaunchAttemptAt > 20_000) {
-      launchGoogleVoiceChromeWindow('server_startup');
-    }
-  }, 4_000);
-
-  watchdogTimer = setInterval(() => {
-    const now = Date.now();
-    const heartbeatMissing = state.lastHeartbeatAt === 0 || now - state.lastHeartbeatAt > 15_000;
-    const cooldownElapsed = now - state.lastLaunchAttemptAt > 30_000;
-
-    if (heartbeatMissing && cooldownElapsed) {
-      // Check if chrome.exe is running at all; even if it is, opening the Profile 7 app-id brings up Google Voice if closed
-      exec('tasklist /FI "IMAGENAME eq chrome.exe" /NH', (_err, stdout) => {
-        const chromeRunning = Boolean(stdout && stdout.toLowerCase().includes('chrome.exe'));
-        if (!chromeRunning || Date.now() - state.lastHeartbeatAt > 25_000) {
-          launchGoogleVoiceChromeWindow(chromeRunning ? 'heartbeat_timeout_reopen_gv' : 'chrome_not_running');
-        }
-      });
-    }
-  }, 6_000);
+  recordGvEvent('watchdog_started', 'Internal Cloned App Receptionist active on (480) 331-9455 (standalone mode — no unsolicited Chrome launch)');
 }

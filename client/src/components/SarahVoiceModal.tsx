@@ -222,24 +222,31 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
   const isEchoOfSarah = (spokenText: string): boolean => {
     const cleanSpoken = spokenText
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
-    if (!cleanSpoken) return true;
+    if (!cleanSpoken || cleanSpoken.length < 2) return true;
     if (
       cleanSpoken.includes('thank you for calling iwg') ||
       cleanSpoken.includes('this is sarah calling') ||
       cleanSpoken.includes('this is sarah speaking') ||
       cleanSpoken.includes('100 free fiduciary') ||
       cleanSpoken.includes('medicare helpline powered by iwg') ||
-      cleanSpoken.includes('over 104 premier carriers')
+      cleanSpoken.includes('over 104 premier carriers') ||
+      cleanSpoken.includes('zero broker fees') ||
+      cleanSpoken.includes('how may i direct your call') ||
+      cleanSpoken.includes('six core divisions') ||
+      cleanSpoken.includes('reply yes to that confirmation') ||
+      cleanSpoken.includes('i have scheduled your')
     ) {
       return true;
     }
     const cleanSarah = (lastSarahReplyRef.current || '')
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
-    if (cleanSarah && cleanSpoken.length >= 14 && cleanSarah.includes(cleanSpoken)) {
+    if (cleanSarah && cleanSpoken.length >= 12 && cleanSarah.includes(cleanSpoken)) {
       return true;
     }
     return false;
@@ -583,10 +590,9 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const activeCtx = sessionCtxRef.current;
     const liveCallId = transferObj?.sarah_call_id || null;
 
-    // Step 1: Place the customer on hold and dial 602-456-9681 FIRST (never announce connection yet!)
+    // Step 1: Place the customer on hold and dial 602-456-9681 internally (never trigger external cell phone app or announce connection yet!)
     setTranslineStage('dialing_transline');
     setActiveScriptStep(3);
-    openGoogleVoiceWindow(recipientPhone);
 
     const pendingTransfer: WhisperTransferConfirmation = {
       ...transferObj,
@@ -786,6 +792,11 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       }
       if (leadCapturedChange) {
         window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
+      }
+
+      if (res?.is_echo) {
+        resumeSpeechRecognitionSafe();
+        return;
       }
 
       if (res?.reply) {
@@ -1087,7 +1098,6 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     setProspectAddress(lead.address || '');
     setActiveScriptStep(1);
     if (dialGoogleVoice && lead.phone) {
-      openGoogleVoiceWindow(lead.phone);
       api
         .post('/sarah/call', {
           phone: lead.phone,
@@ -1121,7 +1131,6 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         selectQueueLead(queueIndex, true);
       } else {
         const dialPhone = res?.first_call?.phone || res?.dispatched?.[0]?.phone || prospectPhone || '';
-        if (dialPhone) openGoogleVoiceWindow(dialPhone);
         startSession({
           mode: 'outbound',
           lead_id: leadId,
@@ -1133,7 +1142,6 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         });
       }
     } catch {
-      if (prospectPhone) openGoogleVoiceWindow(prospectPhone);
       startSession({
         mode: 'outbound',
         lead_id: leadId,

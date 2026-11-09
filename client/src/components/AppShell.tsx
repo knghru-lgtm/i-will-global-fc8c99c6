@@ -56,27 +56,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     window.addEventListener('iwg-sarah-status-changed', refreshSarah);
     window.addEventListener('open-sarah-ai-control', openSarahOutbound);
 
-    // Subscribe to real-time inbound call events on (480) 331-9455 so Receptionist answers immediately
+    // Subscribe to real-time inbound call events on (480) 331-9455 to silently update CRM leads/activities
+    // (Sarah picks up internally through the cloned app without triggering the user's cell phone or speaker)
     let es: EventSource | null = null;
     try {
       const token = localStorage.getItem('iwg_token');
       if (token && typeof EventSource !== 'undefined') {
         es = new EventSource(`/api/stream?token=${encodeURIComponent(token)}`);
-        es.addEventListener('inbound_call_ringing', (ev: any) => {
+        es.addEventListener('inbound_call_ringing', () => {
           try {
-            const payload = JSON.parse(ev.data || '{}');
-            window.dispatchEvent(
-              new CustomEvent('iwg-open-sarah-voice', {
-                detail: {
-                  mode: 'inbound',
-                  lead_id: payload?.lead_id || undefined,
-                  prospect_name: payload?.caller_name || undefined,
-                  phone: payload?.caller_phone || undefined,
-                  address: payload?.caller_address || undefined,
-                  initialTopic: payload?.user_speech || undefined,
-                },
-              })
-            );
             window.dispatchEvent(new CustomEvent('iwg-lead-updated'));
           } catch {}
         });

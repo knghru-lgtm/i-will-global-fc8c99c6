@@ -38,7 +38,7 @@ var init_config = __esm({
       dataDir: process.env.DATA_DIR || fileURLToPath(new URL("../data/pg", import.meta.url)),
       gemini: {
         apiKey: process.env.GEMINI_API_KEY || "",
-        model: process.env.GEMINI_MODEL && process.env.GEMINI_MODEL !== "gemini-2.5-flash" ? process.env.GEMINI_MODEL : "gemini-3.5-flash",
+        model: process.env.GEMINI_MODEL && process.env.GEMINI_MODEL !== "gemini-2.5-flash" && process.env.GEMINI_MODEL !== "gemini-3.5-flash" ? process.env.GEMINI_MODEL : "gemini-3.8-flash",
         ttsModel: process.env.GEMINI_TTS_MODEL || "gemini-3.8-flash-tts"
       },
       google: {
@@ -11182,7 +11182,6 @@ async function synthesizeSarahNeuralAudio(text) {
   const runPromise = (async () => {
     const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
     const baseModels = [
-      "gemini-2.5-flash-preview-tts",
       "gemini-3.8-flash-lite-tts",
       "gemini-3.8-flash-tts",
       "gemini-3.1-flash-tts-preview"
@@ -11509,6 +11508,7 @@ function detectAppointmentBookingIntent(userText, sarahText = "", historyText = 
   ].join(" | ");
   const dayTimeRegex = /\b((?:tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|next week)(?:\s+(?:morning|afternoon|evening|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?|\d{1,2}(?::\d{2})?\s*(?:am|pm)|morning|afternoon)\b/gi;
   const userTimeMatches = [...userOnlyText.matchAll(dayTimeRegex)].map((m) => m[0]);
+  const hasExplicitDatetime = userTimeMatches.length > 0;
   const timeMatch = userTimeMatches.length > 0 ? userTimeMatches[userTimeMatches.length - 1] : `${userText} ${sarahText}`.match(dayTimeRegex)?.[0] || "Thursday afternoon";
   const alreadyBookedInHistory = Boolean(
     (history || []).some(
@@ -11523,17 +11523,15 @@ function detectAppointmentBookingIntent(userText, sarahText = "", historyText = 
   ) && /\b(schedule|book|appointment|set up|confirm|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm)|telephone|in-person|video|confirmation text)\b/i.test(
     `${lowerUser} ${historyText.toLowerCase()}`
   );
-  const userGivesContactForBooking = Boolean(extracted.fullName || extracted.phone || extracted.address) && /\b(appointment|schedule|book|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm)|telephone|in-person|video|confirmation text|full name|street address)\b/i.test(
-    combined
-  );
-  const userExplicitlyRequestsBookingWithTime = /\b(book|schedule|set up|confirm|want an appointment|need an appointment|set an appointment)\b/i.test(lowerUser) && /\b(appointment|consultation|call|visit|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm))\b/i.test(
+  const userGivesContactForBooking = Boolean(extracted.fullName || extracted.phone || extracted.address) && !/\b(transfer me now|connect me right now|put him on right now)\b/i.test(lowerUser);
+  const userExplicitlyRequestsBooking = /\b(book|schedule|set up|confirm|want an appointment|need an appointment|set an appointment|make an appointment|appointment with king)\b/i.test(
     lowerUser
   );
   const sarahConfirmsBooking = /\b(i have (?:officially )?(?:confirmed|reserved|scheduled|booked)|your .* appointment .* is (?:confirmed|set)|just sent a confirmation text)\b/i.test(
     lowerSarah
   );
   const rawWantsAppointment = Boolean(
-    userGivesTimeOrFormat || userGivesContactForBooking || userExplicitlyRequestsBookingWithTime || sarahConfirmsBooking
+    userGivesTimeOrFormat || userGivesContactForBooking || userExplicitlyRequestsBooking || sarahConfirmsBooking
   );
   const wantsAppointment = alreadyBookedInHistory && !userAskingToReschedule ? false : rawWantsAppointment;
   return {
@@ -11542,6 +11540,7 @@ function detectAppointmentBookingIntent(userText, sarahText = "", historyText = 
     alreadyBookedInHistory,
     appointmentType: apptType,
     preferredDatetime: timeMatch,
+    hasExplicitDatetime,
     productInterest,
     extractedName: extracted.fullName,
     extractedPhone: extracted.phone,
@@ -11734,14 +11733,133 @@ async function runClonedSarahScenario(userText, history, sessionContext) {
       reply: `We are a 100% free fiduciary advisory comparing over 104 premier carriers at zero cost to you. Our Principal Broker King Amen Ra can review your coverage options side by side in just 5 minutes. Would you like me to connect you with King Amen Ra right now, or schedule a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment?`
     };
   }
+  const alreadySharedSixDivisions = (history || []).some(
+    (h) => (h.speaker === "sarah" || h.role === "sarah") && /six core divisions|which area can i help you with today/i.test(h.text || "")
+  );
+  if (alreadySharedSixDivisions || /^(hi|hello|hey|good morning|good afternoon|good evening|yes|okay|ok|sure|can you help me|i need help)\b/i.test(lower)) {
+    const callerFirst = !isGenericName ? firstName : "";
+    return {
+      scenario: "Inbound Conversational Intake Progression",
+      reply: `I would love to take great care of you${callerFirst && callerFirst !== "there" ? `, ${callerFirst}` : ""}! Whether you would like to schedule an appointment with our Principal Broker, King Amen Ra, or be connected directly, may I start with your full first and last name, your best phone number, and your street address\u2014and what day and time works best for you?`
+    };
+  }
   return {
     scenario: "Inbound 6-Product Funnel",
     reply: `As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we specialize in six core divisions: Life Insurance & High Cash-Value IUL, Modern Term Life with Living Benefits, Individual & Family Health Insurance, Corporate Group Health, Asset-Based Long Term Care, and 2027 Medicare Plans\u2014or I can connect you with anyone on our 42-member Team Directory. Which area can I help you with today?`
   };
 }
+var memoryCallSessions = /* @__PURE__ */ new Map();
+async function loadSarahCallSession(sessionKey) {
+  const cleanKey = String(sessionKey || "").replace(/[^a-zA-Z0-9_+-]/g, "").slice(0, 64);
+  if (!cleanKey) return null;
+  const dbKey = `sarah_call_session_${cleanKey}`;
+  try {
+    const row = await one(`SELECT value FROM settings WHERE key = $1 LIMIT 1`, [dbKey]);
+    if (row?.value && typeof row.value === "object") {
+      const state2 = row.value;
+      if (Date.now() - (state2.updated_at || 0) < 4 * 60 * 60 * 1e3) {
+        memoryCallSessions.set(cleanKey, state2);
+        return state2;
+      }
+    }
+  } catch {
+  }
+  const mem = memoryCallSessions.get(cleanKey);
+  if (mem && Date.now() - (mem.updated_at || 0) < 4 * 60 * 60 * 1e3) {
+    return mem;
+  }
+  return null;
+}
+async function saveSarahCallSession(sessionKey, state2) {
+  const cleanKey = String(sessionKey || "").replace(/[^a-zA-Z0-9_+-]/g, "").slice(0, 64);
+  if (!cleanKey) return;
+  const existing = memoryCallSessions.get(cleanKey) || {
+    session_key: cleanKey,
+    history: [],
+    updated_at: Date.now()
+  };
+  const merged = {
+    ...existing,
+    ...state2,
+    session_key: cleanKey,
+    history: (state2.history || existing.history || []).slice(-16),
+    updated_at: Date.now()
+  };
+  memoryCallSessions.set(cleanKey, merged);
+  const dbKey = `sarah_call_session_${cleanKey}`;
+  try {
+    await q(
+      `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [dbKey, JSON.stringify(merged)]
+    );
+  } catch {
+  }
+}
+function isEchoOfSarahSpeech(userSpoken, lastSarahText = "") {
+  const cleanUser = String(userSpoken || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleanUser) return true;
+  if (/thank you for calling iwg|100 free fiduciary advisory|representing over 104 premier carriers|zero broker fees|this is sarah speaking|how may i direct your call today|42 member team directory|six core divisions|please reply yes to that confirmation text|i have scheduled your .* appointment with our principal broker/i.test(
+    cleanUser
+  )) {
+    return true;
+  }
+  const cleanSarah = String(lastSarahText || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (cleanSarah && cleanUser.length >= 18 && cleanSarah.includes(cleanUser)) {
+    return true;
+  }
+  return false;
+}
+function normalizeForRepetitionCheck(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+}
+function ensureNonRepeatingSarahReply(candidateReply, history, ctx) {
+  const normCandidate = normalizeForRepetitionCheck(candidateReply);
+  if (!normCandidate) return candidateReply;
+  const recentSarahReplies = (history || []).filter((h) => h.speaker === "sarah" || h.role === "sarah").slice(-2).map((h) => normalizeForRepetitionCheck(h.text));
+  if (!recentSarahReplies.includes(normCandidate)) {
+    return candidateReply;
+  }
+  const hasName = !isPlaceholderProspectName(ctx.prospect_name);
+  const hasPhone = !isPlaceholderProspectPhone(ctx.prospect_phone, ctx.mode);
+  const hasAddr = !isPlaceholderProspectAddress(ctx.address);
+  const callerFirst = hasName ? (ctx.prospect_name || "").split(/\s+/)[0] : "";
+  const howHeardSuffix = !ctx.how_heard ? " Also, how did you hear about us?" : "";
+  if (!hasName && !hasPhone && !hasAddr) {
+    return `I would love to get you taken care of right away! To set up your appointment with our Principal Broker, King Amen Ra\u2014or to have him follow up with you\u2014may I please get your full first and last name, your best phone number, and your street address, along with the day and time that works best for you?${howHeardSuffix}`;
+  }
+  if (hasName && (!hasPhone || !hasAddr)) {
+    const missing = !hasPhone && !hasAddr ? "your best phone number and street address" : !hasPhone ? "your best phone number" : "your street address";
+    return `Thank you, ${callerFirst}! I have your name down in our system. May I also get ${missing}, and let me know what day and time works best for your consultation with Principal Broker King Amen Ra?${howHeardSuffix}`;
+  }
+  if (!hasName && (hasPhone || hasAddr)) {
+    return `Thank you for sharing that! May I please get your full first and last name${!hasPhone ? " and your best phone number" : !hasAddr ? " and your street address" : ""} so I can finalize your Call-In Lead profile and schedule your appointment with Principal Broker King Amen Ra?${howHeardSuffix}`;
+  }
+  return `Thank you so much${callerFirst ? `, ${callerFirst}` : ""}! I have all of your contact details saved on your Call-In Lead profile. Would you like me to confirm your appointment with Principal Broker King Amen Ra for Thursday afternoon, or connect you directly right now?`;
+}
 async function handleSarahHttpTurn(params) {
   const resolveTts = async (text) => {
-    const { firstChunk, restChunk } = splitIntoFastSpeechChunks(text);
+    const cleanFull = String(text || "").replace(/\*\*/g, "").replace(/\[[^\]]+\]/g, "").replace(/\s+/g, " ").trim();
+    if (!cleanFull) {
+      return {
+        audio_base64: null,
+        audio_mime: "audio/wav",
+        voice: SARAH_VOICE_NAME,
+        first_chunk_text: "",
+        rest_text: ""
+      };
+    }
+    const fullCached = SARAH_TTS_CACHE.get(cleanFull);
+    if (fullCached && !params.skip_inline_tts) {
+      return {
+        audio_base64: fullCached.audio_base64,
+        audio_mime: fullCached.audio_mime || "audio/wav",
+        voice: fullCached.voice || SARAH_VOICE_NAME,
+        first_chunk_text: cleanFull,
+        rest_text: ""
+      };
+    }
+    const { firstChunk, restChunk } = splitIntoFastSpeechChunks(cleanFull);
     if (!firstChunk) {
       return {
         audio_base64: null,
@@ -11780,6 +11898,11 @@ async function handleSarahHttpTurn(params) {
   const rawMessage = String(
     params.message ?? params.userText ?? params.user_text ?? params.text ?? ""
   ).trim();
+  const sessionKey = String(
+    params.session_id || params.call_sid || params.context?.session_id || params.context?.call_sid || ""
+  ).trim();
+  const persistedSession = sessionKey && !params.is_initial ? await loadSarahCallSession(sessionKey) : null;
+  const effectiveHistory = Array.isArray(params.history) && params.history.length > 0 ? [...params.history] : persistedSession?.history ? [...persistedSession.history] : [];
   let dbWarmTransfer = false;
   if (!params.is_initial && rawMessage && params.context?.on_warm_transfer === void 0) {
     try {
@@ -11789,22 +11912,25 @@ async function handleSarahHttpTurn(params) {
     }
   }
   const resolvedMode = params.context?.mode === "outbound" || params.mode === "outbound" ? "outbound" : "inbound";
-  const allConvoText = [...(params.history || []).map((h) => h.text), rawMessage].join(" ");
-  const detectedProduct = detectProductInterest(allConvoText, params.context?.product_interest || "");
-  const rawLeadName = (params.context?.prospect_name || params.leadName || "").trim();
+  const allConvoText = [...effectiveHistory.map((h) => h.text), rawMessage].join(" ");
+  const detectedProduct = detectProductInterest(
+    allConvoText,
+    params.context?.product_interest || persistedSession?.product_interest || ""
+  );
+  const rawLeadName = (params.context?.prospect_name || params.leadName || persistedSession?.prospect_name || "").trim();
   const isGenericLeadName = isPlaceholderProspectName(rawLeadName);
-  const rawLeadPhone = (params.context?.prospect_phone || params.leadPhone || "").trim();
+  const rawLeadPhone = (params.context?.prospect_phone || params.leadPhone || persistedSession?.prospect_phone || "").trim();
   const isGenericLeadPhone = isPlaceholderProspectPhone(rawLeadPhone, resolvedMode);
-  const rawLeadAddress = (params.context?.address || "").trim();
+  const rawLeadAddress = (params.context?.address || persistedSession?.address || "").trim();
   const isGenericLeadAddress = isPlaceholderProspectAddress(rawLeadAddress);
   const sessionContext = {
     mode: resolvedMode,
-    lead_id: params.context?.lead_id,
+    lead_id: params.context?.lead_id || persistedSession?.lead_id,
     prospect_name: isGenericLeadName ? resolvedMode === "outbound" ? "Valued Client" : "" : rawLeadName,
     prospect_phone: isGenericLeadPhone ? "" : rawLeadPhone,
-    state: params.context?.state || params.leadState || "Arizona",
+    state: params.context?.state || params.leadState || persistedSession?.state || "Arizona",
     address: isGenericLeadAddress ? "" : rawLeadAddress,
-    how_heard: params.context?.how_heard || "",
+    how_heard: params.context?.how_heard || persistedSession?.how_heard || "",
     caller_name: params.context?.caller_name || "Sarah",
     on_warm_transfer: params.context?.on_warm_transfer !== void 0 ? Boolean(params.context.on_warm_transfer) : dbWarmTransfer,
     product_interest: detectedProduct,
@@ -11815,8 +11941,40 @@ async function handleSarahHttpTurn(params) {
   };
   const workHoursNow = checkReceptionistWorkHours(sessionContext);
   const firstName = isGenericLeadName ? "there" : (sessionContext.prospect_name || "there").split(/\s+/)[0] || "there";
+  const persistIfSessionKey = async (replyToSave) => {
+    if (!sessionKey) return;
+    const nextHistory = [...effectiveHistory];
+    if (rawMessage) {
+      nextHistory.push({ speaker: "user", text: rawMessage });
+    }
+    if (replyToSave) {
+      nextHistory.push({ speaker: "sarah", text: replyToSave });
+    }
+    await saveSarahCallSession(sessionKey, {
+      history: nextHistory,
+      lead_id: sessionContext.lead_id,
+      prospect_name: sessionContext.prospect_name,
+      prospect_phone: sessionContext.prospect_phone,
+      address: sessionContext.address,
+      state: sessionContext.state,
+      how_heard: sessionContext.how_heard,
+      product_interest: sessionContext.product_interest
+    });
+  };
   if (params.is_initial || !rawMessage) {
     const openingReply = sessionContext.mode === "outbound" ? `Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?` : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
+    if (sessionKey) {
+      await saveSarahCallSession(sessionKey, {
+        history: [{ speaker: "sarah", text: openingReply }],
+        lead_id: sessionContext.lead_id,
+        prospect_name: sessionContext.prospect_name,
+        prospect_phone: sessionContext.prospect_phone,
+        address: sessionContext.address,
+        state: sessionContext.state,
+        how_heard: sessionContext.how_heard,
+        product_interest: sessionContext.product_interest
+      });
+    }
     const tts2 = await resolveTts(openingReply);
     return {
       ok: true,
@@ -11837,7 +11995,22 @@ async function handleSarahHttpTurn(params) {
   let transferResult = null;
   let appointmentResult = null;
   let dispositionResult = null;
-  const extractedContact = extractCustomerContactDetails(userText, params.history || []);
+  const lastSarahInHistory = [...effectiveHistory].reverse().find((h) => h.speaker === "sarah" || h.role === "sarah")?.text || "";
+  const extractedContact = extractCustomerContactDetails(userText, effectiveHistory);
+  if (!userText.toLowerCase().includes("[script tree directive]") && !extractedContact.fullName && !extractedContact.phone && !extractedContact.address && isEchoOfSarahSpeech(userText, lastSarahInHistory)) {
+    return {
+      ok: true,
+      is_echo: true,
+      reply: "",
+      audio_base64: null,
+      audio_mime: "audio/wav",
+      first_chunk_text: "",
+      rest_text: "",
+      voice: SARAH_VOICE_NAME,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY
+    };
+  }
   if (extractedContact.fullName) {
     sessionContext.prospect_name = extractedContact.fullName;
   }
@@ -11860,8 +12033,7 @@ async function handleSarahHttpTurn(params) {
     }
   }
   const activeFirstName = !isPlaceholderProspectName(sessionContext.prospect_name) ? (sessionContext.prospect_name || "there").split(/\s+/)[0] || "there" : "there";
-  const preBookingCheck = detectAppointmentBookingIntent(userText, "", allConvoText, params.history || []);
-  const lastSarahInHistory = [...params.history || []].reverse().find((h) => h.speaker === "sarah" || h.role === "sarah")?.text || "";
+  const preBookingCheck = detectAppointmentBookingIntent(userText, "", allConvoText, effectiveHistory);
   if (preBookingCheck.alreadyBookedInHistory && !preBookingCheck.wantsAppointment && (/how did you hear about|how you heard about/i.test(lastSarahInHistory) || Boolean(extractedContact.howHeard))) {
     const howHeardVal = sessionContext.how_heard || userText.trim();
     sessionContext.how_heard = howHeardVal;
@@ -11872,6 +12044,7 @@ async function handleSarahHttpTurn(params) {
       );
     }
     const closingReply = `Thank you so much for sharing that with us, ${activeFirstName}! I have noted on your Call-In Lead profile for Principal Broker King Amen Ra that you heard about us through ${howHeardVal}. Your appointment for ${preBookingCheck.preferredDatetime} is all set\u2014just reply YES to the confirmation text on your phone, and have a truly wonderful day!`;
+    await persistIfSessionKey(closingReply);
     const tts2 = await resolveTts(closingReply);
     return {
       ok: true,
@@ -11914,6 +12087,7 @@ async function handleSarahHttpTurn(params) {
     );
     if (transferResult?.outside_work_hours) {
       const outsideReply = transferResult.message;
+      await persistIfSessionKey(outsideReply);
       const tts3 = await resolveTts(outsideReply);
       return {
         ok: true,
@@ -11932,6 +12106,7 @@ async function handleSarahHttpTurn(params) {
       };
     }
     const transferReply = transferResult.hold_message || `Wonderful! Please hold for just a moment while I call ${transferResult.recipient_name || reqCheck.recipientName} on the line and connect to them first. I will let you know as soon as we are connected.`;
+    await persistIfSessionKey(transferReply);
     const tts2 = await resolveTts(transferReply);
     return {
       ok: true,
@@ -11949,7 +12124,8 @@ async function handleSarahHttpTurn(params) {
     };
   }
   if (userText.toLowerCase().includes("[script tree directive]")) {
-    const clonedMatch2 = await runClonedSarahScenario(userText, params.history || [], sessionContext);
+    const clonedMatch2 = await runClonedSarahScenario(userText, effectiveHistory, sessionContext);
+    await persistIfSessionKey(clonedMatch2.reply);
     const tts2 = await resolveTts(clonedMatch2.reply);
     return {
       ok: true,
@@ -11990,7 +12166,8 @@ async function handleSarahHttpTurn(params) {
       sessionContext
     );
     if (checkRes.lead_id) sessionContext.lead_id = checkRes.lead_id;
-    const replyText = checkRes.message;
+    const replyText = ensureNonRepeatingSarahReply(checkRes.message, effectiveHistory, sessionContext);
+    await persistIfSessionKey(replyText);
     const tts2 = await resolveTts(replyText);
     return {
       ok: true,
@@ -12020,10 +12197,41 @@ async function handleSarahHttpTurn(params) {
       line: SARAH_MAIN_LINE_DISPLAY
     };
   }
+  const fastScenarioCheck = await runClonedSarahScenario(userText, effectiveHistory, sessionContext);
+  if (fastScenarioCheck.scenario !== "Inbound 6-Product Funnel" && fastScenarioCheck.scenario !== "Inbound Conversational Intake Progression" && fastScenarioCheck.scenario !== "Outbound Value Hook & Assumptive Close") {
+    const fastReply = ensureNonRepeatingSarahReply(fastScenarioCheck.reply, effectiveHistory, sessionContext);
+    await persistIfSessionKey(fastReply);
+    const tts2 = await resolveTts(fastReply);
+    return {
+      ok: true,
+      reply: fastReply,
+      scenario: fastScenarioCheck.scenario,
+      audio_base64: tts2.audio_base64,
+      audio_mime: tts2.audio_mime,
+      first_chunk_text: tts2.first_chunk_text,
+      rest_text: tts2.rest_text,
+      voice: tts2.voice,
+      product_interest: detectedProduct || fastScenarioCheck.appointment?.product_line || null,
+      lead_id: sessionContext.lead_id || fastScenarioCheck.appointment?.lead_id || null,
+      lead_source: resolveInboundLeadSource(sessionContext),
+      how_heard: sessionContext.how_heard || null,
+      prospect_name: sessionContext.prospect_name,
+      prospect_phone: sessionContext.prospect_phone,
+      prospect_address: sessionContext.address,
+      prospect_state: sessionContext.state,
+      transfer: fastScenarioCheck.transfer || null,
+      appointment: fastScenarioCheck.appointment || null,
+      disposition: fastScenarioCheck.disposition || null,
+      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours_status: workHoursNow,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY
+    };
+  }
   if (isAIEnabled()) {
     const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
     const normalizedHistory = [];
-    const rawHistory = (params.history || []).slice(-10);
+    const rawHistory = effectiveHistory.slice(-10);
     for (const h of rawHistory) {
       const text = String(h?.text || "").trim();
       if (!text) continue;
@@ -12059,28 +12267,32 @@ async function handleSarahHttpTurn(params) {
     const hasNameNow = !isPlaceholderProspectName(sessionContext.prospect_name);
     const hasPhoneNow = !isPlaceholderProspectPhone(sessionContext.prospect_phone, sessionContext.mode);
     const hasAddressNow = !isPlaceholderProspectAddress(sessionContext.address);
-    const baseTextModels = ["gemini-3.5-flash-lite", config.gemini.model || "gemini-3.5-flash"];
+    const baseTextModels = [config.gemini.model || "gemini-3.8-flash"];
     const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
       try {
-        const response = await ai2.models.generateContent({
-          model: modelName,
-          contents: normalizedHistory,
-          config: {
-            systemInstruction: buildSarahSystemInstruction(sessionContext) + `
+        const response = await Promise.race([
+          ai2.models.generateContent({
+            model: modelName,
+            contents: normalizedHistory,
+            config: {
+              systemInstruction: buildSarahSystemInstruction(sessionContext) + `
 
 CRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:
 - Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").
+- NEVER repeat your opening greeting ("Thank you for calling IWG...") or repeat the exact same sentence you said in your previous turn.
 - ${detectedProduct ? `The caller is asking about ${detectedProduct}. Respond strictly using the award-winning ${detectedProduct} script that leads to an appointment\u2014NEVER treat them as a Medicare lead unless ${detectedProduct} is Medicare!` : `Identify which of our 6 divisions the caller is asking about and never confuse Life Insurance, Health Insurance, or Long-Term Care with Medicare.`}
 - Current captured prospect details: Full Name="${hasNameNow ? sessionContext.prospect_name : "MISSING \u2014 MUST ASK CALLER"}", Phone="${hasPhoneNow ? sessionContext.prospect_phone : "MISSING \u2014 MUST ASK CALLER"}", Street Address="${hasAddressNow ? sessionContext.address : "MISSING \u2014 MUST ASK CALLER"}".
 - STEP-BY-STEP APPOINTMENT RULE: You MUST ask for and collect the caller's Full Name, Phone Number, and Street Address (along with preferred format & date/time) BEFORE confirming an appointment! If any of Full Name, Phone Number, or Street Address is still MISSING, ask the caller for the missing information first.
 - Once Full Name, Phone Number, Street Address, and Date/Time are all provided, call \`book_appointment\` immediately and tell the caller that you have sent an initial confirmation text to their phone and they only need to reply YES to confirm! NEVER mention day-before or same-day reminder texts to the caller (those happen automatically behind the scenes).
 - Keep your spoken response calm, relaxed, warm, human, and concise (1 to 3 sentences).`,
-            tools: SARAH_TOOLS,
-            temperature: 0.2,
-            maxOutputTokens: 200
-          }
-        });
+              tools: SARAH_TOOLS,
+              temperature: 0.2,
+              maxOutputTokens: 200
+            }
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Gemini text turn timeout (2200ms)")), 2200))
+        ]);
         workingTextModel = modelName;
         let replyText = (response.text || "").trim();
         let blockedByMissingContact = false;
@@ -12123,7 +12335,7 @@ CRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:
           }
         }
         if (!appointmentResult && !blockedByMissingContact) {
-          const bookingCheck = detectAppointmentBookingIntent(userText, replyText, allConvoText, params.history || []);
+          const bookingCheck = detectAppointmentBookingIntent(userText, replyText, allConvoText, effectiveHistory);
           if (bookingCheck.shouldBook) {
             const checkRes = await executeSarahTool(
               "book_appointment",
@@ -12174,6 +12386,8 @@ CRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:
               replyText = autoTransferRes.hold_message || `Wonderful! Please hold for just a moment while I call ${autoTransferRes.recipient_name} on the line and connect to them first. I will let you know as soon as we are connected.`;
             }
           }
+          replyText = ensureNonRepeatingSarahReply(replyText, effectiveHistory, sessionContext);
+          await persistIfSessionKey(replyText);
           const tts2 = await resolveTts(replyText);
           return {
             ok: true,
@@ -12186,9 +12400,11 @@ CRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:
             product_interest: detectedProduct || appointmentResult?.product_line || null,
             lead_id: sessionContext.lead_id || appointmentResult?.lead_id || null,
             lead_source: resolveInboundLeadSource(sessionContext),
+            how_heard: sessionContext.how_heard || null,
             prospect_name: sessionContext.prospect_name,
             prospect_phone: sessionContext.prospect_phone,
             prospect_address: sessionContext.address,
+            prospect_state: sessionContext.state,
             transfer: transferResult,
             appointment: appointmentResult,
             disposition: dispositionResult,
@@ -12203,11 +12419,13 @@ CRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:
       }
     }
   }
-  const clonedMatch = await runClonedSarahScenario(userText, params.history || [], sessionContext);
-  const tts = await resolveTts(clonedMatch.reply);
+  const clonedMatch = await runClonedSarahScenario(userText, effectiveHistory, sessionContext);
+  const finalFallbackReply = ensureNonRepeatingSarahReply(clonedMatch.reply, effectiveHistory, sessionContext);
+  await persistIfSessionKey(finalFallbackReply);
+  const tts = await resolveTts(finalFallbackReply);
   return {
     ok: true,
-    reply: clonedMatch.reply,
+    reply: finalFallbackReply,
     scenario: clonedMatch.scenario,
     audio_base64: tts.audio_base64,
     audio_mime: tts.audio_mime,
@@ -12217,9 +12435,11 @@ CRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:
     product_interest: detectedProduct || clonedMatch.appointment?.product_line || null,
     lead_id: sessionContext.lead_id || clonedMatch.appointment?.lead_id || null,
     lead_source: resolveInboundLeadSource(sessionContext),
+    how_heard: sessionContext.how_heard || null,
     prospect_name: sessionContext.prospect_name,
     prospect_phone: sessionContext.prospect_phone,
     prospect_address: sessionContext.address,
+    prospect_state: sessionContext.state,
     transfer: clonedMatch.transfer || null,
     appointment: clonedMatch.appointment || null,
     disposition: clonedMatch.disposition || null,
@@ -12343,9 +12563,11 @@ sarahPublic.all("/inbound", async (req, res) => {
     const dir = await getInboundDirectory();
     const cfg = await getSarahDialerConfig();
     const callSessionKey = String(
-      req.body?.CallSid || req.query?.CallSid || req.body?.call_id || req.query?.call_id || req.body?.From || req.body?.from || req.query?.From || req.query?.from || req.body?.caller_phone || req.query?.caller_phone || "inbound-default"
+      req.body?.CallSid || req.query?.CallSid || req.body?.session_id || req.query?.session_id || req.body?.call_id || req.query?.call_id || req.body?.From || req.body?.from || req.query?.From || req.query?.from || req.body?.caller_phone || req.query?.caller_phone || "inbound-default"
     );
-    const prevSession = inboundCallHistoryMap.get(callSessionKey) || { history: [] };
+    const dbSession = await loadSarahCallSession(callSessionKey);
+    const memSession = inboundCallHistoryMap.get(callSessionKey);
+    const prevSession = dbSession || memSession || { history: [] };
     const callerPhone = String(
       req.body?.From || req.body?.from || req.query?.From || req.query?.from || req.body?.caller_phone || req.query?.caller_phone || prevSession.prospect_phone || ""
     );
@@ -12355,13 +12577,20 @@ sarahPublic.all("/inbound", async (req, res) => {
     const callerAddress = String(
       req.body?.address || req.query?.address || prevSession.address || ""
     );
+    const callerState = String(
+      req.body?.state || req.body?.FromState || req.query?.state || prevSession.state || "AZ"
+    );
+    const callerHowHeard = String(
+      req.body?.how_heard || req.query?.how_heard || prevSession.how_heard || ""
+    );
     const requestedPerson = req.body?.requested_person || req.body?.transfer_to || req.query?.transfer_to;
     const appointmentType = req.body?.appointment_type || req.query?.appointment_type;
     const preferredDatetime = req.body?.preferred_datetime || req.query?.preferred_datetime;
     const productLine = req.body?.product_line || req.query?.product_line || prevSession.product_interest;
     const userSpeech = String(
-      req.body?.SpeechResult || req.body?.message || req.body?.transcript || req.body?.text || req.query?.SpeechResult || req.query?.message || req.query?.transcript || ""
+      req.body?.SpeechResult || req.body?.speech || req.body?.message || req.body?.transcript || req.body?.text || req.query?.SpeechResult || req.query?.speech || req.query?.message || req.query?.transcript || ""
     ).trim();
+    const isGatherTimeout = String(req.query?.timeout || "") === "1";
     const isTwimlRequest = Boolean(
       req.body?.CallSid || req.query?.CallSid || req.query?.format === "twiml" || String(req.headers.accept || "").includes("xml")
     );
@@ -12373,6 +12602,11 @@ sarahPublic.all("/inbound", async (req, res) => {
     let spokenReply = defaultOpeningSentence;
     let turnAudioBase64 = null;
     let turnAudioMime = "audio/wav";
+    let resolvedCallerName = callerName;
+    let resolvedCallerPhone = callerPhone;
+    let resolvedCallerAddress = callerAddress;
+    let resolvedCallerState = callerState;
+    let resolvedHowHeard = callerHowHeard;
     if (req.method === "POST" || userSpeech || isTwimlRequest) {
       if (callerPhone || callerName || callerAddress) {
         const upsertedId = await upsertReceptionistLeadFromContext(
@@ -12382,11 +12616,12 @@ sarahPublic.all("/inbound", async (req, res) => {
             prospect_name: callerName,
             prospect_phone: callerPhone,
             address: callerAddress,
-            state: req.body?.state || req.body?.FromState || "AZ",
+            state: callerState,
+            how_heard: callerHowHeard,
             product_interest: productLine,
             source_channel: "call_in_lead"
           },
-          req.body?.notes || "Inbound call answered right away on (480) 331-9455 by Receptionist"
+          req.body?.notes || "Inbound call picked up internally on 1st ring on (480) 331-9455 by Cloned App Receptionist"
         );
         if (upsertedId) inboundLeadId = upsertedId;
       }
@@ -12398,6 +12633,7 @@ sarahPublic.all("/inbound", async (req, res) => {
       if (userSpeech) {
         const turnResult = await handleSarahHttpTurn({
           message: userSpeech,
+          session_id: callSessionKey,
           history: prevSession.history,
           skip_inline_tts: isTwimlRequest || Boolean(req.body?.skip_inline_tts),
           context: {
@@ -12407,7 +12643,8 @@ sarahPublic.all("/inbound", async (req, res) => {
             prospect_name: callerName,
             prospect_phone: callerPhone,
             address: callerAddress,
-            state: req.body?.state || req.body?.FromState || "AZ",
+            state: callerState,
+            how_heard: callerHowHeard,
             product_interest: productLine,
             on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
             force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
@@ -12420,30 +12657,55 @@ sarahPublic.all("/inbound", async (req, res) => {
         turnAudioBase64 = turnResult?.audio_base64 || null;
         turnAudioMime = turnResult?.audio_mime || "audio/wav";
         if (turnResult?.lead_id) inboundLeadId = turnResult.lead_id;
+        if (turnResult?.prospect_name) resolvedCallerName = turnResult.prospect_name;
+        if (turnResult?.prospect_phone) resolvedCallerPhone = turnResult.prospect_phone;
+        if (turnResult?.prospect_address) resolvedCallerAddress = turnResult.prospect_address;
+        if (turnResult?.prospect_state) resolvedCallerState = turnResult.prospect_state;
+        if (turnResult?.how_heard) resolvedHowHeard = turnResult.how_heard;
         if (turnResult?.transfer) transferResult = turnResult.transfer;
         if (turnResult?.appointment) appointmentResult = turnResult.appointment;
         const nextHistory = [
-          ...prevSession.history.slice(-14),
+          ...(prevSession.history || []).slice(-14),
           { speaker: "user", text: userSpeech },
           { speaker: "sarah", text: spokenReply }
         ];
-        inboundCallHistoryMap.set(callSessionKey, {
+        const nextState = {
           history: nextHistory,
-          lead_id: inboundLeadId,
-          prospect_name: turnResult?.prospect_name || callerName,
-          prospect_phone: turnResult?.prospect_phone || callerPhone,
-          address: turnResult?.prospect_address || callerAddress,
+          lead_id: inboundLeadId || void 0,
+          prospect_name: resolvedCallerName,
+          prospect_phone: resolvedCallerPhone,
+          address: resolvedCallerAddress,
+          state: resolvedCallerState,
+          how_heard: resolvedHowHeard,
           product_interest: turnResult?.product_interest || productLine
-        });
+        };
+        inboundCallHistoryMap.set(callSessionKey, nextState);
+        await saveSarahCallSession(callSessionKey, nextState);
+      } else if (isGatherTimeout) {
+        spokenReply = "I am still right here with you. Would you like to set an appointment with our Principal Broker, King Amen Ra, or may I get your full name, phone number, and street address?";
+        if (!isTwimlRequest && !req.body?.skip_inline_tts) {
+          const tts = await synthesizeSarahNeuralAudio(spokenReply);
+          turnAudioBase64 = tts.audio_base64;
+          turnAudioMime = tts.audio_mime || "audio/wav";
+        }
       } else {
-        inboundCallHistoryMap.set(callSessionKey, {
+        if (!isTwimlRequest && !req.body?.skip_inline_tts) {
+          const tts = await synthesizeSarahNeuralAudio(spokenReply);
+          turnAudioBase64 = tts.audio_base64;
+          turnAudioMime = tts.audio_mime || "audio/wav";
+        }
+        const initState = {
           history: [{ speaker: "sarah", text: spokenReply }],
-          lead_id: inboundLeadId,
+          lead_id: inboundLeadId || void 0,
           prospect_name: callerName,
           prospect_phone: callerPhone,
           address: callerAddress,
+          state: callerState,
+          how_heard: callerHowHeard,
           product_interest: productLine
-        });
+        };
+        inboundCallHistoryMap.set(callSessionKey, initState);
+        await saveSarahCallSession(callSessionKey, initState);
       }
       if (requestedPerson && !cfg.is_on_warm_transfer && !transferResult) {
         transferResult = await executeSarahTool(
@@ -12557,29 +12819,31 @@ Appointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentRes
       } catch {
       }
     }
+    const baseUrl = `${req.protocol || "https"}://${req.get("host") || "iwillglobal.com"}`;
+    const audioPlayUrl = `${baseUrl}/api/sarah/audio.wav?text=${encodeURIComponent(spokenReply)}`;
     if (isTwimlRequest) {
       res.setHeader("Content-Type", "text/xml; charset=utf-8");
       if (transferResult?.success) {
         const targetPhone = transferResult.recipient_phone || "+16024569681";
-        const holdXml = escapeXml(
-          transferResult.hold_message || spokenReply || "Please hold for just a moment while I call King Amen Ra on 602-456-9681 and connect you."
-        );
+        const holdText = transferResult.hold_message || spokenReply || "Please hold for just a moment while I call King Amen Ra on 602-456-9681 and connect you.";
+        const holdAudioUrl = `${baseUrl}/api/sarah/audio.wav?text=${encodeURIComponent(holdText)}`;
         return res.status(200).send(
           `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">${holdXml}</Say>
+  <Play>${escapeXml(holdAudioUrl)}</Play>
   <Dial callerId="+14803319455" timeout="25">${escapeXml(targetPhone)}</Dial>
 </Response>`
         );
       }
-      const actionUrl = `/api/sarah/inbound?format=twiml${inboundLeadId ? `&lead_id=${encodeURIComponent(inboundLeadId)}` : ""}`;
+      const actionUrl = `/api/sarah/inbound?format=twiml&session_id=${encodeURIComponent(callSessionKey)}${inboundLeadId ? `&lead_id=${encodeURIComponent(inboundLeadId)}` : ""}`;
+      const fallbackTag = isGatherTimeout ? `  <Hangup/>` : `  <Redirect method="POST">${escapeXml(`${actionUrl}&timeout=1`)}</Redirect>`;
       return res.status(200).send(
         `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech dtmf" speechTimeout="auto" language="en-US" action="${escapeXml(actionUrl)}" method="POST">
-    <Say voice="Polly.Joanna">${escapeXml(spokenReply)}</Say>
+    <Play>${escapeXml(audioPlayUrl)}</Play>
   </Gather>
-  <Redirect method="POST">${escapeXml(actionUrl)}</Redirect>
+${fallbackTag}
 </Response>`
       );
     }
@@ -12591,12 +12855,17 @@ Appointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentRes
     res.json({
       ok: true,
       success: true,
-      status: "answered",
+      status: "answered_internally",
       answered_immediately: true,
+      answered_internally: true,
+      cell_phone_triggered: false,
+      speaker_triggered: false,
       wait_for_greeting: false,
       ring_delay_ms: 0,
+      session_id: callSessionKey,
       receptionist: "Receptionist",
       receptionist_name: "Receptionist",
+      voice: "Vindemiatrix",
       work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
       work_hours_status: currentWorkHours,
       warm_transfers_allowed_now: currentWorkHours.isOpen && !cfg.is_on_warm_transfer,
@@ -12606,11 +12875,14 @@ Appointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentRes
       line_e164: "+14803319455",
       line_number: "+14803319455",
       display_number: "(480) 331-9455",
-      caller_phone: callerPhone,
-      caller_name: callerName,
-      caller_address: callerAddress,
+      caller_phone: resolvedCallerPhone,
+      caller_name: resolvedCallerName,
+      caller_address: resolvedCallerAddress,
+      caller_state: resolvedCallerState,
+      how_heard: resolvedHowHeard || null,
       first_sentence: defaultOpeningSentence,
       reply: spokenReply,
+      audio_url: `/api/sarah/audio.wav?text=${encodeURIComponent(spokenReply)}`,
       audio_base64: turnAudioBase64,
       audio_mime: turnAudioMime,
       transfer_phone_number: "+16024569681",
@@ -13168,10 +13440,10 @@ sarahAuth.get("/calls/:call_id", async (req, res) => {
 init_realtime();
 
 // server/src/services/googleVoiceWatchdog.ts
-import { spawn, exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync as existsSync2 } from "node:fs";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-var CURRENT_GV_EXTENSION_BUILD = "2026-11-08-v6";
+var CURRENT_GV_EXTENSION_BUILD = "2026-11-09-v7";
 var state = {
   lastHeartbeatAt: 0,
   lastLaunchAttemptAt: 0,
@@ -13299,26 +13571,7 @@ var watchdogTimer = null;
 function startGoogleVoiceWatchdog() {
   if (process.env.VERCEL || process.platform !== "win32") return;
   if (watchdogTimer) return;
-  recordGvEvent("watchdog_started", "Monitoring Google Voice (480) 331-9455 24/7");
-  setTimeout(() => {
-    const now = Date.now();
-    if (now - state.lastHeartbeatAt > 1e4 && now - state.lastLaunchAttemptAt > 2e4) {
-      launchGoogleVoiceChromeWindow("server_startup");
-    }
-  }, 4e3);
-  watchdogTimer = setInterval(() => {
-    const now = Date.now();
-    const heartbeatMissing = state.lastHeartbeatAt === 0 || now - state.lastHeartbeatAt > 15e3;
-    const cooldownElapsed = now - state.lastLaunchAttemptAt > 3e4;
-    if (heartbeatMissing && cooldownElapsed) {
-      exec('tasklist /FI "IMAGENAME eq chrome.exe" /NH', (_err, stdout) => {
-        const chromeRunning = Boolean(stdout && stdout.toLowerCase().includes("chrome.exe"));
-        if (!chromeRunning || Date.now() - state.lastHeartbeatAt > 25e3) {
-          launchGoogleVoiceChromeWindow(chromeRunning ? "heartbeat_timeout_reopen_gv" : "chrome_not_running");
-        }
-      });
-    }
-  }, 6e3);
+  recordGvEvent("watchdog_started", "Internal Cloned App Receptionist active on (480) 331-9455 (standalone mode \u2014 no unsolicited Chrome launch)");
 }
 
 // server/src/index.ts
@@ -13361,6 +13614,22 @@ function createApp() {
       res.json({ ok: true, ...tts });
     } catch (err) {
       res.status(500).json({ ok: false, error: err?.message || "Sarah TTS failed" });
+    }
+  });
+  app.get("/api/sarah/audio.wav", async (req, res) => {
+    try {
+      const text = String(req.query?.text || "").trim() || "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?";
+      const tts = await synthesizeSarahNeuralAudio(text);
+      if (tts?.audio_base64) {
+        const wavBuf = Buffer.from(tts.audio_base64, "base64");
+        res.setHeader("Content-Type", "audio/wav");
+        res.setHeader("Content-Length", String(wavBuf.length));
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return res.status(200).send(wavBuf);
+      }
+      res.status(404).send("Audio not available");
+    } catch (err) {
+      res.status(500).send(err?.message || "Audio error");
     }
   });
   app.post("/api/sarah/transfer/verify", async (req, res) => {

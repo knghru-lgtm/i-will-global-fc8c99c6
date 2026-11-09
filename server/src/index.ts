@@ -77,6 +77,24 @@ export function createApp() {
       res.status(500).json({ ok: false, error: err?.message || 'Sarah TTS failed' });
     }
   });
+  app.get('/api/sarah/audio.wav', async (req, res) => {
+    try {
+      const text =
+        String(req.query?.text || '').trim() ||
+        'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
+      const tts = await synthesizeSarahNeuralAudio(text);
+      if (tts?.audio_base64) {
+        const wavBuf = Buffer.from(tts.audio_base64, 'base64');
+        res.setHeader('Content-Type', 'audio/wav');
+        res.setHeader('Content-Length', String(wavBuf.length));
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.status(200).send(wavBuf);
+      }
+      res.status(404).send('Audio not available');
+    } catch (err: any) {
+      res.status(500).send(err?.message || 'Audio error');
+    }
+  });
   app.post('/api/sarah/transfer/verify', async (req, res) => {
     try {
       const {

@@ -1910,7 +1910,6 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   const runPromise = (async () => {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
     const baseModels = [
-      'gemini-2.5-flash-preview-tts',
       'gemini-3.8-flash-lite-tts',
       'gemini-3.8-flash-tts',
       'gemini-3.1-flash-tts-preview',
@@ -2306,6 +2305,7 @@ export function detectAppointmentBookingIntent(
   const dayTimeRegex =
     /\b((?:tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|next week)(?:\s+(?:morning|afternoon|evening|at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?|\d{1,2}(?::\d{2})?\s*(?:am|pm)|morning|afternoon)\b/gi;
   const userTimeMatches = [...userOnlyText.matchAll(dayTimeRegex)].map((m) => m[0]);
+  const hasExplicitDatetime = userTimeMatches.length > 0;
   const timeMatch =
     userTimeMatches.length > 0
       ? userTimeMatches[userTimeMatches.length - 1]
@@ -2332,15 +2332,14 @@ export function detectAppointmentBookingIntent(
       `${lowerUser} ${historyText.toLowerCase()}`
     );
 
+  // If the caller provides ANY contact detail (Full Name, Phone, or Street Address) on an inbound call (and isn't asking for an immediate live transfer),
+  // treat it as step-by-step intake so Sarah acknowledges what they gave and asks only for the remaining fields!
   const userGivesContactForBooking =
     Boolean(extracted.fullName || extracted.phone || extracted.address) &&
-    /\b(appointment|schedule|book|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm)|telephone|in-person|video|confirmation text|full name|street address)\b/i.test(
-      combined
-    );
+    !/\b(transfer me now|connect me right now|put him on right now)\b/i.test(lowerUser);
 
-  const userExplicitlyRequestsBookingWithTime =
-    /\b(book|schedule|set up|confirm|want an appointment|need an appointment|set an appointment)\b/i.test(lowerUser) &&
-    /\b(appointment|consultation|call|visit|tomorrow|monday|tuesday|wednesday|thursday|friday|morning|afternoon|\d{1,2}\s*(?:am|pm))\b/i.test(
+  const userExplicitlyRequestsBooking =
+    /\b(book|schedule|set up|confirm|want an appointment|need an appointment|set an appointment|make an appointment|appointment with king)\b/i.test(
       lowerUser
     );
 
@@ -2351,9 +2350,9 @@ export function detectAppointmentBookingIntent(
 
   const rawWantsAppointment = Boolean(
     userGivesTimeOrFormat ||
-    userGivesContactForBooking ||
-    userExplicitlyRequestsBookingWithTime ||
-    sarahConfirmsBooking
+      userGivesContactForBooking ||
+      userExplicitlyRequestsBooking ||
+      sarahConfirmsBooking
   );
 
   const wantsAppointment = alreadyBookedInHistory && !userAskingToReschedule ? false : rawWantsAppointment;
@@ -2364,13 +2363,14 @@ export function detectAppointmentBookingIntent(
     alreadyBookedInHistory,
     appointmentType: apptType,
     preferredDatetime: timeMatch,
+    hasExplicitDatetime,
     productInterest,
     extractedName: extracted.fullName,
     extractedPhone: extracted.phone,
     extractedAddress: extracted.address,
     extractedState: extracted.state,
     extractedHowHeard: extracted.howHeard,
-  };
+  } as any;
 }
 
 /**
@@ -2632,10 +2632,160 @@ async function runClonedSarahScenario(
     };
   }
 
+  // If the caller greeted Sarah ("hi", "hello", "good morning", "can you help me") or we already shared the 6-product overview, advance naturally toward booking/helping instead of repeating the 6-product pitch!
+  const alreadySharedSixDivisions = (history || []).some(
+    (h) =>
+      (h.speaker === 'sarah' || (h as any).role === 'sarah') &&
+      /six core divisions|which area can i help you with today/i.test(h.text || '')
+  );
+  if (alreadySharedSixDivisions || /^(hi|hello|hey|good morning|good afternoon|good evening|yes|okay|ok|sure|can you help me|i need help)\b/i.test(lower)) {
+    const callerFirst = !isGenericName ? firstName : '';
+    return {
+      scenario: 'Inbound Conversational Intake Progression',
+      reply: `I would love to take great care of you${callerFirst && callerFirst !== 'there' ? `, ${callerFirst}` : ''}! Whether you would like to schedule an appointment with our Principal Broker, King Amen Ra, or be connected directly, may I start with your full first and last name, your best phone number, and your street address—and what day and time works best for you?`,
+    };
+  }
+
   return {
     scenario: 'Inbound 6-Product Funnel',
     reply: `As a 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees, we specialize in six core divisions: Life Insurance & High Cash-Value IUL, Modern Term Life with Living Benefits, Individual & Family Health Insurance, Corporate Group Health, Asset-Based Long Term Care, and 2027 Medicare Plans—or I can connect you with anyone on our 42-member Team Directory. Which area can I help you with today?`,
   };
+}
+
+interface PersistedSarahSessionState {
+  session_key: string;
+  history: Array<{ speaker: 'sarah' | 'user'; text: string }>;
+  lead_id?: string;
+  prospect_name?: string;
+  prospect_phone?: string;
+  address?: string;
+  state?: string;
+  how_heard?: string;
+  product_interest?: string;
+  updated_at: number;
+}
+
+const memoryCallSessions = new Map<string, PersistedSarahSessionState>();
+
+export async function loadSarahCallSession(sessionKey?: string): Promise<PersistedSarahSessionState | null> {
+  const cleanKey = String(sessionKey || '').replace(/[^a-zA-Z0-9_+-]/g, '').slice(0, 64);
+  if (!cleanKey) return null;
+  const dbKey = `sarah_call_session_${cleanKey}`;
+  try {
+    const row = await one(`SELECT value FROM settings WHERE key = $1 LIMIT 1`, [dbKey]);
+    if (row?.value && typeof row.value === 'object') {
+      const state = row.value as PersistedSarahSessionState;
+      if (Date.now() - (state.updated_at || 0) < 4 * 60 * 60 * 1000) {
+        memoryCallSessions.set(cleanKey, state);
+        return state;
+      }
+    }
+  } catch {
+    // fallback to memory
+  }
+  const mem = memoryCallSessions.get(cleanKey);
+  if (mem && Date.now() - (mem.updated_at || 0) < 4 * 60 * 60 * 1000) {
+    return mem;
+  }
+  return null;
+}
+
+export async function saveSarahCallSession(sessionKey: string | undefined, state: Partial<PersistedSarahSessionState>) {
+  const cleanKey = String(sessionKey || '').replace(/[^a-zA-Z0-9_+-]/g, '').slice(0, 64);
+  if (!cleanKey) return;
+  const existing = memoryCallSessions.get(cleanKey) || {
+    session_key: cleanKey,
+    history: [],
+    updated_at: Date.now(),
+  };
+  const merged: PersistedSarahSessionState = {
+    ...existing,
+    ...state,
+    session_key: cleanKey,
+    history: (state.history || existing.history || []).slice(-16),
+    updated_at: Date.now(),
+  };
+  memoryCallSessions.set(cleanKey, merged);
+  const dbKey = `sarah_call_session_${cleanKey}`;
+  try {
+    await q(
+      `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [dbKey, JSON.stringify(merged)]
+    );
+  } catch {
+    // ignore DB write errors
+  }
+}
+
+export function isEchoOfSarahSpeech(userSpoken: string, lastSarahText = ''): boolean {
+  const cleanUser = String(userSpoken || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleanUser) return true;
+  if (
+    /thank you for calling iwg|100 free fiduciary advisory|representing over 104 premier carriers|zero broker fees|this is sarah speaking|how may i direct your call today|42 member team directory|six core divisions|please reply yes to that confirmation text|i have scheduled your .* appointment with our principal broker/i.test(
+      cleanUser
+    )
+  ) {
+    return true;
+  }
+  const cleanSarah = String(lastSarahText || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleanSarah && cleanUser.length >= 18 && cleanSarah.includes(cleanUser)) {
+    return true;
+  }
+  return false;
+}
+
+function normalizeForRepetitionCheck(s: string): string {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function ensureNonRepeatingSarahReply(
+  candidateReply: string,
+  history: Array<{ speaker: 'sarah' | 'user'; text: string }>,
+  ctx: SarahSessionContext
+): string {
+  const normCandidate = normalizeForRepetitionCheck(candidateReply);
+  if (!normCandidate) return candidateReply;
+
+  const recentSarahReplies = (history || [])
+    .filter((h) => h.speaker === 'sarah' || (h as any).role === 'sarah')
+    .slice(-2)
+    .map((h) => normalizeForRepetitionCheck(h.text));
+
+  if (!recentSarahReplies.includes(normCandidate)) {
+    return candidateReply;
+  }
+
+  // Candidate reply would repeat what Sarah just said! Build a fresh, context-aware progression reply instead:
+  const hasName = !isPlaceholderProspectName(ctx.prospect_name);
+  const hasPhone = !isPlaceholderProspectPhone(ctx.prospect_phone, ctx.mode);
+  const hasAddr = !isPlaceholderProspectAddress(ctx.address);
+  const callerFirst = hasName ? (ctx.prospect_name || '').split(/\s+/)[0] : '';
+  const howHeardSuffix = !ctx.how_heard ? ' Also, how did you hear about us?' : '';
+
+  if (!hasName && !hasPhone && !hasAddr) {
+    return `I would love to get you taken care of right away! To set up your appointment with our Principal Broker, King Amen Ra—or to have him follow up with you—may I please get your full first and last name, your best phone number, and your street address, along with the day and time that works best for you?${howHeardSuffix}`;
+  }
+  if (hasName && (!hasPhone || !hasAddr)) {
+    const missing = !hasPhone && !hasAddr ? 'your best phone number and street address' : !hasPhone ? 'your best phone number' : 'your street address';
+    return `Thank you, ${callerFirst}! I have your name down in our system. May I also get ${missing}, and let me know what day and time works best for your consultation with Principal Broker King Amen Ra?${howHeardSuffix}`;
+  }
+  if (!hasName && (hasPhone || hasAddr)) {
+    return `Thank you for sharing that! May I please get your full first and last name${!hasPhone ? ' and your best phone number' : !hasAddr ? ' and your street address' : ''} so I can finalize your Call-In Lead profile and schedule your appointment with Principal Broker King Amen Ra?${howHeardSuffix}`;
+  }
+  return `Thank you so much${callerFirst ? `, ${callerFirst}` : ''}! I have all of your contact details saved on your Call-In Lead profile. Would you like me to confirm your appointment with Principal Broker King Amen Ra for Thursday afternoon, or connect you directly right now?`;
 }
 
 /**
@@ -2645,6 +2795,8 @@ async function runClonedSarahScenario(
 export async function handleSarahHttpTurn(params: {
   message?: string;
   userText?: string;
+  session_id?: string;
+  call_sid?: string;
   history?: Array<{ speaker: 'sarah' | 'user'; text: string }>;
   context?: Partial<SarahSessionContext>;
   mode?: 'inbound' | 'outbound';
@@ -2655,7 +2807,36 @@ export async function handleSarahHttpTurn(params: {
   skip_inline_tts?: boolean;
 }) {
   const resolveTts = async (text: string) => {
-    const { firstChunk, restChunk } = splitIntoFastSpeechChunks(text);
+    const cleanFull = String(text || '')
+      .replace(/\*\*/g, '')
+      .replace(/\[[^\]]+\]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!cleanFull) {
+      return {
+        audio_base64: null,
+        audio_mime: 'audio/wav',
+        voice: SARAH_VOICE_NAME,
+        first_chunk_text: '',
+        rest_text: '',
+      };
+    }
+
+    // If the entire reply is ALREADY in SARAH_TTS_CACHE (e.g. Sarah's full opening greeting WAV),
+    // return the single continuous WAV with rest_text: '' so the client NEVER plays a second chunk or repeats the second sentence!
+    const fullCached = SARAH_TTS_CACHE.get(cleanFull);
+    if (fullCached && !params.skip_inline_tts) {
+      return {
+        audio_base64: fullCached.audio_base64,
+        audio_mime: fullCached.audio_mime || 'audio/wav',
+        voice: fullCached.voice || SARAH_VOICE_NAME,
+        first_chunk_text: cleanFull,
+        rest_text: '',
+      };
+    }
+
+    const { firstChunk, restChunk } = splitIntoFastSpeechChunks(cleanFull);
     if (!firstChunk) {
       return {
         audio_base64: null,
@@ -2696,6 +2877,17 @@ export async function handleSarahHttpTurn(params: {
     params.message ?? params.userText ?? (params as any).user_text ?? (params as any).text ?? ''
   ).trim();
 
+  const sessionKey = String(
+    params.session_id || params.call_sid || (params.context as any)?.session_id || (params.context as any)?.call_sid || ''
+  ).trim();
+  const persistedSession = sessionKey && !params.is_initial ? await loadSarahCallSession(sessionKey) : null;
+  const effectiveHistory: Array<{ speaker: 'sarah' | 'user'; text: string }> =
+    Array.isArray(params.history) && params.history.length > 0
+      ? [...params.history]
+      : persistedSession?.history
+      ? [...persistedSession.history]
+      : [];
+
   let dbWarmTransfer = false;
   if (!params.is_initial && rawMessage && params.context?.on_warm_transfer === undefined) {
     try {
@@ -2708,24 +2900,27 @@ export async function handleSarahHttpTurn(params: {
 
   const resolvedMode =
     params.context?.mode === 'outbound' || params.mode === 'outbound' ? 'outbound' : 'inbound';
-  const allConvoText = [...(params.history || []).map((h) => h.text), rawMessage].join(' ');
-  const detectedProduct = detectProductInterest(allConvoText, params.context?.product_interest || '');
+  const allConvoText = [...effectiveHistory.map((h) => h.text), rawMessage].join(' ');
+  const detectedProduct = detectProductInterest(
+    allConvoText,
+    params.context?.product_interest || persistedSession?.product_interest || ''
+  );
 
-  const rawLeadName = (params.context?.prospect_name || params.leadName || '').trim();
+  const rawLeadName = (params.context?.prospect_name || params.leadName || persistedSession?.prospect_name || '').trim();
   const isGenericLeadName = isPlaceholderProspectName(rawLeadName);
-  const rawLeadPhone = (params.context?.prospect_phone || params.leadPhone || '').trim();
+  const rawLeadPhone = (params.context?.prospect_phone || params.leadPhone || persistedSession?.prospect_phone || '').trim();
   const isGenericLeadPhone = isPlaceholderProspectPhone(rawLeadPhone, resolvedMode);
-  const rawLeadAddress = (params.context?.address || '').trim();
+  const rawLeadAddress = (params.context?.address || persistedSession?.address || '').trim();
   const isGenericLeadAddress = isPlaceholderProspectAddress(rawLeadAddress);
 
   const sessionContext: SarahSessionContext = {
     mode: resolvedMode,
-    lead_id: params.context?.lead_id,
+    lead_id: params.context?.lead_id || persistedSession?.lead_id,
     prospect_name: isGenericLeadName ? (resolvedMode === 'outbound' ? 'Valued Client' : '') : rawLeadName,
     prospect_phone: isGenericLeadPhone ? '' : rawLeadPhone,
-    state: params.context?.state || params.leadState || 'Arizona',
+    state: params.context?.state || params.leadState || persistedSession?.state || 'Arizona',
     address: isGenericLeadAddress ? '' : rawLeadAddress,
-    how_heard: params.context?.how_heard || '',
+    how_heard: params.context?.how_heard || persistedSession?.how_heard || '',
     caller_name: params.context?.caller_name || 'Sarah',
     on_warm_transfer:
       params.context?.on_warm_transfer !== undefined ? Boolean(params.context.on_warm_transfer) : dbWarmTransfer,
@@ -2740,12 +2935,45 @@ export async function handleSarahHttpTurn(params: {
   const workHoursNow = checkReceptionistWorkHours(sessionContext);
   const firstName = isGenericLeadName ? 'there' : (sessionContext.prospect_name || 'there').split(/\s+/)[0] || 'there';
 
+  const persistIfSessionKey = async (replyToSave: string) => {
+    if (!sessionKey) return;
+    const nextHistory = [...effectiveHistory];
+    if (rawMessage) {
+      nextHistory.push({ speaker: 'user', text: rawMessage });
+    }
+    if (replyToSave) {
+      nextHistory.push({ speaker: 'sarah', text: replyToSave });
+    }
+    await saveSarahCallSession(sessionKey, {
+      history: nextHistory,
+      lead_id: sessionContext.lead_id,
+      prospect_name: sessionContext.prospect_name,
+      prospect_phone: sessionContext.prospect_phone,
+      address: sessionContext.address,
+      state: sessionContext.state,
+      how_heard: sessionContext.how_heard,
+      product_interest: sessionContext.product_interest,
+    });
+  };
+
   // 1. Initial opening greeting when call starts (answers inbound calls immediately right away!)
   if (params.is_initial || !rawMessage) {
     const openingReply =
       sessionContext.mode === 'outbound'
         ? `Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?`
         : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
+    if (sessionKey) {
+      await saveSarahCallSession(sessionKey, {
+        history: [{ speaker: 'sarah', text: openingReply }],
+        lead_id: sessionContext.lead_id,
+        prospect_name: sessionContext.prospect_name,
+        prospect_phone: sessionContext.prospect_phone,
+        address: sessionContext.address,
+        state: sessionContext.state,
+        how_heard: sessionContext.how_heard,
+        product_interest: sessionContext.product_interest,
+      });
+    }
     const tts = await resolveTts(openingReply);
     return {
       ok: true,
@@ -2768,8 +2996,36 @@ export async function handleSarahHttpTurn(params: {
   let appointmentResult: any = null;
   let dispositionResult: any = null;
 
+  const lastSarahInHistory =
+    [...effectiveHistory]
+      .reverse()
+      .find((h) => h.speaker === 'sarah' || (h as any).role === 'sarah')?.text || '';
+
   // Extract caller's spoken name, phone, street address, state, and how they heard about us strictly from USER turns
-  const extractedContact = extractCustomerContactDetails(userText, params.history || []);
+  const extractedContact = extractCustomerContactDetails(userText, effectiveHistory);
+
+  // Echo Guard: If microphone picked up Sarah's own voice (and no customer contact info is present), ignore it so Sarah never talks to herself!
+  if (
+    !userText.toLowerCase().includes('[script tree directive]') &&
+    !extractedContact.fullName &&
+    !extractedContact.phone &&
+    !extractedContact.address &&
+    isEchoOfSarahSpeech(userText, lastSarahInHistory)
+  ) {
+    return {
+      ok: true,
+      is_echo: true,
+      reply: '',
+      audio_base64: null,
+      audio_mime: 'audio/wav',
+      first_chunk_text: '',
+      rest_text: '',
+      voice: SARAH_VOICE_NAME,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY,
+    };
+  }
+
   if (extractedContact.fullName) {
     sessionContext.prospect_name = extractedContact.fullName;
   }
@@ -2803,11 +3059,7 @@ export async function handleSarahHttpTurn(params: {
     : 'there';
 
   // Check if an appointment was ALREADY booked in an earlier turn and the caller is now answering "How did you hear about us?" or wrapping up
-  const preBookingCheck = detectAppointmentBookingIntent(userText, '', allConvoText, params.history || []);
-  const lastSarahInHistory =
-    [...(params.history || [])]
-      .reverse()
-      .find((h) => h.speaker === 'sarah' || (h as any).role === 'sarah')?.text || '';
+  const preBookingCheck = detectAppointmentBookingIntent(userText, '', allConvoText, effectiveHistory);
 
   if (
     preBookingCheck.alreadyBookedInHistory &&
@@ -2823,6 +3075,7 @@ export async function handleSarahHttpTurn(params: {
       );
     }
     const closingReply = `Thank you so much for sharing that with us, ${activeFirstName}! I have noted on your Call-In Lead profile for Principal Broker King Amen Ra that you heard about us through ${howHeardVal}. Your appointment for ${preBookingCheck.preferredDatetime} is all set—just reply YES to the confirmation text on your phone, and have a truly wonderful day!`;
+    await persistIfSessionKey(closingReply);
     const tts = await resolveTts(closingReply);
     return {
       ok: true,
@@ -2868,6 +3121,7 @@ export async function handleSarahHttpTurn(params: {
     );
     if (transferResult?.outside_work_hours) {
       const outsideReply = transferResult.message;
+      await persistIfSessionKey(outsideReply);
       const tts = await resolveTts(outsideReply);
       return {
         ok: true,
@@ -2889,6 +3143,7 @@ export async function handleSarahHttpTurn(params: {
     const transferReply =
       transferResult.hold_message ||
       `Wonderful! Please hold for just a moment while I call ${transferResult.recipient_name || reqCheck.recipientName} on the line and connect to them first. I will let you know as soon as we are connected.`;
+    await persistIfSessionKey(transferReply);
     const tts = await resolveTts(transferReply);
     return {
       ok: true,
@@ -2908,7 +3163,8 @@ export async function handleSarahHttpTurn(params: {
 
   // 3. Explicit Script Tree Directive button click -> run exact deterministic step
   if (userText.toLowerCase().includes('[script tree directive]')) {
-    const clonedMatch = await runClonedSarahScenario(userText, params.history || [], sessionContext);
+    const clonedMatch = await runClonedSarahScenario(userText, effectiveHistory, sessionContext);
+    await persistIfSessionKey(clonedMatch.reply);
     const tts = await resolveTts(clonedMatch.reply);
     return {
       ok: true,
@@ -2951,7 +3207,8 @@ export async function handleSarahHttpTurn(params: {
       sessionContext
     );
     if (checkRes.lead_id) sessionContext.lead_id = checkRes.lead_id;
-    const replyText = checkRes.message;
+    const replyText = ensureNonRepeatingSarahReply(checkRes.message, effectiveHistory, sessionContext);
+    await persistIfSessionKey(replyText);
     const tts = await resolveTts(replyText);
     return {
       ok: true,
@@ -2982,13 +3239,50 @@ export async function handleSarahHttpTurn(params: {
     };
   }
 
-  // 4. Primary Conversational Brain: Run Gemini (`gemini-3.5-flash-lite` -> `gemini-3.5-flash`) for natural conversational answers
+  // 3C. Ultra-Fast (<10ms) Deterministic Cloned Scenario Match for specific product divisions, objections, or work hours
+  const fastScenarioCheck = await runClonedSarahScenario(userText, effectiveHistory, sessionContext);
+  if (
+    fastScenarioCheck.scenario !== 'Inbound 6-Product Funnel' &&
+    fastScenarioCheck.scenario !== 'Inbound Conversational Intake Progression' &&
+    fastScenarioCheck.scenario !== 'Outbound Value Hook & Assumptive Close'
+  ) {
+    const fastReply = ensureNonRepeatingSarahReply(fastScenarioCheck.reply, effectiveHistory, sessionContext);
+    await persistIfSessionKey(fastReply);
+    const tts = await resolveTts(fastReply);
+    return {
+      ok: true,
+      reply: fastReply,
+      scenario: fastScenarioCheck.scenario,
+      audio_base64: tts.audio_base64,
+      audio_mime: tts.audio_mime,
+      first_chunk_text: tts.first_chunk_text,
+      rest_text: tts.rest_text,
+      voice: tts.voice,
+      product_interest: detectedProduct || fastScenarioCheck.appointment?.product_line || null,
+      lead_id: sessionContext.lead_id || fastScenarioCheck.appointment?.lead_id || null,
+      lead_source: resolveInboundLeadSource(sessionContext),
+      how_heard: sessionContext.how_heard || null,
+      prospect_name: sessionContext.prospect_name,
+      prospect_phone: sessionContext.prospect_phone,
+      prospect_address: sessionContext.address,
+      prospect_state: sessionContext.state,
+      transfer: fastScenarioCheck.transfer || null,
+      appointment: fastScenarioCheck.appointment || null,
+      disposition: fastScenarioCheck.disposition || null,
+      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours_status: workHoursNow,
+      mode: sessionContext.mode,
+      line: SARAH_MAIN_LINE_DISPLAY,
+    };
+  }
+
+  // 4. Primary Conversational Brain: Run Gemini for natural conversational answers
   if (isAIEnabled()) {
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
     // Normalize multi-turn history so it ALWAYS begins with role: 'user' and strictly alternates user <-> model
     const normalizedHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
-    const rawHistory = (params.history || []).slice(-10);
+    const rawHistory = effectiveHistory.slice(-10);
 
     for (const h of rawHistory) {
       const text = String(h?.text || '').trim();
@@ -3032,25 +3326,28 @@ export async function handleSarahHttpTurn(params: {
     const hasPhoneNow = !isPlaceholderProspectPhone(sessionContext.prospect_phone, sessionContext.mode);
     const hasAddressNow = !isPlaceholderProspectAddress(sessionContext.address);
 
-    const baseTextModels = ['gemini-3.5-flash-lite', config.gemini.model || 'gemini-3.5-flash'];
+    const baseTextModels = [config.gemini.model || 'gemini-3.8-flash'];
     const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
       try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: normalizedHistory,
-          config: {
-            systemInstruction:
-              buildSarahSystemInstruction(sessionContext) +
-              `\n\nCRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:\n- Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").\n- ${detectedProduct
-                ? `The caller is asking about ${detectedProduct}. Respond strictly using the award-winning ${detectedProduct} script that leads to an appointment—NEVER treat them as a Medicare lead unless ${detectedProduct} is Medicare!`
-                : `Identify which of our 6 divisions the caller is asking about and never confuse Life Insurance, Health Insurance, or Long-Term Care with Medicare.`
-              }\n- Current captured prospect details: Full Name="${hasNameNow ? sessionContext.prospect_name : 'MISSING — MUST ASK CALLER'}", Phone="${hasPhoneNow ? sessionContext.prospect_phone : 'MISSING — MUST ASK CALLER'}", Street Address="${hasAddressNow ? sessionContext.address : 'MISSING — MUST ASK CALLER'}".\n- STEP-BY-STEP APPOINTMENT RULE: You MUST ask for and collect the caller's Full Name, Phone Number, and Street Address (along with preferred format & date/time) BEFORE confirming an appointment! If any of Full Name, Phone Number, or Street Address is still MISSING, ask the caller for the missing information first.\n- Once Full Name, Phone Number, Street Address, and Date/Time are all provided, call \`book_appointment\` immediately and tell the caller that you have sent an initial confirmation text to their phone and they only need to reply YES to confirm! NEVER mention day-before or same-day reminder texts to the caller (those happen automatically behind the scenes).\n- Keep your spoken response calm, relaxed, warm, human, and concise (1 to 3 sentences).`,
-            tools: SARAH_TOOLS,
-            temperature: 0.2,
-            maxOutputTokens: 200,
-          },
-        });
+        const response: any = await Promise.race([
+          ai.models.generateContent({
+            model: modelName,
+            contents: normalizedHistory,
+            config: {
+              systemInstruction:
+                buildSarahSystemInstruction(sessionContext) +
+                `\n\nCRITICAL CONVERSATIONAL LISTENING & STEP-BY-STEP APPOINTMENT SETTING RULE:\n- Listen carefully and respond DIRECTLY to what the caller just said ("${userText}").\n- NEVER repeat your opening greeting ("Thank you for calling IWG...") or repeat the exact same sentence you said in your previous turn.\n- ${detectedProduct
+                  ? `The caller is asking about ${detectedProduct}. Respond strictly using the award-winning ${detectedProduct} script that leads to an appointment—NEVER treat them as a Medicare lead unless ${detectedProduct} is Medicare!`
+                  : `Identify which of our 6 divisions the caller is asking about and never confuse Life Insurance, Health Insurance, or Long-Term Care with Medicare.`
+                }\n- Current captured prospect details: Full Name="${hasNameNow ? sessionContext.prospect_name : 'MISSING — MUST ASK CALLER'}", Phone="${hasPhoneNow ? sessionContext.prospect_phone : 'MISSING — MUST ASK CALLER'}", Street Address="${hasAddressNow ? sessionContext.address : 'MISSING — MUST ASK CALLER'}".\n- STEP-BY-STEP APPOINTMENT RULE: You MUST ask for and collect the caller's Full Name, Phone Number, and Street Address (along with preferred format & date/time) BEFORE confirming an appointment! If any of Full Name, Phone Number, or Street Address is still MISSING, ask the caller for the missing information first.\n- Once Full Name, Phone Number, Street Address, and Date/Time are all provided, call \`book_appointment\` immediately and tell the caller that you have sent an initial confirmation text to their phone and they only need to reply YES to confirm! NEVER mention day-before or same-day reminder texts to the caller (those happen automatically behind the scenes).\n- Keep your spoken response calm, relaxed, warm, human, and concise (1 to 3 sentences).`,
+              tools: SARAH_TOOLS,
+              temperature: 0.2,
+              maxOutputTokens: 200,
+            },
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini text turn timeout (2200ms)')), 2200)),
+        ]);
 
         workingTextModel = modelName;
         let replyText = (response.text || '').trim();
@@ -3101,7 +3398,7 @@ export async function handleSarahHttpTurn(params: {
 
         // Safety net: if the caller or Receptionist is in the middle of booking an appointment and the LLM didn't emit a functionCall, check step-by-step requirements!
         if (!appointmentResult && !blockedByMissingContact) {
-          const bookingCheck = detectAppointmentBookingIntent(userText, replyText, allConvoText, params.history || []);
+          const bookingCheck = detectAppointmentBookingIntent(userText, replyText, allConvoText, effectiveHistory);
           if (bookingCheck.shouldBook) {
             const checkRes = await executeSarahTool(
               'book_appointment',
@@ -3160,6 +3457,8 @@ export async function handleSarahHttpTurn(params: {
                 `Wonderful! Please hold for just a moment while I call ${autoTransferRes.recipient_name} on the line and connect to them first. I will let you know as soon as we are connected.`;
             }
           }
+          replyText = ensureNonRepeatingSarahReply(replyText, effectiveHistory, sessionContext);
+          await persistIfSessionKey(replyText);
           const tts = await resolveTts(replyText);
           return {
             ok: true,
@@ -3172,9 +3471,11 @@ export async function handleSarahHttpTurn(params: {
             product_interest: detectedProduct || appointmentResult?.product_line || null,
             lead_id: sessionContext.lead_id || appointmentResult?.lead_id || null,
             lead_source: resolveInboundLeadSource(sessionContext),
+            how_heard: sessionContext.how_heard || null,
             prospect_name: sessionContext.prospect_name,
             prospect_phone: sessionContext.prospect_phone,
             prospect_address: sessionContext.address,
+            prospect_state: sessionContext.state,
             transfer: transferResult,
             appointment: appointmentResult,
             disposition: dispositionResult,
@@ -3191,11 +3492,13 @@ export async function handleSarahHttpTurn(params: {
   }
 
   // 5. Deterministic Cloned Sarah Scenario fallback if AI is offline
-  const clonedMatch = await runClonedSarahScenario(userText, params.history || [], sessionContext);
-  const tts = await resolveTts(clonedMatch.reply);
+  const clonedMatch = await runClonedSarahScenario(userText, effectiveHistory, sessionContext);
+  const finalFallbackReply = ensureNonRepeatingSarahReply(clonedMatch.reply, effectiveHistory, sessionContext);
+  await persistIfSessionKey(finalFallbackReply);
+  const tts = await resolveTts(finalFallbackReply);
   return {
     ok: true,
-    reply: clonedMatch.reply,
+    reply: finalFallbackReply,
     scenario: clonedMatch.scenario,
     audio_base64: tts.audio_base64,
     audio_mime: tts.audio_mime,
@@ -3205,9 +3508,11 @@ export async function handleSarahHttpTurn(params: {
     product_interest: detectedProduct || clonedMatch.appointment?.product_line || null,
     lead_id: sessionContext.lead_id || clonedMatch.appointment?.lead_id || null,
     lead_source: resolveInboundLeadSource(sessionContext),
+    how_heard: sessionContext.how_heard || null,
     prospect_name: sessionContext.prospect_name,
     prospect_phone: sessionContext.prospect_phone,
     prospect_address: sessionContext.address,
+    prospect_state: sessionContext.state,
     transfer: clonedMatch.transfer || null,
     appointment: clonedMatch.appointment || null,
     disposition: clonedMatch.disposition || null,

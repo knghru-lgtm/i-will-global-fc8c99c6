@@ -24,9 +24,11 @@ export const config = {
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || '',
     model:
-      process.env.GEMINI_MODEL && process.env.GEMINI_MODEL !== 'gemini-2.5-flash'
+      process.env.GEMINI_MODEL &&
+      process.env.GEMINI_MODEL !== 'gemini-2.5-flash' &&
+      process.env.GEMINI_MODEL !== 'gemini-3.5-flash'
         ? process.env.GEMINI_MODEL
-        : 'gemini-3.5-flash',
+        : 'gemini-3.8-flash',
     ttsModel: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
   },
   google: {
