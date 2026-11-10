@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 .env.*
+!.env.example
 server/data/
 *.log
 client/android/app/build/
@@ -11,11 +12,3 @@ screenshots/
 .vercel
 .neon
 api_build/
-
-# Bland agent local runtime
-/.bland-local.json
-/.bland-write.json
-/.bland-write.lock
-/.bland-write.recover.lock
-/.bland-write.*.tmp
-/.bland-local.*.tmp

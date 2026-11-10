@@ -1,16 +1,23 @@
-const EXTENSION_BUILD = '2026-11-09-v8';
-const API_BASES = ['http://localhost:4000', 'https://iwillglobal.com'];
+const EXTENSION_BUILD = '2026-11-09-v10';
+// Cloud-first so the extension never depends on localhost:4000 or laptop drives!
+const API_BASES = ['https://iwillglobal.com', 'http://localhost:4000'];
+const BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 let hasAutoOpenedGvTab = false;
+let lastCookieSyncTs = 0;
 const tabReloadTimestamps = new Map();
 
-async function callSarahApi(endpoint, payload) {
+async function callSarahApi(endpoint, payload, extraHeaders = {}) {
   for (const base of API_BASES) {
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5500);
       const res = await fetch(`${base}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...extraHeaders },
         body: JSON.stringify(payload || {}),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       if (res.ok) {
         return await res.json();
       }
@@ -19,6 +26,45 @@ async function callSarahApi(endpoint, payload) {
     }
   }
   return null;
+}
+
+function syncGoogleVoiceCookiesToCloud(force = false) {
+  const now = Date.now();
+  if (!force && now - lastCookieSyncTs < 5 * 60 * 1000) return;
+  if (!chrome.cookies || typeof chrome.cookies.getAll !== 'function') return;
+
+  try {
+    chrome.cookies.getAll({}, async (allCookies) => {
+      void chrome.runtime.lastError;
+      if (!Array.isArray(allCookies) || allCookies.length === 0) return;
+      const googleCookies = allCookies.filter((c) => {
+        const d = String(c.domain || '').toLowerCase();
+        return d.endsWith('google.com') || d === 'google.com';
+      });
+      const hasAuth = googleCookies.some((c) =>
+        ['SID', '__Secure-1PSID', '__Secure-3PSID'].includes(String(c.name))
+      );
+      if (!hasAuth) return;
+
+      lastCookieSyncTs = now;
+      // Sync to BOTH cloud (https://iwillglobal.com) and local dev if running
+      for (const base of API_BASES) {
+        try {
+          await fetch(`${base}/api/sarah/gv-session-sync`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-iwg-bridge-token': BRIDGE_TOKEN,
+            },
+            body: JSON.stringify({
+              cookies: googleCookies,
+              source: `chrome-extension-${EXTENSION_BUILD}`,
+            }),
+          });
+        } catch {}
+      }
+    });
+  } catch {}
 }
 
 function ensureGoogleVoiceTabsHealthy() {
@@ -34,8 +80,13 @@ function ensureGoogleVoiceTabsHealthy() {
                 active: false,
                 pinned: true,
               },
-              () => {
+              (newTab) => {
                 void chrome.runtime.lastError;
+                if (newTab?.id) {
+                  chrome.tabs.update(newTab.id, { autoDiscardable: false, muted: true }, () => {
+                    void chrome.runtime.lastError;
+                  });
+                }
               }
             );
           } catch {}
@@ -46,12 +97,11 @@ function ensureGoogleVoiceTabsHealthy() {
       for (const tab of tabs) {
         if (!tab.id) continue;
         try {
-          chrome.tabs.update(tab.id, { autoDiscardable: false, muted: false }, () => {
+          chrome.tabs.update(tab.id, { autoDiscardable: false, muted: true }, () => {
             void chrome.runtime.lastError;
           });
         } catch {}
 
-        // Verify content.js is alive and on the latest EXTENSION_BUILD
         if (tab.status === 'complete') {
           try {
             chrome.tabs.sendMessage(tab.id, { type: 'IWG_GV_PING' }, (res) => {
@@ -74,14 +124,18 @@ function ensureGoogleVoiceTabsHealthy() {
 }
 
 ensureGoogleVoiceTabsHealthy();
+syncGoogleVoiceCookiesToCloud(true);
 setInterval(ensureGoogleVoiceTabsHealthy, 5000);
+setInterval(() => syncGoogleVoiceCookiesToCloud(false), 60000);
 
 chrome.runtime.onInstalled.addListener(() => {
   ensureGoogleVoiceTabsHealthy();
+  syncGoogleVoiceCookiesToCloud(true);
 });
 
 chrome.runtime.onStartup.addListener(() => {
   ensureGoogleVoiceTabsHealthy();
+  syncGoogleVoiceCookiesToCloud(true);
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -92,6 +146,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then((data) => sendResponse({ ok: Boolean(data), data }))
       .catch((err) => sendResponse({ ok: false, error: err?.message || 'API error' }));
     return true;
+  }
+
+  if (msg.type === 'IWG_SYNC_COOKIES_NOW') {
+    syncGoogleVoiceCookiesToCloud(true);
+    sendResponse({ ok: true });
+    return false;
   }
 
   if (msg.type === 'IWG_RELOAD_EXTENSION') {
@@ -109,7 +169,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       from: msg.callerPhone || '',
       caller_name: msg.callerName || '',
       internal_only: true,
-      notes: 'Picked up internally by IWG Cloned App Receptionist on (480) 331-9455',
+      notes: 'Picked up internally by IWG Cloud Receptionist on (480) 331-9455',
     }).catch(() => {});
     sendResponse({ ok: true, internal_only: true });
     return false;

@@ -3,6 +3,7 @@ import type { WebSocket as WsWebSocket } from 'ws';
 import { config, isAIEnabled } from '../config.ts';
 import { one, q } from '../db/index.ts';
 import sarahGreetingAudioJson from './sarahGreetingAudio.json' with { type: 'json' };
+import sarahAfterHoursAudioJson from './sarahAfterHoursAudio.json' with { type: 'json' };
 import {
   IWG_TEAM_DIRECTORY,
   buildAiWhisperScripts,
@@ -65,10 +66,93 @@ export interface SarahSessionContext {
 const PHOENIX_OFFSET_MS = 7 * 3600 * 1000;
 const DAY_NAMES_SHORT = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+function parseHourMinute(raw: string, defaultHour: number): { hour: number; minute: number } {
+  const s = String(raw || '').trim();
+  if (!s) return { hour: defaultHour, minute: 0 };
+  const m = s.match(/^(\d{1,2})(?::(\d{2}))?$/);
+  if (!m) return { hour: defaultHour, minute: 0 };
+  const h = Math.min(24, Math.max(0, Number(m[1])));
+  const min = m[2] ? Math.min(59, Math.max(0, Number(m[2]))) : 0;
+  return { hour: h, minute: min };
+}
+
+function parseOfficeDays(raw: string): number[] {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s || s === 'mon-fri' || s === 'monday-friday') return [1, 2, 3, 4, 5];
+  const dayMap: Record<string, number> = {
+    sun: 0, sunday: 0,
+    mon: 1, monday: 1,
+    tue: 2, tues: 2, tuesday: 2,
+    wed: 3, wednesday: 3,
+    thu: 4, thur: 4, thurs: 4, thursday: 4,
+    fri: 5, friday: 5,
+    sat: 6, saturday: 6,
+  };
+  const out = new Set<number>();
+  for (const part of s.split(/[,\s]+/).filter(Boolean)) {
+    if (/^[0-6]$/.test(part)) out.add(Number(part));
+    else if (dayMap[part] !== undefined) out.add(dayMap[part]);
+  }
+  return out.size > 0 ? Array.from(out).sort((a, b) => a - b) : [1, 2, 3, 4, 5];
+}
+
+function formatSpokenHour(hour: number, minute = 0): string {
+  const ampm = hour >= 12 && hour < 24 ? 'PM' : 'AM';
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return minute > 0 ? `${h12}:${String(minute).padStart(2, '0')} ${ampm}` : `${h12} ${ampm}`;
+}
+
+function formatColonHour(hour: number, minute = 0): string {
+  const ampm = hour >= 12 && hour < 24 ? 'PM' : 'AM';
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}:${String(minute).padStart(2, '0')} ${ampm}`;
+}
+
+export function getOfficeHoursSpec() {
+  const startRaw = process.env.OFFICE_HOURS_START || config.agency.officeHoursStart || '08:00';
+  const endRaw = process.env.OFFICE_HOURS_END || config.agency.officeHoursEnd || '20:00';
+  const daysRaw = process.env.OFFICE_DAYS || config.agency.officeDays || '1,2,3,4,5';
+  const timezone = process.env.OFFICE_TIMEZONE || config.agency.timezone || 'America/Phoenix';
+
+  const start = parseHourMinute(startRaw, 8);
+  const end = parseHourMinute(endRaw, 20);
+  const days = parseOfficeDays(daysRaw);
+  const daysLabel =
+    days.length === 5 && days[0] === 1 && days[4] === 5
+      ? 'Monday through Friday'
+      : days.map((d) => DAY_NAMES_SHORT[d]).join(', ');
+
+  const workHoursLabel = `${daysLabel}, ${formatColonHour(start.hour, start.minute)} to ${formatColonHour(end.hour, end.minute)} (Arizona time)`;
+  const spokenWindowLabel = `${daysLabel}, from ${formatSpokenHour(start.hour, start.minute)} to ${formatSpokenHour(end.hour, end.minute)} Arizona time`;
+
+  return {
+    timezone,
+    startHour: start.hour,
+    startMinute: start.minute,
+    endHour: end.hour,
+    endMinute: end.minute,
+    days,
+    daysLabel,
+    workHoursLabel,
+    spokenWindowLabel,
+  };
+}
+
+export const BUSINESS_HOURS_OPENING_GREETING =
+  'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
+
+export function buildBusinessHoursGreeting(): string {
+  return BUSINESS_HOURS_OPENING_GREETING;
+}
+
+export function buildAfterHoursGreeting(): string {
+  const spec = getOfficeHoursSpec();
+  return `Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are ${spec.spokenWindowLabel}. Please give us a call back during normal business hours, and we will be happy to assist you. Have a wonderful evening.`;
+}
+
 /**
- * Checks whether the current time in Arizona (America/Phoenix, UTC-7) is within
- * official Receptionist Work Hours: Monday through Friday, 8:00 AM to 8:00 PM.
- * Warm transfers are strictly prohibited outside Monday–Friday 8:00 AM to 8:00 PM.
+ * Evaluates current time strictly in America/Phoenix (MST, UTC-7, no DST) against
+ * centralized OFFICE_HOURS_START, OFFICE_HOURS_END, and OFFICE_DAYS.
  */
 export function checkReceptionistWorkHours(
   ctx?: Partial<SarahSessionContext>,
@@ -76,16 +160,22 @@ export function checkReceptionistWorkHours(
 ): {
   isOpen: boolean;
   dayName: string;
+  dayOfWeek: number;
   hour: number;
   minute: number;
+  timezone: string;
   localTimeDisplay: string;
   workHoursLabel: string;
+  spokenWindowLabel: string;
   reason: string;
 } {
+  const spec = getOfficeHoursSpec();
   const refDate =
     ctx?.simulated_now_iso && !Number.isNaN(Date.parse(ctx.simulated_now_iso))
       ? new Date(ctx.simulated_now_iso)
       : nowInput || new Date();
+
+  // America/Phoenix is strictly MST (UTC-7) year-round with zero DST transitions
   const phx = new Date(refDate.getTime() - PHOENIX_OFFSET_MS);
   const day = phx.getUTCDay(); // 0=Sunday .. 6=Saturday
   const hour = phx.getUTCHours(); // 0..23
@@ -96,22 +186,28 @@ export function checkReceptionistWorkHours(
   const mPad = String(minute).padStart(2, '0');
   const localTimeDisplay = `${dayName} ${h12}:${mPad} ${ampm} MST`;
 
-  const isWeekday = day >= 1 && day <= 5;
-  const isWithinHours = hour >= 8 && hour < 20; // 8:00 AM to 7:59:59 PM (8:00 PM exclusive)
-  const computedOpen = isWeekday && isWithinHours;
+  const isAllowedDay = spec.days.includes(day);
+  const nowTotalMin = hour * 60 + minute;
+  const startTotalMin = spec.startHour * 60 + spec.startMinute;
+  const endTotalMin = spec.endHour * 60 + spec.endMinute;
+  const isWithinHours = nowTotalMin >= startTotalMin && nowTotalMin < endTotalMin;
+  const computedOpen = isAllowedDay && isWithinHours;
   const isOpen =
     typeof ctx?.force_work_hours === 'boolean' ? ctx.force_work_hours : computedOpen;
 
   return {
     isOpen,
     dayName,
+    dayOfWeek: day,
     hour,
     minute,
+    timezone: spec.timezone,
     localTimeDisplay,
-    workHoursLabel: RECEPTIONIST_WORK_HOURS_LABEL,
+    workHoursLabel: spec.workHoursLabel,
+    spokenWindowLabel: spec.spokenWindowLabel,
     reason: isOpen
-      ? `Within official work hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Current Arizona time: ${localTimeDisplay}`
-      : `Outside official work hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Current Arizona time: ${localTimeDisplay}. No warm transfers outside Monday–Friday 8:00 AM to 8:00 PM.`,
+      ? `Within official business hours (${spec.workHoursLabel}) — Current Arizona time: ${localTimeDisplay}`
+      : `Outside official business hours (${spec.workHoursLabel}) — Current Arizona time: ${localTimeDisplay}. After-hours mode active.`,
   };
 }
 
@@ -247,7 +343,14 @@ IWG Insurance and Financial Services has 6 distinct divisions. Listen carefully 
      "Protecting your life savings and dignity is at the heart of what we do! Traditional long-term care was a 'use-it-or-lose-it' trap with constant rate hikes, so we represent over 104 premier carriers offering modern Asset-Based Hybrid Life and Long-Term Care with guaranteed level premiums—paying tax-free monthly benefits for home health care, assisted living, or memory care if you need it, or returning 100% of your benefit tax-free to your family if you never use it. Let's schedule a dedicated Telephone, Video, or In-Person asset-protection consultation with our Principal Broker, King Amen Ra. What day and time works best—and may I have your full name, phone number, and street address so I can send your confirmation text?"
 
 6. DIVISION 6 — 2027 MEDICARE PLANS (MEDIGAP PLAN G/N, PART C ADVANTAGE, PART D $2,400 RX CAP):
-   - Use our 2027 Medicare script ($1,788 Part A hospital deductible, $209.50/mo Part B with $292 deductible and uncapped 20% coinsurance, $2,400 Part D Rx cap, and side-by-side Medigap Plan G/N vs. Medicare Advantage comparisons across 104+ carriers), leading directly to a live transfer or a confirmed appointment where you collect their full name, phone number, and street address.
+   - Use our 2027 Medicare script ($1,788 Part A hospital deductible; Days 1–60 $0, Days 61–90 $447/day, Days 91–150 $894/day Lifetime Reserve Days; Skilled Nursing Days 1–20 $0/day, Days 21–100 $223.50/day; $209.50/mo Part B with $292 annual deductible and uncapped 20% coinsurance; $2,400 Part D Rx annual out-of-pocket cap, $700 max deductible, $35/mo insulin cap, $0 ACIP adult vaccines, and optional M3P interest-free monthly Rx installments; Medigap Plan G covers the full $1,788 Part A deductible and 20% coinsurance after the $292 Part B deductible, while Plan N offers lower premiums with up to $20 office visit copays; plus Medicare Advantage Part C and D-SNP/C-SNP comparisons across 104+ carriers), leading directly to a live transfer or a confirmed appointment where you collect their full name, phone number, and street address.
+
+AGENCY & CARRIER REFERENCE FACTS:
+- 100% Free Independent Fiduciary Brokerage (zero broker fees, zero markup, NPN 16094432 verified, CMS compliant).
+- Direct contracts across 104+ premier carriers including UnitedHealthcare, Humana, Aetna, Cigna Healthcare, Blue Cross Blue Shield, Wellcare, Devoted Health, Mutual of Omaha, Anthem, and SilverScript.
+- Core licensed states: AZ, TX, CA, NV, FL, NM, CO (confirm additional state availability with Principal Broker King Amen Ra).
+- Individual Health includes 60-day Special Enrollment Period (SEP) fast-track for qualifying life events (lost coverage, move, marriage, turning 26, birth) and Silver CSR $0 deductible optimization.
+- Group Health includes Level-Funded plans (returning unused claims reserves to the employer) and tax-free ICHRA designs for 1–50+ employees.
 
 ================================================================================
 CRITICAL RULE #2 — MANDATORY STEP-BY-STEP APPOINTMENT SETTING (COLLECT NAME, PHONE & ADDRESS) & CONFIRMATION TEXT RULE
@@ -1379,6 +1482,9 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
     on_warm_transfer: initialCtx?.on_warm_transfer !== undefined ? Boolean(initialCtx.on_warm_transfer) : dbWarmTransfer,
     product_interest: initialCtx?.product_interest || '',
     source_channel: initialCtx?.source_channel || (initMode === 'outbound' ? 'outbound' : 'website_traffic'),
+    force_work_hours: initialCtx?.force_work_hours,
+    force_live_connect: initialCtx?.force_live_connect,
+    simulated_now_iso: initialCtx?.simulated_now_iso,
   };
 
   const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
@@ -1488,24 +1594,26 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
       },
       callbacks: {
         onopen: () => {
-          if (!isClosed && clientWs.readyState === 1) {
-            clientWs.send(
-              JSON.stringify({
-                type: 'ready',
-                voice: 'Vindemiatrix',
-                mode: sessionContext.mode,
-                line: SARAH_MAIN_LINE_DISPLAY,
-                line_number: SARAH_MAIN_LINE_DISPLAY,
-                prospect_name: sessionContext.prospect_name,
-                prospect_phone: sessionContext.prospect_phone,
-                on_warm_transfer: sessionContext.on_warm_transfer,
-                message:
-                  sessionContext.mode === 'outbound'
-                    ? `Sarah Outbound Caller active on ${SARAH_MAIN_LINE_DISPLAY} — Dialing ${sessionContext.prospect_name} (${sessionContext.prospect_phone})`
-                    : `Sarah Virtual Receptionist active on ${SARAH_MAIN_LINE_DISPLAY}`,
-              })
-            );
-          }
+          setTimeout(() => {
+            if (!isClosed && clientWs.readyState === 1) {
+              clientWs.send(
+                JSON.stringify({
+                  type: 'ready',
+                  voice: 'Vindemiatrix',
+                  mode: sessionContext.mode,
+                  line: SARAH_MAIN_LINE_DISPLAY,
+                  line_number: SARAH_MAIN_LINE_DISPLAY,
+                  prospect_name: sessionContext.prospect_name,
+                  prospect_phone: sessionContext.prospect_phone,
+                  on_warm_transfer: sessionContext.on_warm_transfer,
+                  message:
+                    sessionContext.mode === 'outbound'
+                      ? `Sarah Outbound Caller active on ${SARAH_MAIN_LINE_DISPLAY} — Dialing ${sessionContext.prospect_name} (${sessionContext.prospect_phone})`
+                      : `Sarah Receptionist active on ${SARAH_MAIN_LINE_DISPLAY}`,
+                })
+              );
+            }
+          }, 15);
         },
         onmessage: async (serverMsg: any) => {
           if (isClosed || clientWs.readyState !== 1) return;
@@ -1868,8 +1976,11 @@ export function splitIntoFastSpeechChunks(text: string): { firstChunk: string; r
   return { firstChunk: clean, restChunk: '' };
 }
 
-// Pre-seed Sarah's natural Vindemiatrix voice cache with the opening greeting chunks (0ms latency, 0 quota used)
-for (const [k, b64] of Object.entries(sarahGreetingAudioJson as Record<string, string>)) {
+// Pre-seed Sarah's natural female Vindemiatrix voice cache with BOTH Business-Hours and After-Hours greetings (0ms latency, 0 quota used)
+for (const [k, b64] of Object.entries({
+  ...(sarahGreetingAudioJson as Record<string, string>),
+  ...(sarahAfterHoursAudioJson as Record<string, string>),
+})) {
   if (k && b64) {
     SARAH_TTS_CACHE.set(k.trim(), {
       audio_base64: b64,
@@ -1877,6 +1988,31 @@ for (const [k, b64] of Object.entries(sarahGreetingAudioJson as Record<string, s
       voice: SARAH_VOICE_NAME,
     });
   }
+}
+
+export function getPreCachedSarahAudio(presetOrText: string): {
+  audio_base64: string | null;
+  audio_mime: string;
+  voice: string;
+} {
+  if (presetOrText === 'business_greeting') {
+    const hit = SARAH_TTS_CACHE.get(BUSINESS_HOURS_OPENING_GREETING);
+    if (hit) return hit;
+  }
+  if (presetOrText === 'after_hours') {
+    const dynamicText = buildAfterHoursGreeting();
+    const hit =
+      SARAH_TTS_CACHE.get(dynamicText) ||
+      Object.values(sarahAfterHoursAudioJson as Record<string, string>)[0];
+    if (typeof hit === 'string') {
+      return { audio_base64: hit, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
+    }
+    if (hit) return hit;
+  }
+  const clean = String(presetOrText || '').trim();
+  const direct = SARAH_TTS_CACHE.get(clean);
+  if (direct) return direct;
+  return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
 }
 
 export async function synthesizeSarahNeuralAudio(text: string): Promise<{
@@ -1913,6 +2049,7 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
       'gemini-3.8-flash-lite-tts',
       'gemini-3.8-flash-tts',
       'gemini-3.1-flash-tts-preview',
+      'gemini-2.5-flash-preview-tts',
     ];
     const ttsModels = workingTtsModel ? [workingTtsModel, ...baseModels] : baseModels;
 
@@ -1938,7 +2075,7 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
               },
             },
           }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('TTS timeout')), 3500)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('TTS timeout')), 6500)),
         ]);
         const inline = r?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
         if (inline?.data) {
@@ -2350,9 +2487,9 @@ export function detectAppointmentBookingIntent(
 
   const rawWantsAppointment = Boolean(
     userGivesTimeOrFormat ||
-      userGivesContactForBooking ||
-      userExplicitlyRequestsBooking ||
-      sarahConfirmsBooking
+    userGivesContactForBooking ||
+    userExplicitlyRequestsBooking ||
+    sarahConfirmsBooking
   );
 
   const wantsAppointment = alreadyBookedInHistory && !userAskingToReschedule ? false : rawWantsAppointment;
@@ -2881,52 +3018,47 @@ export async function handleSarahHttpTurn(params: {
   let transcribedFromWebRtcAudio = false;
 
   if (!rawMessage && params.caller_audio_base64 && isAIEnabled()) {
-    try {
-      const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-      const sttRes: any = await Promise.race([
-        ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  inlineData: {
-                    data: String(params.caller_audio_base64),
-                    mimeType: String(params.caller_audio_mime || 'audio/webm'),
+    const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+    const sttModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
+    let transcribed = '';
+    for (const sttModel of sttModels) {
+      try {
+        const sttRes: any = await Promise.race([
+          ai.models.generateContent({
+            model: sttModel,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    inlineData: {
+                      data: String(params.caller_audio_base64),
+                      mimeType: String(params.caller_audio_mime || 'audio/webm'),
+                    },
                   },
-                },
-                {
-                  text: 'Transcribe the exact words spoken by the human caller in this telephone audio clip. Output ONLY the transcribed words with no commentary or quotes. If there is no intelligible human speech, silence, or only background noise/tones, output ONLY the word SILENCE.',
-                },
-              ],
+                  {
+                    text: 'Transcribe the exact words spoken by the human caller in this telephone audio clip. Output ONLY the transcribed words with no commentary or quotes. If there is no intelligible human speech, silence, or only background noise/tones, output ONLY the word SILENCE.',
+                  },
+                ],
+              },
+            ],
+            config: {
+              temperature: 0.0,
+              maxOutputTokens: 120,
             },
-          ],
-          config: {
-            temperature: 0.0,
-            maxOutputTokens: 120,
-          },
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('STT timeout')), 2500)),
-      ]);
-      const sttText = String(sttRes?.text || '')
-        .replace(/^["']|["']$/g, '')
-        .trim();
-      if (!sttText || /^silence$/i.test(sttText) || sttText.length < 2) {
-        return {
-          ok: true,
-          is_silence: true,
-          reply: '',
-          first_chunk_text: '',
-          rest_text: '',
-          voice: SARAH_VOICE_NAME,
-          audio_base64: null,
-          audio_mime: 'audio/wav',
-        };
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('STT timeout')), 3200)),
+        ]);
+        transcribed = String(sttRes?.text || '')
+          .replace(/^["']|["']$/g, '')
+          .trim();
+        if (transcribed) break;
+      } catch {
+        // try next fast flash-lite model
       }
-      rawMessage = sttText;
-      transcribedFromWebRtcAudio = true;
-    } catch {
+    }
+
+    if (!transcribed || /^silence$/i.test(transcribed) || transcribed.length < 2) {
       return {
         ok: true,
         is_silence: true,
@@ -2938,6 +3070,8 @@ export async function handleSarahHttpTurn(params: {
         audio_mime: 'audio/wav',
       };
     }
+    rawMessage = transcribed;
+    transcribedFromWebRtcAudio = true;
   }
 
   const sessionKey = String(
@@ -2948,8 +3082,8 @@ export async function handleSarahHttpTurn(params: {
     Array.isArray(params.history) && params.history.length > 0
       ? [...params.history]
       : persistedSession?.history
-      ? [...persistedSession.history]
-      : [];
+        ? [...persistedSession.history]
+        : [];
 
   let dbWarmTransfer = false;
   if (!params.is_initial && rawMessage && params.context?.on_warm_transfer === undefined) {
@@ -3019,14 +3153,19 @@ export async function handleSarahHttpTurn(params: {
     });
   };
 
-  // 1. Initial opening greeting when call starts (answers inbound calls immediately right away!)
+  // 1. Initial 1st-ring pickup when call starts — zero blocking DB queries (<5ms response, strict America/Phoenix routing!)
   if (params.is_initial || !rawMessage) {
+    const isAfterHoursInbound = sessionContext.mode === 'inbound' && !workHoursNow.isOpen;
     const openingReply =
       sessionContext.mode === 'outbound'
-        ? `Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?`
-        : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
+        ? `Hello ${firstName}, this is Sarah calling from the Medicare Helpline powered by IWG Insurance and Financial Services. How are you today?`
+        : isAfterHoursInbound
+          ? buildAfterHoursGreeting()
+          : buildBusinessHoursGreeting();
+
+    // Persist session asynchronously so 1st-ring pickup never blocks on DB latency
     if (sessionKey) {
-      await saveSarahCallSession(sessionKey, {
+      void saveSarahCallSession(sessionKey, {
         history: [{ speaker: 'sarah', text: openingReply }],
         lead_id: sessionContext.lead_id,
         prospect_name: sessionContext.prospect_name,
@@ -3035,9 +3174,24 @@ export async function handleSarahHttpTurn(params: {
         state: sessionContext.state,
         how_heard: sessionContext.how_heard,
         product_interest: sessionContext.product_interest,
-      });
+      }).catch(() => {});
     }
-    const tts = await resolveTts(openingReply);
+
+    const preCached =
+      sessionContext.mode === 'inbound'
+        ? getPreCachedSarahAudio(isAfterHoursInbound ? 'after_hours' : 'business_greeting')
+        : null;
+    const tts =
+      preCached?.audio_base64 && !params.skip_inline_tts
+        ? {
+            audio_base64: preCached.audio_base64,
+            audio_mime: preCached.audio_mime,
+            first_chunk_text: openingReply,
+            rest_text: '',
+            voice: SARAH_VOICE_NAME,
+          }
+        : await resolveTts(openingReply);
+
     return {
       ok: true,
       reply: openingReply,
@@ -3046,10 +3200,20 @@ export async function handleSarahHttpTurn(params: {
       first_chunk_text: tts.first_chunk_text,
       rest_text: tts.rest_text,
       voice: tts.voice,
+      voice_gender: 'female',
+      routing_mode:
+        sessionContext.mode === 'outbound'
+          ? 'outbound'
+          : isAfterHoursInbound
+            ? 'after_hours'
+            : 'business_hours',
+      is_after_hours: isAfterHoursInbound,
+      should_hangup: isAfterHoursInbound,
       mode: sessionContext.mode,
       line: SARAH_MAIN_LINE_DISPLAY,
+      line_e164: SARAH_MAIN_LINE_E164,
       on_warm_transfer: sessionContext.on_warm_transfer,
-      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+      work_hours: workHoursNow.workHoursLabel,
       work_hours_status: workHoursNow,
     };
   }
@@ -3391,7 +3555,12 @@ export async function handleSarahHttpTurn(params: {
     const hasPhoneNow = !isPlaceholderProspectPhone(sessionContext.prospect_phone, sessionContext.mode);
     const hasAddressNow = !isPlaceholderProspectAddress(sessionContext.address);
 
-    const baseTextModels = [config.gemini.model || 'gemini-3.8-flash'];
+    const baseTextModels = [
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-3.6-flash',
+      config.gemini.model || 'gemini-3.8-flash',
+    ];
     const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
       try {

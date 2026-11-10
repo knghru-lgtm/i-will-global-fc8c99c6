@@ -1,6 +1,8 @@
-// IWG Main-World WebRTC Virtual Audio Bridge for Google Voice (480) 331-9455
-// Routes Sarah's Vindemiatrix WAV audio directly into Google Voice's outgoing WebRTC stream
-// and captures the remote caller's incoming WebRTC audio track for 100% internal call handling.
+// IWG Main-World WebRTC Virtual Audio Bridge for Google Voice (480) 331-9455 (v9 — Zero Echo / Zero Noise / Pure Digital Isolation)
+// 1. Feeds ONLY Sarah's digital Vindemiatrix audio into Google Voice's outgoing WebRTC stream (NEVER opens or mixes the PC's physical microphone).
+// 2. Replaces the 440Hz oscillator with pure 0.0 digital silence + DynamicsCompressor soft limiter so there is zero hum, buzz, or clipping.
+// 3. Never outputs Sarah's voice or the remote caller's voice to the PC's physical speakers (zero acoustic feedback loop).
+// 4. Captures the remote caller's incoming WebRTC MediaStreamTrack directly in digital memory via WebAudio AnalyserNode + MediaRecorder.
 (function () {
   if (typeof window === 'undefined' || window.__IWG_WEBRTC_BRIDGE_INSTALLED__) {
     return;
@@ -12,10 +14,11 @@
 
   let bridgeAudioCtx = null;
   let virtualMicDest = null;
-  let micGainNode = null;
   let sarahGainNode = null;
+  let limiterNode = null;
   let activeSourceNode = null;
   let sarahSpeakingNow = false;
+  let lastSarahEndedTs = 0;
   const hookedRemoteTrackIds = new Set();
 
   function ensureAudioGraph() {
@@ -23,24 +26,31 @@
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return null;
       if (!bridgeAudioCtx || bridgeAudioCtx.state === 'closed') {
-        bridgeAudioCtx = new AudioCtx();
+        bridgeAudioCtx = new AudioCtx({ sampleRate: 48000 });
         virtualMicDest = bridgeAudioCtx.createMediaStreamDestination();
-        micGainNode = bridgeAudioCtx.createGain();
-        micGainNode.gain.value = 1.0;
+
+        // Clean studio gain + brickwall soft limiter to prevent any WebRTC Opus clipping or distortion
         sarahGainNode = bridgeAudioCtx.createGain();
-        sarahGainNode.gain.value = 1.15;
+        sarahGainNode.gain.value = 0.85;
 
-        micGainNode.connect(virtualMicDest);
-        sarahGainNode.connect(virtualMicDest);
+        limiterNode = bridgeAudioCtx.createDynamicsCompressor();
+        limiterNode.threshold.value = -3.0;
+        limiterNode.knee.value = 6.0;
+        limiterNode.ratio.value = 12.0;
+        limiterNode.attack.value = 0.002;
+        limiterNode.release.value = 0.08;
 
-        // Sub-audible keep-alive signal so WebRTC RTP packets flow continuously
+        sarahGainNode.connect(limiterNode);
+        limiterNode.connect(virtualMicDest);
+
+        // Pure 0.0 DC constant source (zero frequency, zero tone, zero hum) so WebRTC RTP frames stay active during silence
         try {
-          const osc = bridgeAudioCtx.createOscillator();
-          const silentGain = bridgeAudioCtx.createGain();
-          silentGain.gain.value = 0.00001;
-          osc.connect(silentGain);
-          silentGain.connect(virtualMicDest);
-          osc.start();
+          if (typeof bridgeAudioCtx.createConstantSource === 'function') {
+            const zeroSource = bridgeAudioCtx.createConstantSource();
+            zeroSource.offset.value = 0.0;
+            zeroSource.connect(virtualMicDest);
+            zeroSource.start();
+          }
         } catch {}
       }
       if (bridgeAudioCtx.state === 'suspended') {
@@ -57,10 +67,13 @@
     if (!virtualMicDest || !virtualMicDest.stream) return null;
     const baseTrack = virtualMicDest.stream.getAudioTracks()[0];
     if (!baseTrack) return null;
-    return baseTrack.clone();
+    const cloned = baseTrack.clone();
+    cloned.enabled = true;
+    return cloned;
   }
 
-  // 1. Intercept navigator.mediaDevices.getUserMedia so Google Voice receives our internal virtual mic bus
+  // 1. Intercept navigator.mediaDevices.getUserMedia — NEVER open the physical PC microphone!
+  // Returning ONLY our pure digital virtual track eliminates 100% of room noise, fan noise, and speaker-to-mic echo.
   if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
     const origGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = async function (constraints) {
@@ -69,39 +82,16 @@
         return origGetUserMedia(constraints);
       }
 
-      const ctx = ensureAudioGraph();
-      let realStream = null;
-      try {
-        realStream = await origGetUserMedia(constraints);
-      } catch {
-        try {
-          realStream = await origGetUserMedia({ audio: true });
-        } catch {}
-      }
-
-      if (ctx && realStream && micGainNode) {
-        try {
-          const micSource = ctx.createMediaStreamSource(realStream);
-          micSource.connect(micGainNode);
-        } catch {}
-      }
-
       const virtualTrack = getClonedVirtualAudioTrack();
       if (virtualTrack) {
-        const tracks = [virtualTrack];
-        if (realStream) {
-          for (const vt of realStream.getVideoTracks()) {
-            tracks.push(vt);
-          }
-        }
-        return new MediaStream(tracks);
+        return new MediaStream([virtualTrack]);
       }
 
-      return realStream || origGetUserMedia(constraints);
+      return origGetUserMedia(constraints);
     };
   }
 
-  // 2. Attach VAD + MediaRecorder to incoming remote WebRTC audio tracks from the phone caller
+  // 2. Attach VAD + MediaRecorder directly to incoming remote WebRTC audio tracks from the phone caller
   function monitorRemoteAudioStream(remoteStream) {
     if (!remoteStream || typeof remoteStream.getAudioTracks !== 'function') return;
     const audioTracks = remoteStream.getAudioTracks();
@@ -145,7 +135,9 @@
           finishRecording();
           return;
         }
-        if (sarahSpeakingNow) {
+        const now = Date.now();
+        // Do not record while Sarah is speaking or within 450ms after she finishes speaking
+        if (sarahSpeakingNow || now - lastSarahEndedTs < 450) {
           if (isRecordingUtterance) {
             chunks = [];
             finishRecording();
@@ -159,9 +151,8 @@
           sumSq += data[i] * data[i];
         }
         const rms = Math.sqrt(sumSq / data.length);
-        const now = Date.now();
 
-        if (rms > 0.015) {
+        if (rms > 0.014) {
           lastVoiceTs = now;
           if (!isRecordingUtterance) {
             try {
@@ -182,7 +173,7 @@
                 }
                 const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
                 chunks = [];
-                if (blob.size < 700) return;
+                if (blob.size < 650) return;
                 const reader = new FileReader();
                 reader.onloadend = () => {
                   const dataUrl = String(reader.result || '');
@@ -211,14 +202,15 @@
           } else if (now - speechStartTs > 8500) {
             finishRecording();
           }
-        } else if (isRecordingUtterance && now - lastVoiceTs > 720) {
+        } else if (isRecordingUtterance && now - lastVoiceTs > 700) {
           finishRecording();
         }
-      }, 75);
+      }, 70);
     } catch {}
   }
 
-  // 3. Wrap RTCPeerConnection so outgoing audio uses our virtual bus and incoming audio is captured
+  // 3. Wrap RTCPeerConnection and RTCRtpSender so outgoing audio ALWAYS uses our pure digital bus
+  //    and incoming audio is captured without playing out loud on the PC speakers
   if (typeof window.RTCPeerConnection === 'function') {
     const OrigPeerConnection = window.RTCPeerConnection;
     const WrappedPeerConnection = function (...args) {
@@ -253,7 +245,23 @@
     window.RTCPeerConnection = WrappedPeerConnection;
   }
 
-  // Also hook HTMLMediaElement.srcObject in case Google Voice attaches remote streams to <audio> elements
+  if (typeof window.RTCRtpSender === 'function' && window.RTCRtpSender.prototype?.replaceTrack) {
+    const origReplaceTrack = window.RTCRtpSender.prototype.replaceTrack;
+    window.RTCRtpSender.prototype.replaceTrack = function (withTrack) {
+      try {
+        if (withTrack && withTrack.kind === 'audio') {
+          const vTrack = getClonedVirtualAudioTrack();
+          if (vTrack) {
+            return origReplaceTrack.call(this, vTrack);
+          }
+        }
+      } catch {}
+      return origReplaceTrack.call(this, withTrack);
+    };
+  }
+
+  // Hook HTMLMediaElement.srcObject & play() so remote caller audio streams are tapped digitally
+  // AND muted on the local PC speakers (volume = 0) so the caller NEVER hears speaker echo or feedback!
   try {
     const desc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'srcObject');
     if (desc && desc.set && desc.get) {
@@ -267,6 +275,9 @@
           try {
             if (val && typeof val.getAudioTracks === 'function' && val.getAudioTracks().length > 0) {
               monitorRemoteAudioStream(val);
+              // Silence local PC speaker rendering of the remote stream to prevent acoustic feedback
+              this.volume = 0.0;
+              this.muted = true;
             }
           } catch {}
           return desc.set.call(this, val);
@@ -316,16 +327,11 @@
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
 
-      // Feed directly into Google Voice's WebRTC virtual mic stream AND local audio context
+      // IMPORTANT: Connect ONLY to sarahGainNode (WebRTC outgoing stream).
+      // NEVER connect to ctx.destination (PC physical speakers) — prevents 100% of double-voice echo and room feedback!
       source.connect(sarahGainNode);
-      try {
-        source.connect(ctx.destination);
-      } catch {}
 
       sarahSpeakingNow = true;
-      if (micGainNode) {
-        micGainNode.gain.value = 0.0;
-      }
       activeSourceNode = source;
 
       let doneCalled = false;
@@ -335,14 +341,12 @@
         if (activeSourceNode === source) {
           activeSourceNode = null;
           sarahSpeakingNow = false;
-          if (micGainNode) {
-            micGainNode.gain.value = 1.0;
-          }
+          lastSarahEndedTs = Date.now();
         }
         finish(ok);
       };
 
-      const maxMs = Math.min(25000, Math.ceil((audioBuffer.duration || 10) * 1000) + 1500);
+      const maxMs = Math.min(25000, Math.ceil((audioBuffer.duration || 10) * 1000) + 1200);
       const timer = setTimeout(() => onEnded(true), maxMs);
       source.onended = () => {
         clearTimeout(timer);
@@ -351,9 +355,7 @@
       source.start(0);
     } catch {
       sarahSpeakingNow = false;
-      if (micGainNode) {
-        micGainNode.gain.value = 1.0;
-      }
+      lastSarahEndedTs = Date.now();
       finish(false);
     }
   }
@@ -366,9 +368,7 @@
       handlePlayWavRequest(data.base64, data.requestId);
     } else if (data.type === 'IWG_SARAH_STOP_WAV') {
       sarahSpeakingNow = false;
-      if (micGainNode) {
-        micGainNode.gain.value = 1.0;
-      }
+      lastSarahEndedTs = Date.now();
       if (activeSourceNode) {
         try {
           activeSourceNode.stop();

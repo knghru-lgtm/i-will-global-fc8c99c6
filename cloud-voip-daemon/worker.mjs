@@ -1,0 +1,226 @@
+import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import puppeteer from 'puppeteer-core';
+
+const API_BASE = process.env.APP_URL || 'https://iwillglobal.com';
+const BRIDGE_TOKEN = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-9455';
+const REGION = process.env.VERCEL_REGION || 'iad1';
+const INSTANCE_ID = `cloud-${REGION}-${randomUUID().slice(0, 8)}`;
+
+const webrtcBridgeCode = readFileSync(new URL('./webrtc-bridge.js', import.meta.url), 'utf8');
+const contentControllerCode = readFileSync(new URL('./content.js', import.meta.url), 'utf8');
+
+let shuttingDown = false;
+let activeBrowser = null;
+
+process.on('SIGTERM', async () => {
+  console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] SIGTERM received — shutting down cleanly...`);
+  shuttingDown = true;
+  if (activeBrowser) {
+    try {
+      await activeBrowser.close();
+    } catch {}
+  }
+  process.exit(0);
+});
+
+async function fetchCloudCookies() {
+  try {
+    const res = await fetch(`${API_BASE}/api/sarah/gv-session-sync`, {
+      headers: { 'x-iwg-bridge-token': BRIDGE_TOKEN },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data?.cookies) ? data.cookies : [];
+  } catch (err) {
+    console.error('[Sarah Cloud Daemon] Cookie fetch error:', err?.message);
+    return [];
+  }
+}
+
+async function saveRefreshedCookies(cookies) {
+  try {
+    if (!Array.isArray(cookies) || cookies.length === 0) return;
+    await fetch(`${API_BASE}/api/sarah/gv-session-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-iwg-bridge-token': BRIDGE_TOKEN,
+      },
+      body: JSON.stringify({
+        cookies,
+        source: `cloud-daemon-${INSTANCE_ID}`,
+      }),
+    });
+  } catch {}
+}
+
+async function reportDaemonHeartbeat(extra = {}) {
+  try {
+    await fetch(`${API_BASE}/api/sarah/gv-heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        runner: 'cloud-daemon',
+        instanceId: INSTANCE_ID,
+        region: REGION,
+        extensionBuild: '2026-11-09-v10',
+        ...extra,
+      }),
+    });
+  } catch {}
+}
+
+function normalizeCookiesForCdp(rawCookies) {
+  const out = [];
+  for (const c of rawCookies) {
+    if (!c?.name || typeof c.value !== 'string' || !c.domain) continue;
+    const entry = {
+      name: String(c.name),
+      value: String(c.value),
+      domain: String(c.domain),
+      path: String(c.path || '/'),
+      secure: Boolean(c.secure),
+      httpOnly: Boolean(c.httpOnly),
+    };
+    if (typeof c.expirationDate === 'number' && c.expirationDate > 0) {
+      entry.expires = c.expirationDate;
+    } else if (typeof c.expires === 'number' && c.expires > 0) {
+      entry.expires = c.expires;
+    }
+    const ss = String(c.sameSite || '').toLowerCase();
+    if (ss === 'no_restriction' || ss === 'none') entry.sameSite = 'None';
+    else if (ss === 'lax') entry.sameSite = 'Lax';
+    else if (ss === 'strict') entry.sameSite = 'Strict';
+    out.push(entry);
+  }
+  return out;
+}
+
+async function runBrowserSession(cookies) {
+  const execPath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+  console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Launching Chromium with ${cookies.length} Google Voice cookies...`);
+
+  const browser = await puppeteer.launch({
+    executablePath: execPath,
+    headless: false, // Runs inside Xvfb :99 so visibilityState === "visible" & WebAudio runs unthrottled
+    ignoreDefaultArgs: ['--mute-audio'],
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--autoplay-policy=no-user-gesture-required',
+      '--use-fake-ui-for-media-stream',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      '--window-size=1280,800',
+    ],
+  });
+  activeBrowser = browser;
+
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+
+    const client = await page.createCDPSession();
+    await client.send('Browser.grantPermissions', {
+      origin: 'https://voice.google.com',
+      permissions: ['audioCapture', 'notifications'],
+    });
+
+    const cdpCookies = normalizeCookiesForCdp(cookies);
+    if (cdpCookies.length > 0) {
+      await client.send('Network.setCookies', { cookies: cdpCookies });
+    }
+
+    const configBootstrap = `window.__IWG_CLOUD_DAEMON_CONFIG__ = ${JSON.stringify({
+      runner: 'cloud-daemon',
+      instanceId: INSTANCE_ID,
+      region: REGION,
+      apiBase: API_BASE,
+    })};`;
+
+    // Inject Zero-Echo WebRTC Bridge BEFORE any page scripts run
+    await page.evaluateOnNewDocument(`${configBootstrap}\n${webrtcBridgeCode}`);
+
+    await page.goto('https://voice.google.com/u/0/calls', {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    });
+
+    await new Promise((r) => setTimeout(r, 3500));
+
+    // Click page once so Chromium unlocks WebAudio AudioContext at 48kHz immediately
+    try {
+      await page.mouse.click(80, 80);
+    } catch {}
+
+    // Inject Cloud Auto-Answer & Conversational Controller
+    await page.evaluate(`${configBootstrap}\n${contentControllerCode}`);
+
+    let lastRefreshSave = Date.now();
+    while (!shuttingDown && browser.connected && !page.isClosed()) {
+      const currentUrl = page.url();
+      const title = await page.title().catch(() => '');
+      const isSignedOut = currentUrl.includes('accounts.google.com') || /sign in/i.test(title);
+      if (isSignedOut) {
+        console.warn(`[Sarah Cloud Daemon ${INSTANCE_ID}] Session redirected to sign-in (${currentUrl}); waiting for refreshed cookies...`);
+        await reportDaemonHeartbeat({
+          url: currentUrl,
+          title,
+          sessionAuthenticated: false,
+          receivingCallsText: 'Awaiting Google Voice Session Sync',
+        });
+        break;
+      }
+
+      // Periodically persist rotated Google cookies (__Secure-1PSIDTS) back to encrypted Cloud Postgres vault
+      if (Date.now() - lastRefreshSave > 5 * 60 * 1000) {
+        lastRefreshSave = Date.now();
+        try {
+          const all = await client.send('Network.getAllCookies');
+          if (Array.isArray(all?.cookies) && all.cookies.length > 0) {
+            await saveRefreshedCookies(all.cookies);
+          }
+        } catch {}
+      }
+
+      await new Promise((r) => setTimeout(r, 8000));
+    }
+  } finally {
+    try {
+      await browser.close();
+    } catch {}
+    if (activeBrowser === browser) activeBrowser = null;
+  }
+}
+
+async function main() {
+  console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Starting 24/7 Cloud Receptionist for +14803319455 -> ${API_BASE}`);
+  while (!shuttingDown) {
+    const cookies = await fetchCloudCookies();
+    if (!cookies || cookies.length === 0) {
+      await reportDaemonHeartbeat({
+        url: 'https://voice.google.com/u/0/calls',
+        title: 'Waiting for initial cookie vault sync',
+        sessionAuthenticated: false,
+        receivingCallsText: 'Awaiting Initial Session Sync',
+      });
+      await new Promise((r) => setTimeout(r, 6000));
+      continue;
+    }
+
+    try {
+      await runBrowserSession(cookies);
+    } catch (err) {
+      console.error(`[Sarah Cloud Daemon ${INSTANCE_ID}] Browser loop error:`, err?.message);
+    }
+    if (!shuttingDown) {
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+}
+
+void main();
+

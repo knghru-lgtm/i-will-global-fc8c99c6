@@ -19,6 +19,9 @@ import {
   handleSarahHttpTurn,
   executeSarahTool,
   synthesizeSarahNeuralAudio,
+  getPreCachedSarahAudio,
+  buildBusinessHoursGreeting,
+  buildAfterHoursGreeting,
   getSarahDirectLiveSessionConfig,
   checkLiveTransferCallStatus,
   checkReceptionistWorkHours,
@@ -29,6 +32,9 @@ import {
   queueGvCommand,
   launchGoogleVoiceChromeWindow,
   startGoogleVoiceWatchdog,
+  saveCloudGvCookies,
+  loadCloudGvCookies,
+  verifyBridgeToken,
 } from './services/googleVoiceWatchdog.ts';
 
 export function createApp() {
@@ -79,9 +85,21 @@ export function createApp() {
   });
   app.get('/api/sarah/audio.wav', async (req, res) => {
     try {
+      const preset = String(req.query?.preset || '').trim();
+      if (preset === 'business_greeting' || preset === 'after_hours') {
+        const fast = getPreCachedSarahAudio(preset);
+        if (fast?.audio_base64) {
+          const wavBuf = Buffer.from(fast.audio_base64, 'base64');
+          res.setHeader('Content-Type', 'audio/wav');
+          res.setHeader('Content-Length', String(wavBuf.length));
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return res.status(200).send(wavBuf);
+        }
+      }
+      const wh = checkReceptionistWorkHours();
       const text =
         String(req.query?.text || '').trim() ||
-        'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
+        (wh.isOpen ? buildBusinessHoursGreeting() : buildAfterHoursGreeting());
       const tts = await synthesizeSarahNeuralAudio(text);
       if (tts?.audio_base64) {
         const wavBuf = Buffer.from(tts.audio_base64, 'base64');
@@ -172,18 +190,54 @@ export function createApp() {
     });
     res.json({ ok: true, ...wh });
   });
-  app.post('/api/sarah/gv-heartbeat', (req, res) => {
-    res.json(handleGvHeartbeat(req.body || {}));
-  });
-  app.get('/api/sarah/gv-status', (_req, res) => {
-    res.json(getGvWatchdogStatus());
-  });
-  app.post('/api/sarah/gv-command', (req, res) => {
-    if (req.body?.launchChrome) {
-      const launched = launchGoogleVoiceChromeWindow('manual_api_command');
-      return res.json({ ok: true, launched, status: getGvWatchdogStatus() });
+  app.post('/api/sarah/gv-heartbeat', async (req, res) => {
+    try {
+      res.json(await handleGvHeartbeat(req.body || {}));
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Heartbeat failed' });
     }
-    res.json(queueGvCommand(req.body || {}));
+  });
+  app.get('/api/sarah/gv-status', async (_req, res) => {
+    try {
+      res.json(await getGvWatchdogStatus());
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Status check failed' });
+    }
+  });
+  app.post('/api/sarah/gv-command', async (req, res) => {
+    try {
+      if (req.body?.launchChrome) {
+        const launched = launchGoogleVoiceChromeWindow('manual_api_command');
+        return res.json({ ok: true, launched, status: await getGvWatchdogStatus() });
+      }
+      res.json(await queueGvCommand(req.body || {}));
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Command queue failed' });
+    }
+  });
+  app.post('/api/sarah/gv-session-sync', async (req, res) => {
+    const token = String(req.headers['x-iwg-bridge-token'] || req.body?.bridgeToken || '');
+    if (!verifyBridgeToken(token)) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized bridge token' });
+    }
+    try {
+      const saved = await saveCloudGvCookies(req.body?.cookies || [], req.body?.source || 'extension');
+      res.json(saved);
+    } catch (err: any) {
+      res.status(400).json({ ok: false, error: err?.message || 'Failed to sync cloud session' });
+    }
+  });
+  app.get('/api/sarah/gv-session-sync', async (req, res) => {
+    const token = String(req.headers['x-iwg-bridge-token'] || req.query?.bridgeToken || '');
+    if (!verifyBridgeToken(token)) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized bridge token' });
+    }
+    try {
+      const loaded = await loadCloudGvCookies();
+      res.json({ ok: true, ...loaded });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to load cloud session' });
+    }
   });
 
   // Public: website chat widget, SOA e-sign, appointment web confirmation, OAuth callback, Inbound Receptionist & Webhook
@@ -192,6 +246,8 @@ export function createApp() {
   app.use('/api/google', googleCallback);
   app.use('/api/sarah', sarahPublic);
   app.use('/api/telephony/twiml', sarahPublic);
+  app.use('/api/voice', sarahPublic);
+  app.use('/api/twilio', sarahPublic);
   app.use('/widget', express.static(fileURLToPath(new URL('../public', import.meta.url))));
 
   // Authenticated API
@@ -239,6 +295,9 @@ export function attachSarahWebSocket(server: http.Server) {
         address: sp.get('address') || undefined,
         caller_name: sp.get('caller_name') || undefined,
         on_warm_transfer: sp.has('on_warm_transfer') ? sp.get('on_warm_transfer') === 'true' : undefined,
+        force_work_hours: sp.has('force_work_hours') ? sp.get('force_work_hours') === 'true' : undefined,
+        force_live_connect: sp.has('force_live_connect') ? sp.get('force_live_connect') === 'true' : undefined,
+        simulated_now_iso: sp.get('simulated_now_iso') || undefined,
       };
     } catch {
       // default to inbound

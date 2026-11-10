@@ -9,11 +9,19 @@
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
-  const EXTENSION_BUILD = '2026-11-09-v8';
+  const EXTENSION_BUILD = '2026-11-09-v10';
+  const cloudDaemonCfg =
+    typeof window !== 'undefined' && window.__IWG_CLOUD_DAEMON_CONFIG__
+      ? window.__IWG_CLOUD_DAEMON_CONFIG__
+      : null;
+  const RUNNER_MODE = cloudDaemonCfg ? 'cloud-daemon' : 'chrome-extension';
   const OPENING_GREETING =
     'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
+  let afterHoursGreetingText =
+    'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 8 PM Arizona time. Please give us a call back during normal business hours, and we will be happy to assist you. Have a wonderful evening.';
 
   let autoAnswerEnabled = true;
+  let standbyForCloud = false;
   let callActive = false;
   let isSpeaking = false;
   let turnInFlight = false;
@@ -25,6 +33,21 @@
   let callHistory = [];
   let activeAudio = null;
   let preloadedGreeting = null;
+  let preloadedAfterHoursGreeting = null;
+  let configuredStartMin = 8 * 60;
+  let configuredEndMin = 20 * 60;
+
+  function isPhoenixBusinessHoursNow() {
+    try {
+      // America/Phoenix is UTC-7 year-round (zero DST)
+      const phx = new Date(Date.now() - 7 * 3600 * 1000);
+      const day = phx.getUTCDay();
+      const mins = phx.getUTCHours() * 60 + phx.getUTCMinutes();
+      return day >= 1 && day <= 5 && mins >= configuredStartMin && mins < configuredEndMin;
+    } catch {
+      return true;
+    }
+  }
   let playReqCounter = 0;
   const pendingPlayResolvers = new Map();
 
@@ -210,7 +233,9 @@
       if (viaBg) return viaBg;
     }
 
-    const bases = ['http://localhost:4000', 'https://iwillglobal.com'];
+    const bases = cloudDaemonCfg?.apiBase
+      ? [cloudDaemonCfg.apiBase, 'https://iwillglobal.com']
+      : ['https://iwillglobal.com', 'http://localhost:4000'];
     for (const base of bases) {
       try {
         const res = await fetch(`${base}${endpoint}`, {
@@ -228,14 +253,28 @@
 
   async function preloadSarahNaturalGreeting() {
     try {
-      const turn = await callSarahBackend('/api/sarah/turn', {
-        is_initial: true,
-        context: { mode: 'inbound', source_channel: 'call_in_lead' },
-      });
-      if (turn && turn.audio_base64) {
+      const [openTurn, closedTurn] = await Promise.all([
+        callSarahBackend('/api/sarah/turn', {
+          is_initial: true,
+          context: { mode: 'inbound', source_channel: 'call_in_lead', force_work_hours: true },
+        }),
+        callSarahBackend('/api/sarah/turn', {
+          is_initial: true,
+          context: { mode: 'inbound', source_channel: 'call_in_lead', force_work_hours: false },
+        }),
+      ]);
+      if (openTurn && openTurn.audio_base64) {
         preloadedGreeting = {
-          audio_base64: turn.audio_base64,
-          audio_mime: turn.audio_mime || 'audio/wav',
+          audio_base64: openTurn.audio_base64,
+          audio_mime: openTurn.audio_mime || 'audio/wav',
+          rest_audio_base64: null,
+        };
+      }
+      if (closedTurn && closedTurn.audio_base64) {
+        if (closedTurn.reply) afterHoursGreetingText = closedTurn.reply;
+        preloadedAfterHoursGreeting = {
+          audio_base64: closedTurn.audio_base64,
+          audio_mime: closedTurn.audio_mime || 'audio/wav',
           rest_audio_base64: null,
         };
       }
@@ -453,6 +492,14 @@
 
   function startListening() {
     if (!callActive || isSpeaking || recRunning) return;
+    // When the MAIN-world WebRTC Direct Audio Bridge is active, incoming caller speech is captured
+    // 100% digitally from the WebRTC MediaStreamTrack — NEVER open the PC's physical microphone (prevents room noise, hiss, and feedback)!
+    if (
+      typeof document !== 'undefined' &&
+      document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready'
+    ) {
+      return;
+    }
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRec) return;
     if (!recognition) {
@@ -519,6 +566,23 @@
     return '';
   }
 
+  function hangupActiveGoogleVoiceCall() {
+    try {
+      const elements = queryAllDeep(document);
+      for (const el of elements) {
+        if (!isElementVisible(el)) continue;
+        const aria = String(el.getAttribute?.('aria-label') || '').trim();
+        const title = String(el.getAttribute?.('title') || el.getAttribute?.('mattooltip') || '').trim();
+        const testId = String(el.getAttribute?.('gv-test-id') || '').trim();
+        const txt = String(el.textContent || '').trim();
+        if (/\b(end\s*call|hang\s*up|leave\s*call|disconnect|call_end)\b/i.test(`${aria} ${title} ${testId} ${txt}`)) {
+          clickElement(el);
+        }
+      }
+    } catch {}
+    callActive = false;
+  }
+
   function onIncomingCallAnswered(customCallerPhone, silentInternalOnly = false) {
     if (callActive && Date.now() - lastCallStartTs < 15000) {
       return;
@@ -528,6 +592,10 @@
     totalCallsAnswered += 1;
     callHistory = [];
     const callerPhone = customCallerPhone || extractActiveCallerPhone();
+    const isBusinessHours = isPhoenixBusinessHoursNow();
+    const selectedGreetingText = isBusinessHours ? OPENING_GREETING : afterHoursGreetingText;
+    const selectedAudio = isBusinessHours ? preloadedGreeting : preloadedAfterHoursGreeting;
+
     sessionContext = {
       mode: 'inbound',
       source_channel: 'call_in_lead',
@@ -538,36 +606,54 @@
       state: 'AZ',
     };
 
-    callHistory.push({ speaker: 'sarah', text: OPENING_GREETING });
-    updateStatusBanner('🟢 Call Picked Up Internally on 1st Ring • (480) 331-9455', '#10b981');
+    callHistory.push({ speaker: 'sarah', text: selectedGreetingText });
+    updateStatusBanner(
+      isBusinessHours
+        ? '🟢 Call Answered on 1st Ring (Business Hours) • (480) 331-9455'
+        : '🌙 Call Answered on 1st Ring (After-Hours Greeting) • (480) 331-9455',
+      '#10b981'
+    );
 
     callSarahBackend('/api/sarah/inbound', {
       from: callerPhone || '',
       caller_name: '',
       internal_only: true,
-      notes: 'Picked up immediately on 1st ring internally on (480) 331-9455',
+      skip_inline_tts: true,
+      notes: isBusinessHours
+        ? 'Picked up immediately on 1st ring (Business Hours) on (480) 331-9455'
+        : 'Picked up immediately on 1st ring (After Hours) on (480) 331-9455',
     }).catch(() => {});
 
     callSarahBackend('/api/sarah/gv-heartbeat', {
+      runner: RUNNER_MODE,
+      instanceId: cloudDaemonCfg?.instanceId || undefined,
+      region: cloudDaemonCfg?.region || undefined,
       extensionBuild: EXTENSION_BUILD,
       url: window.location.href,
+      title: document.title || '',
       callActive: true,
       totalCallsAnswered,
       lastAnswerClickTs,
       event: 'call_answered_on_first_ring',
-      eventDetail: `Answered incoming call ${callerPhone || '(unknown caller)'}`,
+      eventDetail: `Answered incoming call ${callerPhone || '(unknown caller)'} [${isBusinessHours ? 'business_hours' : 'after_hours'}]`,
     }).catch(() => {});
 
     if (!silentInternalOnly) {
       setTimeout(() => {
         speakSarahNaturalVoice(
-          OPENING_GREETING,
-          preloadedGreeting?.audio_base64 || null,
-          preloadedGreeting?.audio_mime || 'audio/wav',
+          selectedGreetingText,
+          selectedAudio?.audio_base64 || null,
+          selectedAudio?.audio_mime || 'audio/wav',
           '',
-          null
+          null,
+          () => {
+            if (!isBusinessHours) {
+              // After hours: politely disconnect cleanly right after speaking the closed greeting
+              setTimeout(hangupActiveGoogleVoiceCall, 600);
+            }
+          }
         );
-      }, 120);
+      }, 60);
     }
   }
 
@@ -639,6 +725,9 @@
 
   function scanGoogleVoiceDom() {
     if (!autoAnswerEnabled) return;
+    if (RUNNER_MODE === 'chrome-extension' && standbyForCloud && !callActive) {
+      return;
+    }
     const now = Date.now();
     const elements = queryAllDeep(document);
 
@@ -653,6 +742,17 @@
             recRunning = false;
           } catch {}
         }
+        callSarahBackend('/api/sarah/gv-heartbeat', {
+          runner: RUNNER_MODE,
+          instanceId: cloudDaemonCfg?.instanceId || undefined,
+          region: cloudDaemonCfg?.region || undefined,
+          extensionBuild: EXTENSION_BUILD,
+          url: window.location.href,
+          title: document.title || '',
+          callActive: false,
+          totalCallsAnswered,
+          event: 'call_ended_ready_for_next',
+        }).catch(() => {});
         updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
       }
       return;
@@ -737,13 +837,16 @@
         '[class*="incoming" i], [aria-label*="Incoming call" i], [role="alertdialog"]'
       );
       const res = await callSarahBackend('/api/sarah/gv-heartbeat', {
+        runner: RUNNER_MODE,
+        instanceId: cloudDaemonCfg?.instanceId || undefined,
+        region: cloudDaemonCfg?.region || undefined,
         extensionBuild: EXTENSION_BUILD,
         url: window.location.href,
         title: document.title || '',
         visibilityState: document.visibilityState || 'visible',
         receivingCallsText:
           document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready'
-            ? 'WebRTC Direct Audio Bridge READY'
+            ? 'Zero-Echo Pure Digital WebRTC Isolation ACTIVE'
             : 'HTML5 Audio Fallback',
         incomingBannerText: incomingEl ? String(incomingEl.innerText || '').slice(0, 200) : '',
         callActive,
@@ -755,6 +858,23 @@
         visibleButtons: collectButtonTelemetry(),
       });
 
+      if (RUNNER_MODE === 'chrome-extension') {
+        const nextStandby = Boolean(res?.standbyForCloud);
+        if (nextStandby !== standbyForCloud) {
+          standbyForCloud = nextStandby;
+          if (standbyForCloud) {
+            updateStatusBanner('☁️ 24/7 Cloud Daemon Answering (480) 331-9455 • Laptop Standby', '#38bdf8');
+          } else {
+            updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
+          }
+        }
+        if (res?.needsCookieSync && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          chrome.runtime.sendMessage({ type: 'IWG_SYNC_COOKIES_NOW' }, () => {
+            void chrome.runtime.lastError;
+          });
+        }
+      }
+
       if (res?.reloadExtension && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
         chrome.runtime.sendMessage({ type: 'IWG_RELOAD_EXTENSION' }, () => {
           void chrome.runtime.lastError;
@@ -764,7 +884,12 @@
         window.location.reload();
       }
       if (res?.simulateIncomingCall) {
+        const prevStandby = standbyForCloud;
+        standbyForCloud = false;
         triggerSimulatedIncomingCallInDom(res.callerPhone || '(602) 456-9681');
+        setTimeout(() => {
+          standbyForCloud = prevStandby;
+        }, 2000);
       }
     } catch {}
   }

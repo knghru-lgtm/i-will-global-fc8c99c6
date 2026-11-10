@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "IWG Receptionist — Google Voice Auto-Answer & Caller (480) 331-9455",
-  "version": "2.8.0",
-  "description": "Internal IWG Cloned App Receptionist Bridge for (480) 331-9455 — WebRTC Direct Audio & 1st-Ring Auto-Answer.",
+  "name": "IWG Receptionist — 24/7 Cloud & Google Voice Bridge (480) 331-9455",
+  "version": "3.0.0",
+  "description": "Cloud-First Zero-Echo Pure Digital WebRTC Receptionist Bridge & Session Sync for (480) 331-9455.",
   "permissions": [
     "storage",
     "tabs",
-    "activeTab"
+    "activeTab",
+    "cookies"
   ],
   "host_permissions": [
+    "https://*.google.com/*",
     "https://voice.google.com/*",
     "https://iwillglobal.com/*",
     "http://localhost:4000/*",

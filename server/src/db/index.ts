@@ -1,4 +1,5 @@
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.ts';
 
@@ -27,9 +28,39 @@ async function createAdapter(): Promise<Adapter> {
     };
   }
   const { PGlite } = await import('@electric-sql/pglite');
-  const dir = process.env.NODE_ENV === 'test' ? 'memory://' : config.dataDir;
-  if (!dir.startsWith('memory://')) mkdirSync(dir, { recursive: true });
-  const db = await PGlite.create(dir.startsWith('memory://') ? undefined : dir);
+  const dir =
+    process.env.NODE_ENV === 'test'
+      ? 'memory://'
+      : process.env.VERCEL
+        ? '/tmp/iwg-pg'
+        : config.dataDir;
+  if (!dir.startsWith('memory://')) {
+    mkdirSync(dir, { recursive: true });
+    const pidFile = path.join(dir, 'postmaster.pid');
+    if (existsSync(pidFile)) {
+      try {
+        unlinkSync(pidFile);
+      } catch {}
+    }
+  }
+  let db: any;
+  try {
+    db = await PGlite.create(dir.startsWith('memory://') ? undefined : dir);
+  } catch {
+    const recoveryDir = `${dir}-live`;
+    mkdirSync(recoveryDir, { recursive: true });
+    const recPid = path.join(recoveryDir, 'postmaster.pid');
+    if (existsSync(recPid)) {
+      try {
+        unlinkSync(recPid);
+      } catch {}
+    }
+    try {
+      db = await PGlite.create(recoveryDir);
+    } catch {
+      db = await PGlite.create();
+    }
+  }
   return {
     query: (sql, params = []) => db.query(sql, params) as any,
     exec: async (sql) => { await db.exec(sql); },

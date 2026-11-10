@@ -12,6 +12,7 @@ import {
   dispatchNextLeadInQueue,
   canDispatchOutboundCall,
   getInboundDirectory,
+  IWG_TEAM_DIRECTORY,
   dispatchAiWhisperTransfer,
   stopSarahOutboundCalls,
   runSarahAutoDialerTick,
@@ -19,18 +20,32 @@ import {
   countSarahAssignedRemaining,
   SARAH_AI_USER_ID,
 } from '../services/sarahDialer.ts';
-import { one, q, insert } from '../db/index.ts';
+import { one, q, insert, uid } from '../db/index.ts';
 import { publish } from '../realtime.ts';
 import {
   executeSarahTool,
   upsertReceptionistLeadFromContext,
   checkReceptionistWorkHours,
-  RECEPTIONIST_WORK_HOURS_LABEL,
+  buildBusinessHoursGreeting,
+  buildAfterHoursGreeting,
+  getPreCachedSarahAudio,
   handleSarahHttpTurn,
   loadSarahCallSession,
   saveSarahCallSession,
   synthesizeSarahNeuralAudio,
 } from '../services/sarahVoiceService.ts';
+
+const STATIC_TRANSFER_LIST: Record<string, string> = (() => {
+  const m: Record<string, string> = {
+    default: '+16024569681',
+    'King Amen Ra': '+16024569681',
+    'Principal Broker': '+16024569681',
+  };
+  for (const d of IWG_TEAM_DIRECTORY) {
+    m[d.name] = d.e164;
+  }
+  return m;
+})();
 
 function escapeXml(str: string): string {
   return String(str || '')
@@ -99,11 +114,10 @@ sarahPublic.get('/public-directory', async (_req, res) => {
   }
 });
 
-// Inbound Receptionist handler when people call (480) 331-9455 (+14803319455) — answers immediately
+// Inbound Receptionist handler when people call (480) 331-9455 (+14803319455) — answers immediately on 1st ring (<50ms, zero blocking DB calls)
 sarahPublic.all('/inbound', async (req, res) => {
+  const startedAtMs = Date.now();
   try {
-    const dir = await getInboundDirectory();
-    const cfg = await getSarahDialerConfig();
     const callSessionKey = String(
       req.body?.CallSid ||
         req.query?.CallSid ||
@@ -119,9 +133,7 @@ sarahPublic.all('/inbound', async (req, res) => {
         req.query?.caller_phone ||
         'inbound-default'
     );
-    const dbSession = await loadSarahCallSession(callSessionKey);
-    const memSession = inboundCallHistoryMap.get(callSessionKey);
-    const prevSession: any = dbSession || memSession || { history: [] };
+    const memSession: any = inboundCallHistoryMap.get(callSessionKey) || { history: [] };
 
     const callerPhone = String(
       req.body?.From ||
@@ -130,25 +142,25 @@ sarahPublic.all('/inbound', async (req, res) => {
         req.query?.from ||
         req.body?.caller_phone ||
         req.query?.caller_phone ||
-        prevSession.prospect_phone ||
+        memSession.prospect_phone ||
         ''
     );
     const callerName = String(
-      req.body?.caller_name || req.query?.caller_name || req.body?.CallerName || prevSession.prospect_name || ''
+      req.body?.caller_name || req.query?.caller_name || req.body?.CallerName || memSession.prospect_name || ''
     );
     const callerAddress = String(
-      req.body?.address || req.query?.address || prevSession.address || ''
+      req.body?.address || req.query?.address || memSession.address || ''
     );
     const callerState = String(
-      req.body?.state || req.body?.FromState || req.query?.state || prevSession.state || 'AZ'
+      req.body?.state || req.body?.FromState || req.query?.state || memSession.state || 'AZ'
     );
     const callerHowHeard = String(
-      req.body?.how_heard || req.query?.how_heard || prevSession.how_heard || ''
+      req.body?.how_heard || req.query?.how_heard || memSession.how_heard || ''
     );
     const requestedPerson = req.body?.requested_person || req.body?.transfer_to || req.query?.transfer_to;
     const appointmentType = req.body?.appointment_type || req.query?.appointment_type;
     const preferredDatetime = req.body?.preferred_datetime || req.query?.preferred_datetime;
-    const productLine = req.body?.product_line || req.query?.product_line || prevSession.product_interest;
+    const productLine = req.body?.product_line || req.query?.product_line || memSession.product_interest;
     const userSpeech = String(
       req.body?.SpeechResult ||
         req.body?.speech ||
@@ -170,14 +182,216 @@ sarahPublic.all('/inbound', async (req, res) => {
         String(req.headers.accept || '').includes('xml')
     );
 
+    const rawForceWorkHours = req.body?.force_work_hours ?? req.query?.force_work_hours;
+    const parsedForceWorkHours =
+      rawForceWorkHours === true || rawForceWorkHours === 'true'
+        ? true
+        : rawForceWorkHours === false || rawForceWorkHours === 'false'
+          ? false
+          : undefined;
+    const simulatedNowIso = String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined;
+
+    // 1. Evaluate America/Phoenix (MST, no DST) synchronously in <0.1ms (zero DB blocking!)
+    const workHoursStatus = checkReceptionistWorkHours({
+      mode: 'inbound',
+      force_work_hours: parsedForceWorkHours,
+      simulated_now_iso: simulatedNowIso,
+    });
+    const baseUrl = `${req.protocol || 'https'}://${req.get('host') || 'iwillglobal.com'}`;
+
+    // =========================================================================
+    // FAST PATH: INITIAL 1ST-RING PICKUP (ZERO BLOCKING DB OR EXTERNAL API CALLS)
+    // =========================================================================
+    const isFirstRingPickup = !userSpeech && !requestedPerson && !appointmentType && !isGatherTimeout;
+    if (isFirstRingPickup) {
+      const isAfterHours = !workHoursStatus.isOpen;
+      const openingGreeting = isAfterHours ? buildAfterHoursGreeting() : buildBusinessHoursGreeting();
+      const presetKey = isAfterHours ? 'after_hours' : 'business_greeting';
+      const audioPlayUrl = `${baseUrl}/api/sarah/audio.wav?preset=${presetKey}`;
+      const skipInlineAudio =
+        isTwimlRequest ||
+        Boolean(req.body?.skip_inline_tts) ||
+        req.query?.include_audio === '0' ||
+        req.query?.skip_inline_tts === 'true';
+      const cachedAudio = skipInlineAudio ? null : getPreCachedSarahAudio(presetKey);
+      const activityId = req.method === 'POST' || isTwimlRequest ? uid() : null;
+
+      // Update in-memory session map immediately (0ms)
+      const initState = {
+        history: [{ speaker: 'sarah' as const, text: openingGreeting }],
+        lead_id: (req.body?.lead_id || req.query?.lead_id || memSession.lead_id || undefined) as string | undefined,
+        prospect_name: callerName,
+        prospect_phone: callerPhone,
+        address: callerAddress,
+        state: callerState,
+        how_heard: callerHowHeard,
+        product_interest: productLine,
+      };
+      inboundCallHistoryMap.set(callSessionKey, initState);
+
+      // Run all CRM lead lookups, session saves, activity logging, and SSE notifications asynchronously AFTER answering!
+      if (req.method === 'POST' || isTwimlRequest) {
+        void (async () => {
+          try {
+            let asyncLeadId = initState.lead_id || null;
+            if (callerPhone || callerName || callerAddress) {
+              const upsertedId = await upsertReceptionistLeadFromContext(
+                {
+                  mode: 'inbound',
+                  lead_id: asyncLeadId || undefined,
+                  prospect_name: callerName,
+                  prospect_phone: callerPhone,
+                  address: callerAddress,
+                  state: callerState,
+                  how_heard: callerHowHeard,
+                  product_interest: productLine,
+                  source_channel: 'call_in_lead',
+                },
+                req.body?.notes ||
+                  `Inbound call answered on 1st ring on (480) 331-9455 (${isAfterHours ? 'After-Hours Greeting' : 'Business-Hours Receptionist'})`
+              );
+              if (upsertedId) asyncLeadId = upsertedId;
+            }
+            await saveSarahCallSession(callSessionKey, { ...initState, lead_id: asyncLeadId || undefined });
+            if (activityId) {
+              await insert('activities', {
+                id: activityId,
+                type: 'call',
+                subject: `🎧 Sarah Inbound Call on (480) 331-9455 (${isAfterHours ? 'After Hours' : 'Business Hours'}) — ${callerName || callerPhone || 'Call-In Lead'}`,
+                body: `Inbound call answered immediately on 1st ring by Sarah on (480) 331-9455 (+14803319455).\nRouting Mode: ${isAfterHours ? 'AFTER_HOURS_CLOSED_GREETING' : 'BUSINESS_HOURS_INTERACTIVE'}\nOffice Hours (${workHoursStatus.timezone}): ${workHoursStatus.workHoursLabel} — Current Time: ${workHoursStatus.localTimeDisplay}\nCaller: ${callerName || 'Caller'} (${callerPhone || 'Unknown'})\nSarah Spoke: "${openingGreeting}"`,
+                related_type: 'lead',
+                related_id: asyncLeadId,
+                user_id: SARAH_AI_USER_ID,
+                status: 'Completed',
+                completed: true,
+                direction: 'inbound',
+                phone: callerPhone || '+14803319455',
+                provider: 'google_voice_ai',
+                disposition_id: 'contacted_interested',
+                disposition: isAfterHours
+                  ? `Sarah Inbound — After-Hours Closed Greeting (${workHoursStatus.localTimeDisplay})`
+                  : 'Sarah Inbound — Answered on 1st Ring on (480) 331-9455',
+                duration_sec: isAfterHours ? 18 : 45,
+                meta: {
+                  mode: 'inbound_receptionist',
+                  routing_mode: isAfterHours ? 'after_hours' : 'business_hours',
+                  is_after_hours: isAfterHours,
+                  line: '(480) 331-9455',
+                  line_e164: '+14803319455',
+                  answered_immediately: true,
+                  ring_delay_ms: 0,
+                  work_hours: workHoursStatus.workHoursLabel,
+                  work_hours_status: workHoursStatus,
+                  caller_phone: callerPhone,
+                  caller_name: callerName,
+                  lead_id: asyncLeadId,
+                  receptionist_reply: openingGreeting,
+                },
+              });
+            }
+            publish('inbox', 'inbound_call_ringing', {
+              call_id: callSessionKey,
+              line: '(480) 331-9455',
+              line_e164: '+14803319455',
+              caller_phone: callerPhone,
+              caller_name: callerName,
+              lead_id: asyncLeadId,
+              reply: openingGreeting,
+              routing_mode: isAfterHours ? 'after_hours' : 'business_hours',
+              answered_immediately: true,
+            });
+          } catch {
+            // background logging errors never affect active call audio
+          }
+        })();
+      }
+
+      if (isTwimlRequest) {
+        res.setHeader('Content-Type', 'text/xml; charset=utf-8');
+        if (isAfterHours) {
+          // After-Hours TwiML: Answer immediately on 1st ring, play female Vindemiatrix closed greeting, hang up cleanly
+          return res.status(200).send(
+            `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Play>${escapeXml(audioPlayUrl)}</Play>\n  <Hangup/>\n</Response>`
+          );
+        }
+        // Business-Hours TwiML: Answer immediately on 1st ring, play female Vindemiatrix greeting inside <Gather> with zero <Pause>
+        const actionUrl = `/api/sarah/inbound?format=twiml&session_id=${encodeURIComponent(callSessionKey)}`;
+        return res.status(200).send(
+          `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Gather input="speech dtmf" speechTimeout="auto" language="en-US" action="${escapeXml(actionUrl)}" method="POST">\n    <Play>${escapeXml(audioPlayUrl)}</Play>\n  </Gather>\n  <Redirect method="POST">${escapeXml(`${actionUrl}&timeout=1`)}</Redirect>\n</Response>`
+        );
+      }
+
+      return res.json({
+        ok: true,
+        success: true,
+        status: 'answered_internally',
+        answered_immediately: true,
+        answered_internally: true,
+        cell_phone_triggered: false,
+        speaker_triggered: false,
+        wait_for_greeting: false,
+        ring_delay_ms: 0,
+        response_latency_ms: Date.now() - startedAtMs,
+        routing_mode: isAfterHours ? 'after_hours' : 'business_hours',
+        is_after_hours: isAfterHours,
+        should_hangup: isAfterHours,
+        session_id: callSessionKey,
+        receptionist: 'Sarah',
+        receptionist_name: 'Sarah',
+        voice: 'Vindemiatrix',
+        voice_gender: 'female',
+        work_hours: workHoursStatus.workHoursLabel,
+        work_hours_status: workHoursStatus,
+        warm_transfers_allowed_now: workHoursStatus.isOpen,
+        lead_source: 'Call-In Lead',
+        lead_id: initState.lead_id || null,
+        line: '(480) 331-9455',
+        line_e164: '+14803319455',
+        line_number: '+14803319455',
+        display_number: '(480) 331-9455',
+        caller_phone: callerPhone,
+        caller_name: callerName,
+        caller_address: callerAddress,
+        caller_state: callerState,
+        how_heard: callerHowHeard || null,
+        first_sentence: openingGreeting,
+        reply: openingGreeting,
+        audio_url: `/api/sarah/audio.wav?preset=${presetKey}`,
+        audio_base64: cachedAudio?.audio_base64 || null,
+        audio_mime: 'audio/wav',
+        transfer_phone_number: '+16024569681',
+        directory_count: IWG_TEAM_DIRECTORY.length,
+        transfer_list: STATIC_TRANSFER_LIST,
+        directory: IWG_TEAM_DIRECTORY,
+        on_warm_transfer: false,
+        telephony_provider: 'google_voice',
+        google_voice_inbox_url: 'https://voice.google.com/u/0/calls',
+        sarah_live_ws: '/api/sarah/live?mode=inbound',
+        activity_id: activityId,
+        transfer_result: null,
+        appointment_result: null,
+      });
+    }
+
+    // =========================================================================
+    // SUBSEQUENT CONVERSATIONAL TURN OR EXPLICIT TRANSFER / APPOINTMENT ACTION
+    // =========================================================================
+    const [dir, cfg, dbSession] = await Promise.all([
+      getInboundDirectory(),
+      getSarahDialerConfig(),
+      loadSarahCallSession(callSessionKey),
+    ]);
+    const prevSession: any = dbSession || memSession || { history: [] };
+
     let transferResult: any = null;
     let appointmentResult: any = null;
     let activityId: string | null = null;
     let inboundLeadId: string | null =
       req.body?.lead_id || req.query?.lead_id || prevSession.lead_id || null;
 
-    const defaultOpeningSentence =
-      'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
+    const defaultOpeningSentence = workHoursStatus.isOpen
+      ? buildBusinessHoursGreeting()
+      : buildAfterHoursGreeting();
     let spokenReply = defaultOpeningSentence;
     let turnAudioBase64: string | null = null;
     let turnAudioMime = 'audio/wav';
@@ -187,8 +401,68 @@ sarahPublic.all('/inbound', async (req, res) => {
     let resolvedCallerState = callerState;
     let resolvedHowHeard = callerHowHeard;
 
+    // Strict After-Hours Guard on follow-up speech (when no explicit appointment booking action was passed):
+    // Never run full intake or hallucinate advisor availability after hours!
+    if (!workHoursStatus.isOpen && !appointmentType && !requestedPerson) {
+      spokenReply = buildAfterHoursGreeting();
+      const cachedAfter = getPreCachedSarahAudio('after_hours');
+      turnAudioBase64 = isTwimlRequest || req.body?.skip_inline_tts ? null : cachedAfter.audio_base64;
+      void (async () => {
+        try {
+          if (callerPhone || callerName || userSpeech) {
+            await upsertReceptionistLeadFromContext(
+              {
+                mode: 'inbound',
+                lead_id: inboundLeadId || undefined,
+                prospect_name: callerName,
+                prospect_phone: callerPhone,
+                address: callerAddress,
+                state: callerState,
+                source_channel: 'call_in_lead',
+              },
+              `After-hours callback/message on (480) 331-9455: "${userSpeech || 'Called after hours'}"`
+            );
+          }
+        } catch {}
+      })();
+
+      const afterHoursAudioUrl = `${baseUrl}/api/sarah/audio.wav?preset=after_hours`;
+      if (isTwimlRequest) {
+        res.setHeader('Content-Type', 'text/xml; charset=utf-8');
+        return res.status(200).send(
+          `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Play>${escapeXml(afterHoursAudioUrl)}</Play>\n  <Hangup/>\n</Response>`
+        );
+      }
+      return res.json({
+        ok: true,
+        success: true,
+        status: 'answered_internally',
+        answered_immediately: true,
+        ring_delay_ms: 0,
+        response_latency_ms: Date.now() - startedAtMs,
+        routing_mode: 'after_hours',
+        is_after_hours: true,
+        should_hangup: true,
+        session_id: callSessionKey,
+        receptionist: 'Sarah',
+        receptionist_name: 'Sarah',
+        voice: 'Vindemiatrix',
+        voice_gender: 'female',
+        work_hours: workHoursStatus.workHoursLabel,
+        work_hours_status: workHoursStatus,
+        warm_transfers_allowed_now: false,
+        line: '(480) 331-9455',
+        line_e164: '+14803319455',
+        caller_phone: resolvedCallerPhone,
+        caller_name: resolvedCallerName,
+        reply: spokenReply,
+        audio_url: '/api/sarah/audio.wav?preset=after_hours',
+        audio_base64: turnAudioBase64,
+        audio_mime: turnAudioMime,
+      });
+    }
+
     if (req.method === 'POST' || userSpeech || isTwimlRequest) {
-      // Automatically create or update the Call-In Lead in CRM when caller details are available
       if (callerPhone || callerName || callerAddress) {
         const upsertedId = await upsertReceptionistLeadFromContext(
           {
@@ -202,16 +476,10 @@ sarahPublic.all('/inbound', async (req, res) => {
             product_interest: productLine,
             source_channel: 'call_in_lead',
           },
-          req.body?.notes || 'Inbound call picked up internally on 1st ring on (480) 331-9455 by Cloned App Receptionist'
+          req.body?.notes || 'Inbound call picked up internally on 1st ring on (480) 331-9455 by Sarah'
         );
         if (upsertedId) inboundLeadId = upsertedId;
       }
-
-      const workHoursStatus = checkReceptionistWorkHours({
-        mode: 'inbound',
-        force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
-        simulated_now_iso: String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined,
-      });
 
       if (userSpeech) {
         const turnResult = await handleSarahHttpTurn({
@@ -230,8 +498,8 @@ sarahPublic.all('/inbound', async (req, res) => {
             how_heard: callerHowHeard,
             product_interest: productLine,
             on_warm_transfer: Boolean(cfg.is_on_warm_transfer),
-            force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
-            simulated_now_iso: String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined,
+            force_work_hours: parsedForceWorkHours,
+            simulated_now_iso: simulatedNowIso,
           },
         });
         if (turnResult?.reply) {
@@ -264,9 +532,8 @@ sarahPublic.all('/inbound', async (req, res) => {
           product_interest: turnResult?.product_interest || productLine,
         };
         inboundCallHistoryMap.set(callSessionKey, nextState);
-        await saveSarahCallSession(callSessionKey, nextState);
+        void saveSarahCallSession(callSessionKey, nextState).catch(() => {});
       } else if (isGatherTimeout) {
-        // Never repeat the opening greeting if the caller hasn't spoken yet — ask a gentle follow-up once!
         spokenReply =
           'I am still right here with you. Would you like to set an appointment with our Principal Broker, King Amen Ra, or may I get your full name, phone number, and street address?';
         if (!isTwimlRequest && !req.body?.skip_inline_tts) {
@@ -274,25 +541,10 @@ sarahPublic.all('/inbound', async (req, res) => {
           turnAudioBase64 = tts.audio_base64;
           turnAudioMime = tts.audio_mime || 'audio/wav';
         }
-      } else {
-        // Initial 1st-ring pickup: get pre-cached Vindemiatrix greeting WAV in 0ms and reset session history cleanly
-        if (!isTwimlRequest && !req.body?.skip_inline_tts) {
-          const tts = await synthesizeSarahNeuralAudio(spokenReply);
-          turnAudioBase64 = tts.audio_base64;
-          turnAudioMime = tts.audio_mime || 'audio/wav';
-        }
-        const initState = {
-          history: [{ speaker: 'sarah' as const, text: spokenReply }],
-          lead_id: inboundLeadId || undefined,
-          prospect_name: callerName,
-          prospect_phone: callerPhone,
-          address: callerAddress,
-          state: callerState,
-          how_heard: callerHowHeard,
-          product_interest: productLine,
-        };
-        inboundCallHistoryMap.set(callSessionKey, initState);
-        await saveSarahCallSession(callSessionKey, initState);
+      } else if (!isTwimlRequest && !req.body?.skip_inline_tts) {
+        const cached = getPreCachedSarahAudio(workHoursStatus.isOpen ? 'business_greeting' : 'after_hours');
+        turnAudioBase64 = cached.audio_base64;
+        turnAudioMime = cached.audio_mime;
       }
 
       if (requestedPerson && !cfg.is_on_warm_transfer && !transferResult) {
@@ -315,8 +567,8 @@ sarahPublic.all('/inbound', async (req, res) => {
             address: callerAddress,
             state: req.body?.state || 'AZ',
             product_interest: productLine,
-            force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
-            simulated_now_iso: String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined,
+            force_work_hours: parsedForceWorkHours,
+            simulated_now_iso: simulatedNowIso,
           }
         );
       }
@@ -333,7 +585,7 @@ sarahPublic.all('/inbound', async (req, res) => {
             appointment_type: String(appointmentType || 'Telephone'),
             preferred_datetime: String(preferredDatetime || 'Tomorrow at 10:00 AM'),
             state: req.body?.state || 'AZ',
-            notes: req.body?.notes || 'Booked by Receptionist on inbound call to (480) 331-9455',
+            notes: req.body?.notes || 'Booked by Sarah on inbound call to (480) 331-9455',
           },
           {
             mode: 'inbound',
@@ -351,8 +603,8 @@ sarahPublic.all('/inbound', async (req, res) => {
 
       const inboundAct = await insert('activities', {
         type: 'call',
-        subject: `🎧 Receptionist Inbound Call on (480) 331-9455 — ${callerName || callerPhone || 'Call-In Lead'}`,
-        body: `Inbound call answered immediately by Receptionist on (480) 331-9455 (+14803319455).\nOfficial Work Hours: ${RECEPTIONIST_WORK_HOURS_LABEL} (Open Now: ${workHoursStatus.isOpen ? 'YES' : 'NO — No Warm Transfers Outside Work Hours'})\nLead Source Tag: Call-In Lead\nCaller: ${callerName || 'Pending Name'} (${callerPhone || 'Pending Phone'})${callerAddress ? `\nAddress: ${callerAddress}` : ''}${userSpeech ? `\nCaller Said: "${userSpeech}"\nReceptionist Replied: "${spokenReply}"` : ''}${transferResult?.success ? `\nLive Outbound Call to ${transferResult.recipient_name} (${transferResult.recipient_phone}) Initiated (Call ID: ${transferResult.sarah_call_id || 'Pending'}): "${transferResult.private_whisper_delivered}"` : transferResult?.outside_work_hours ? `\nWarm Transfer Blocked Outside Work Hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Transitioned to Appointment Booking` : ''}${appointmentResult?.success ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
+        subject: `🎧 Sarah Inbound Call on (480) 331-9455 — ${callerName || callerPhone || 'Call-In Lead'}`,
+        body: `Inbound call answered immediately by Sarah on (480) 331-9455 (+14803319455).\nOfficial Work Hours: ${workHoursStatus.workHoursLabel} (Open Now: ${workHoursStatus.isOpen ? 'YES' : 'NO — After Hours'})\nLead Source Tag: Call-In Lead\nCaller: ${callerName || 'Pending Name'} (${callerPhone || 'Pending Phone'})${callerAddress ? `\nAddress: ${callerAddress}` : ''}${userSpeech ? `\nCaller Said: "${userSpeech}"\nSarah Replied: "${spokenReply}"` : ''}${transferResult?.success ? `\nLive Outbound Call to ${transferResult.recipient_name} (${transferResult.recipient_phone}) Initiated (Call ID: ${transferResult.sarah_call_id || 'Pending'}): "${transferResult.private_whisper_delivered}"` : transferResult?.outside_work_hours ? `\nWarm Transfer Blocked Outside Work Hours (${workHoursStatus.workHoursLabel})` : ''}${appointmentResult?.success ? `\nAppointment Scheduled: ${appointmentResult.appointment_type} on ${appointmentResult.preferred_datetime}` : ''}`,
         related_type: 'lead',
         related_id: appointmentResult?.lead_id || inboundLeadId || null,
         user_id: SARAH_AI_USER_ID,
@@ -363,12 +615,12 @@ sarahPublic.all('/inbound', async (req, res) => {
         provider: 'google_voice_ai',
         disposition_id: appointmentResult?.success ? 'appointment_set' : transferResult?.success ? 'warm_transfer_success' : 'contacted_interested',
         disposition: appointmentResult?.success
-          ? `Receptionist Inbound — ${appointmentResult.appointment_type} Appointment Booked`
+          ? `Sarah Inbound — ${appointmentResult.appointment_type} Appointment Booked`
           : transferResult?.success
-          ? `Receptionist Inbound — Live Call to ${transferResult.recipient_name} (${transferResult.recipient_phone})`
+          ? `Sarah Inbound — Live Call to ${transferResult.recipient_name} (${transferResult.recipient_phone})`
           : transferResult?.outside_work_hours
-          ? `Receptionist Inbound — Outside Work Hours (${RECEPTIONIST_WORK_HOURS_LABEL}) — Appointment Offered`
-          : 'Receptionist Inbound — Answered Immediately on (480) 331-9455',
+          ? `Sarah Inbound — Outside Work Hours (${workHoursStatus.workHoursLabel})`
+          : 'Sarah Inbound — Answered Immediately on (480) 331-9455',
         duration_sec: 45,
         meta: {
           mode: 'inbound_receptionist',
@@ -377,7 +629,7 @@ sarahPublic.all('/inbound', async (req, res) => {
           line_e164: '+14803319455',
           answered_immediately: true,
           ring_delay_ms: 0,
-          work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
+          work_hours: workHoursStatus.workHoursLabel,
           work_hours_status: workHoursStatus,
           caller_phone: callerPhone,
           caller_name: callerName,
@@ -391,7 +643,6 @@ sarahPublic.all('/inbound', async (req, res) => {
       });
       activityId = inboundAct?.id || null;
 
-      // Broadcast real-time SSE notification so any open CRM browser window pops open & answers immediately!
       try {
         publish('inbox', 'inbound_call_ringing', {
           call_id: callSessionKey,
@@ -405,14 +656,9 @@ sarahPublic.all('/inbound', async (req, res) => {
           reply: spokenReply,
           answered_immediately: true,
         });
-      } catch {
-        // ignore SSE error
-      }
+      } catch {}
     }
 
-    // If called by a PSTN/SIP/Twilio/Telnyx/Google Voice forwarding trunk expecting TwiML/TeXML voice XML,
-    // play Sarah's natural Vindemiatrix voice WAV (<Play>) inside the call stream without Chrome or speaker!
-    const baseUrl = `${req.protocol || 'https'}://${req.get('host') || 'iwillglobal.com'}`;
     const audioPlayUrl = `${baseUrl}/api/sarah/audio.wav?text=${encodeURIComponent(spokenReply)}`;
 
     if (isTwimlRequest) {
@@ -422,7 +668,7 @@ sarahPublic.all('/inbound', async (req, res) => {
         const holdText =
           transferResult.hold_message ||
           spokenReply ||
-          'Please hold for just a moment while I call King Amen Ra on 602-456-9681 and connect you.';
+          'Please hold for just a moment while I call King Amen Ra on his line and connect you.';
         const holdAudioUrl = `${baseUrl}/api/sarah/audio.wav?text=${encodeURIComponent(holdText)}`;
         return res.status(200).send(
           `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Play>${escapeXml(holdAudioUrl)}</Play>\n  <Dial callerId="+14803319455" timeout="25">${escapeXml(targetPhone)}</Dial>\n</Response>`
@@ -437,12 +683,6 @@ sarahPublic.all('/inbound', async (req, res) => {
       );
     }
 
-    const currentWorkHours = checkReceptionistWorkHours({
-      mode: 'inbound',
-      force_work_hours: Boolean(req.body?.force_work_hours || req.query?.force_work_hours),
-      simulated_now_iso: String(req.body?.simulated_now_iso || req.query?.simulated_now_iso || '') || undefined,
-    });
-
     res.json({
       ok: true,
       success: true,
@@ -453,13 +693,18 @@ sarahPublic.all('/inbound', async (req, res) => {
       speaker_triggered: false,
       wait_for_greeting: false,
       ring_delay_ms: 0,
+      response_latency_ms: Date.now() - startedAtMs,
+      routing_mode: workHoursStatus.isOpen ? 'business_hours' : 'after_hours',
+      is_after_hours: !workHoursStatus.isOpen,
+      should_hangup: !workHoursStatus.isOpen && !appointmentResult?.success,
       session_id: callSessionKey,
-      receptionist: 'Receptionist',
-      receptionist_name: 'Receptionist',
+      receptionist: 'Sarah',
+      receptionist_name: 'Sarah',
       voice: 'Vindemiatrix',
-      work_hours: RECEPTIONIST_WORK_HOURS_LABEL,
-      work_hours_status: currentWorkHours,
-      warm_transfers_allowed_now: currentWorkHours.isOpen && !cfg.is_on_warm_transfer,
+      voice_gender: 'female',
+      work_hours: workHoursStatus.workHoursLabel,
+      work_hours_status: workHoursStatus,
+      warm_transfers_allowed_now: workHoursStatus.isOpen && !cfg.is_on_warm_transfer,
       lead_source: 'Call-In Lead',
       lead_id: inboundLeadId,
       line: '(480) 331-9455',

@@ -39,10 +39,14 @@ export const config = {
   agency: {
     name: 'I Will Global',
     phone: '(480) 331-9455',
+    phoneE164: '+14803319455',
     email: 'info@iwillglobal.com',
     website: 'https://iwillglobal.com',
     address: '3033 N Central Ave, Phoenix, AZ 85012',
-    timezone: 'America/Phoenix',
+    timezone: process.env.OFFICE_TIMEZONE || 'America/Phoenix',
+    officeHoursStart: process.env.OFFICE_HOURS_START || '08:00',
+    officeHoursEnd: process.env.OFFICE_HOURS_END || '20:00',
+    officeDays: process.env.OFFICE_DAYS || '1,2,3,4,5',
   },
 };
 
