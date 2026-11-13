@@ -2,10 +2,30 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
 
-const API_BASE = process.env.APP_URL || 'https://voice.iwillglobal.com';
+const PUBLIC_API_BASE = process.env.APP_URL || 'https://voice.iwillglobal.com';
+const API_BASES = Array.from(
+  new Set([
+    process.env.LOCAL_API_URL || 'http://127.0.0.1:4000',
+    PUBLIC_API_BASE,
+  ])
+);
 const BRIDGE_TOKEN = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-9455';
-const REGION = process.env.VERCEL_REGION || 'iad1';
-const INSTANCE_ID = `cloud-${REGION}-${randomUUID().slice(0, 8)}`;
+const REGION = process.env.GOOGLE_CLOUD_REGION || 'us-west1';
+const INSTANCE_ID = `gcloud-${REGION}-${randomUUID().slice(0, 8)}`;
+
+async function fetchDaemonApi(pathname, init = {}) {
+  let lastErr = null;
+  for (const base of API_BASES) {
+    try {
+      const res = await fetch(`${base}${pathname}`, init);
+      if (res.ok) return res;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (lastErr) throw lastErr;
+  return null;
+}
 
 const webrtcBridgeCode = readFileSync(new URL('./webrtc-bridge.js', import.meta.url), 'utf8');
 const contentControllerCode = readFileSync(new URL('./content.js', import.meta.url), 'utf8');
@@ -26,10 +46,10 @@ process.on('SIGTERM', async () => {
 
 async function fetchCloudCookies() {
   try {
-    const res = await fetch(`${API_BASE}/api/sarah/gv-session-sync`, {
+    const res = await fetchDaemonApi('/api/sarah/gv-session-sync', {
       headers: { 'x-iwg-bridge-token': BRIDGE_TOKEN },
     });
-    if (!res.ok) return [];
+    if (!res || !res.ok) return [];
     const data = await res.json();
     return Array.isArray(data?.cookies) ? data.cookies : [];
   } catch (err) {
@@ -41,7 +61,7 @@ async function fetchCloudCookies() {
 async function saveRefreshedCookies(cookies) {
   try {
     if (!Array.isArray(cookies) || cookies.length === 0) return;
-    await fetch(`${API_BASE}/api/sarah/gv-session-sync`, {
+    await fetchDaemonApi('/api/sarah/gv-session-sync', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -57,14 +77,14 @@ async function saveRefreshedCookies(cookies) {
 
 async function reportDaemonHeartbeat(extra = {}) {
   try {
-    await fetch(`${API_BASE}/api/sarah/gv-heartbeat`, {
+    await fetchDaemonApi('/api/sarah/gv-heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         runner: 'cloud-daemon',
         instanceId: INSTANCE_ID,
         region: REGION,
-        extensionBuild: '2026-11-09-v10',
+        extensionBuild: '2026-11-10-v12',
         ...extra,
       }),
     });
@@ -109,6 +129,11 @@ async function runBrowserSession(cookies) {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--disable-extensions',
+      '--renderer-process-limit=2',
+      '--js-flags=--max-old-space-size=256',
       '--autoplay-policy=no-user-gesture-required',
       '--use-fake-ui-for-media-stream',
       '--disable-background-timer-throttling',
@@ -138,7 +163,7 @@ async function runBrowserSession(cookies) {
       runner: 'cloud-daemon',
       instanceId: INSTANCE_ID,
       region: REGION,
-      apiBase: API_BASE,
+      apiBase: PUBLIC_API_BASE,
     })};`;
 
     // Inject Zero-Echo WebRTC Bridge BEFORE any page scripts run
@@ -197,7 +222,7 @@ async function runBrowserSession(cookies) {
 }
 
 async function main() {
-  console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Starting 24/7 Cloud Receptionist for +14803319455 -> ${API_BASE}`);
+  console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Starting 24/7 Cloud Receptionist for +14803319455 -> ${PUBLIC_API_BASE}`);
   while (!shuttingDown) {
     const cookies = await fetchCloudCookies();
     if (!cookies || cookies.length === 0) {

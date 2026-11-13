@@ -1,16 +1,44 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Automatically load root .env if started from server/ workspace without --env-file=..
-try {
-  for (const rel of ['../../.env', '../.env']) {
-    const p = fileURLToPath(new URL(rel, import.meta.url));
-    if (existsSync(p) && typeof (process as any).loadEnvFile === 'function') {
-      (process as any).loadEnvFile(p);
+function loadEnvPath(p: string) {
+  if (!existsSync(p)) return;
+  if (typeof (process as any).loadEnvFile === 'function') {
+    (process as any).loadEnvFile(p);
+    return;
+  }
+  const raw = readFileSync(p, 'utf8');
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (process.env[key] === undefined) {
+      process.env[key] = val;
     }
   }
+}
+
+// Automatically load .env from repo root or server/ whether started via api/index.js or server/src/index.ts
+try {
+  const candidates = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), 'server/.env'),
+    fileURLToPath(new URL('../.env', import.meta.url)),
+    fileURLToPath(new URL('../server/.env', import.meta.url)),
+    fileURLToPath(new URL('../../.env', import.meta.url)),
+  ];
+  for (const p of candidates) {
+    loadEnvPath(p);
+  }
 } catch {
-  // ignore in serverless environments where env vars are injected directly
+  // ignore in environments where env vars are injected directly
 }
 
 // Central configuration. All integrations are optional; missing keys put features into demo mode.

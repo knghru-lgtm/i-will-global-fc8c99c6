@@ -14,18 +14,45 @@ var __export = (target, all) => {
 };
 
 // server/src/config.ts
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+function loadEnvPath(p) {
+  if (!existsSync(p)) return;
+  if (typeof process.loadEnvFile === "function") {
+    process.loadEnvFile(p);
+    return;
+  }
+  const raw = readFileSync(p, "utf8");
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    if (val.startsWith('"') && val.endsWith('"') || val.startsWith("'") && val.endsWith("'")) {
+      val = val.slice(1, -1);
+    }
+    if (process.env[key] === void 0) {
+      process.env[key] = val;
+    }
+  }
+}
 var config, isAIEnabled, isGoogleEnabled, TPMO_DISCLAIMER;
 var init_config = __esm({
   "server/src/config.ts"() {
     "use strict";
     try {
-      for (const rel of ["../../.env", "../.env"]) {
-        const p = fileURLToPath(new URL(rel, import.meta.url));
-        if (existsSync(p) && typeof process.loadEnvFile === "function") {
-          process.loadEnvFile(p);
-        }
+      const candidates = [
+        path.resolve(process.cwd(), ".env"),
+        path.resolve(process.cwd(), "server/.env"),
+        fileURLToPath(new URL("../.env", import.meta.url)),
+        fileURLToPath(new URL("../server/.env", import.meta.url)),
+        fileURLToPath(new URL("../../.env", import.meta.url))
+      ];
+      for (const p of candidates) {
+        loadEnvPath(p);
       }
     } catch {
     }
@@ -3437,8 +3464,8 @@ var init_seed = __esm({
 });
 
 // server/src/db/index.ts
-import { readFileSync, mkdirSync, existsSync as existsSync2, unlinkSync } from "node:fs";
-import path from "node:path";
+import { readFileSync as readFileSync2, mkdirSync, existsSync as existsSync2, unlinkSync } from "node:fs";
+import path2 from "node:path";
 import { randomUUID as randomUUID2 } from "node:crypto";
 async function createAdapter() {
   if (config.databaseUrl) {
@@ -3456,7 +3483,7 @@ async function createAdapter() {
   const dir = process.env.NODE_ENV === "test" ? "memory://" : process.env.VERCEL || process.env.RENDER ? "/tmp/iwg-pg" : config.dataDir;
   if (!dir.startsWith("memory://")) {
     mkdirSync(dir, { recursive: true });
-    const pidFile = path.join(dir, "postmaster.pid");
+    const pidFile = path2.join(dir, "postmaster.pid");
     if (existsSync2(pidFile)) {
       try {
         unlinkSync(pidFile);
@@ -3470,7 +3497,7 @@ async function createAdapter() {
   } catch {
     const recoveryDir = `${dir}-live`;
     mkdirSync(recoveryDir, { recursive: true });
-    const recPid = path.join(recoveryDir, "postmaster.pid");
+    const recPid = path2.join(recoveryDir, "postmaster.pid");
     if (existsSync2(recPid)) {
       try {
         unlinkSync(recPid);
@@ -3498,12 +3525,12 @@ function loadSchemaSql() {
   ];
   for (const url of candidates) {
     try {
-      return readFileSync(url, "utf8");
+      return readFileSync2(url, "utf8");
     } catch {
     }
   }
-  const cwdFallback = path.resolve(process.cwd(), "server/src/db/schema.sql");
-  return readFileSync(cwdFallback, "utf8");
+  const cwdFallback = path2.resolve(process.cwd(), "server/src/db/schema.sql");
+  return readFileSync2(cwdFallback, "utf8");
 }
 async function getDb() {
   if (adapter) return adapter;
@@ -5003,7 +5030,7 @@ import cors from "cors";
 import http from "node:http";
 import { WebSocketServer } from "ws";
 import { existsSync as existsSync4 } from "node:fs";
-import path2 from "node:path";
+import path3 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // server/src/routes/records.ts
@@ -14769,7 +14796,7 @@ function attachSarahWebSocket(server) {
   });
   return wss;
 }
-var isMain = Boolean(process.argv[1]) && path2.resolve(fileURLToPath3(import.meta.url)).toLowerCase() === path2.resolve(process.argv[1]).toLowerCase();
+var isMain = Boolean(process.argv[1]) && path3.resolve(fileURLToPath3(import.meta.url)).toLowerCase() === path3.resolve(process.argv[1]).toLowerCase();
 if (isMain) {
   const app = createApp();
   const server = http.createServer(app);
