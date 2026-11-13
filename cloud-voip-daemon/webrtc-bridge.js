@@ -21,6 +21,21 @@
   let lastSarahEndedTs = 0;
   const hookedRemoteTrackIds = new Set();
 
+  function notifyCallConnectionState(connected, reason) {
+    try {
+      document.documentElement?.setAttribute('data-iwg-webrtc-connected', connected ? 'true' : 'false');
+      window.postMessage(
+        {
+          __iwg_webrtc__: true,
+          type: connected ? 'IWG_WEBRTC_CALL_CONNECTED' : 'IWG_WEBRTC_CALL_ENDED',
+          reason: reason || '',
+          ts: Date.now(),
+        },
+        '*'
+      );
+    } catch {}
+  }
+
   function ensureAudioGraph() {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -99,6 +114,10 @@
     const track = audioTracks[0];
     if (!track || hookedRemoteTrackIds.has(track.id)) return;
     hookedRemoteTrackIds.add(track.id);
+    notifyCallConnectionState(true, 'remote_audio_track_attached');
+    track.addEventListener?.('ended', () => {
+      notifyCallConnectionState(false, 'remote_audio_track_ended');
+    });
 
     const ctx = ensureAudioGraph();
     if (!ctx) return;
@@ -215,6 +234,21 @@
     const OrigPeerConnection = window.RTCPeerConnection;
     const WrappedPeerConnection = function (...args) {
       const pc = new OrigPeerConnection(...args);
+      ensureAudioGraph();
+
+      const onStateChange = () => {
+        try {
+          const cs = pc.connectionState;
+          const ice = pc.iceConnectionState;
+          if (cs === 'connected' || ice === 'connected' || ice === 'completed') {
+            notifyCallConnectionState(true, `pc_${cs || ice}`);
+          } else if (cs === 'closed' || cs === 'failed' || cs === 'disconnected' || ice === 'closed' || ice === 'failed') {
+            notifyCallConnectionState(false, `pc_${cs || ice}`);
+          }
+        } catch {}
+      };
+      pc.addEventListener('connectionstatechange', onStateChange);
+      pc.addEventListener('iceconnectionstatechange', onStateChange);
 
       pc.addEventListener('track', (ev) => {
         try {
@@ -366,6 +400,8 @@
     if (!data || !data.__iwg_webrtc__) return;
     if (data.type === 'IWG_SARAH_PLAY_WAV') {
       handlePlayWavRequest(data.base64, data.requestId);
+    } else if (data.type === 'IWG_RESUME_AUDIO') {
+      ensureAudioGraph();
     } else if (data.type === 'IWG_SARAH_STOP_WAV') {
       sarahSpeakingNow = false;
       lastSarahEndedTs = Date.now();

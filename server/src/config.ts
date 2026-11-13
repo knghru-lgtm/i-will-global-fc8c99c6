@@ -22,14 +22,24 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || '',
   dataDir: process.env.DATA_DIR || fileURLToPath(new URL('../data/pg', import.meta.url)),
   gemini: {
-    apiKey: process.env.GEMINI_API_KEY || '',
+    apiKey: process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY || '',
     model:
       process.env.GEMINI_MODEL &&
-      process.env.GEMINI_MODEL !== 'gemini-2.5-flash' &&
-      process.env.GEMINI_MODEL !== 'gemini-3.5-flash'
+        process.env.GEMINI_MODEL !== 'gemini-2.5-flash' &&
+        process.env.GEMINI_MODEL !== 'gemini-3.5-flash'
         ? process.env.GEMINI_MODEL
         : 'gemini-3.8-flash',
+    liveModel: process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live',
     ttsModel: process.env.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts',
+  },
+  telephony: {
+    publicHostFqdn:
+      process.env.PUBLIC_HOST_FQDN ||
+      'voice.iwillglobal.com',
+    googleVoiceNumber: process.env.GOOGLE_VOICE_NUMBER || '+14803319455',
+    cloudHeadlessOnly:
+      process.env.CLOUD_TELEPHONY_MODE === 'true' ||
+      process.platform !== 'win32',
   },
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID || '',
@@ -45,7 +55,7 @@ export const config = {
     address: '3033 N Central Ave, Phoenix, AZ 85012',
     timezone: process.env.OFFICE_TIMEZONE || 'America/Phoenix',
     officeHoursStart: process.env.OFFICE_HOURS_START || '08:00',
-    officeHoursEnd: process.env.OFFICE_HOURS_END || '20:00',
+    officeHoursEnd: process.env.OFFICE_HOURS_END || '17:00',
     officeDays: process.env.OFFICE_DAYS || '1,2,3,4,5',
   },
 };

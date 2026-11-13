@@ -803,7 +803,16 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         if (!ctxOverride?.skip_transcript_append) {
           appendNewTranscript('sarah', res.reply);
         }
-        playSarahResponseAudio(res.reply, res.audio_base64, res.audio_mime, res.rest_text);
+        await playSarahResponseAudio(res.reply, res.audio_base64, res.audio_mime, res.rest_text);
+        if (res?.should_hangup || res?.is_after_hours) {
+          try {
+            (window as any).SarahAndroidBridge?.endActiveCall?.();
+          } catch {}
+          setTimeout(() => {
+            endSession();
+          }, 300);
+          return;
+        }
         const lower = String(res.reply).toLowerCase();
         if (lower.includes('$1,788') || lower.includes('$2,400') || lower.includes('20%')) {
           setActiveScriptStep(2);
@@ -996,7 +1005,35 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       }
     } catch {}
 
-    // Immediately answer inbound/outbound call on Frame 0 so there is zero wait time!
+    // 1. Fire native Android bridge acceptRingingCallNow() (<10ms) BEFORE any AI/network work
+    try {
+      (window as any).SarahAndroidBridge?.acceptRingingCallNow?.();
+    } catch {}
+
+    // 2. Evaluate America/Phoenix (Mon-Fri, 8:00 AM - 5:00 PM MST) for Frame 0 greeting
+    const isPhoenixBusinessHours = (() => {
+      try {
+        if (typeof (window as any).SarahAndroidBridge?.isArizonaBusinessHours === 'function') {
+          return Boolean((window as any).SarahAndroidBridge.isArizonaBusinessHours());
+        }
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/Phoenix',
+          weekday: 'long',
+          hour: '2-digit',
+          minute: '2-digit',
+          hourCycle: 'h23',
+        }).formatToParts(new Date());
+        const weekday = parts.find((p) => p.type === 'weekday')?.value || 'Monday';
+        const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+        const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+        const isWeekday = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].includes(weekday);
+        const mins = hour * 60 + minute;
+        return isWeekday && mins >= 8 * 60 && mins < 17 * 60;
+      } catch {
+        return true;
+      }
+    })();
+
     const rawName = (ctx.prospect_name || '').trim();
     const isGeneric =
       !rawName ||
@@ -1005,10 +1042,15 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
     const immediateGreetingText =
       ctx.mode === 'outbound'
         ? `Hello ${greetFirst}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?`
-        : `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`;
+        : isPhoenixBusinessHours
+          ? `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`
+          : `Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.`;
 
     appendNewTranscript('sarah', immediateGreetingText);
     await sendHttpTurn('', { ...ctx, is_initial: true, skip_transcript_append: true });
+    if (ctx.mode !== 'outbound' && !isPhoenixBusinessHours) {
+      return;
+    }
     const topicToUse = initialPayload?.initialTopic || initialTopic;
     if (topicToUse) {
       appendNewTranscript('user', topicToUse);

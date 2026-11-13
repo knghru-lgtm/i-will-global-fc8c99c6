@@ -284,7 +284,17 @@ export const App: React.FC = () => {
       }
       setIsSarahVoiceOpen(true);
     };
+    const handleAndroidCallAnswered = (e: Event) => {
+      const detail = (e as CustomEvent<{ callerPhone?: string; isBusinessHours?: boolean }>).detail;
+      setSarahPayload({
+        mode: 'inbound',
+        phone: detail?.callerPhone || '',
+        state: 'AZ',
+      });
+      setIsSarahVoiceOpen(true);
+    };
     window.addEventListener('iwg-open-sarah-voice', handleOpenSarah);
+    window.addEventListener('iwg-android-call-answered', handleAndroidCallAnswered);
 
     // Support direct URL launch for outbound calls (e.g. ?sarah_call=4805550100&mode=outbound)
     try {
@@ -302,7 +312,10 @@ export const App: React.FC = () => {
       }
     } catch { }
 
-    return () => window.removeEventListener('iwg-open-sarah-voice', handleOpenSarah);
+    return () => {
+      window.removeEventListener('iwg-open-sarah-voice', handleOpenSarah);
+      window.removeEventListener('iwg-android-call-answered', handleAndroidCallAnswered);
+    };
   }, []);
   return (
     <AuthProvider>

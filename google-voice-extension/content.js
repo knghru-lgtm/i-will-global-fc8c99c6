@@ -1,15 +1,20 @@
 (function () {
-  if (typeof window !== 'undefined' && window.top && window !== window.top) {
-    return;
-  }
+  const IS_TOP_FRAME = typeof window === 'undefined' || !window.top || window === window.top;
   if (typeof window.__IWG_GV_RECEPTIONIST_CLEANUP__ === 'function') {
     try {
       window.__IWG_GV_RECEPTIONIST_CLEANUP__();
-    } catch {}
+    } catch { }
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
-  const EXTENSION_BUILD = '2026-11-09-v10';
+  const EXTENSION_BUILD = '2026-11-10-v12';
+  const SELECTORS = [
+    'button[aria-label*="Answer" i]',
+    'button[aria-label*="Accept" i]',
+    'button[data-call-action="answer"]',
+    'div[role="button"][aria-label*="Answer" i]',
+    '[aria-label*="Pick up" i]',
+  ];
   const cloudDaemonCfg =
     typeof window !== 'undefined' && window.__IWG_CLOUD_DAEMON_CONFIG__
       ? window.__IWG_CLOUD_DAEMON_CONFIG__
@@ -17,16 +22,21 @@
   const RUNNER_MODE = cloudDaemonCfg ? 'cloud-daemon' : 'chrome-extension';
   const OPENING_GREETING =
     'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
-  let afterHoursGreetingText =
-    'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 8 PM Arizona time. Please give us a call back during normal business hours, and we will be happy to assist you. Have a wonderful evening.';
+  const AFTER_HOURS_GREETING =
+    'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.';
 
   let autoAnswerEnabled = true;
   let standbyForCloud = false;
   let callActive = false;
+  let pendingAnswerAttempt = false;
+  let pendingAnswerStartedTs = 0;
+  let pendingCallerPhone = '';
+  let activeCallIsBusinessHours = true;
   let isSpeaking = false;
   let turnInFlight = false;
   let lastAnswerClickTs = 0;
   let lastCallStartTs = 0;
+  let lastCallEndedTs = 0;
   let lastSpeechEndedAt = 0;
   let lastSarahSpokenText = '';
   let totalCallsAnswered = 0;
@@ -34,18 +44,77 @@
   let activeAudio = null;
   let preloadedGreeting = null;
   let preloadedAfterHoursGreeting = null;
-  let configuredStartMin = 8 * 60;
-  let configuredEndMin = 20 * 60;
+
+  const phoenixFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Phoenix',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+
+  function nthWeekdayOfMonth(year, month1Based, targetDow, n) {
+    const firstDow = new Date(Date.UTC(year, month1Based - 1, 1)).getUTCDay();
+    return 1 + ((7 + targetDow - firstDow) % 7) + (n - 1) * 7;
+  }
+
+  function lastWeekdayOfMonth(year, month1Based, targetDow) {
+    const lastDate = new Date(Date.UTC(year, month1Based, 0));
+    const lastDom = lastDate.getUTCDate();
+    const lastDow = lastDate.getUTCDay();
+    return lastDom - ((7 + lastDow - targetDow) % 7);
+  }
+
+  function isObservedFixedHoliday(year, month, day, targetMonth, targetDay) {
+    if (month === targetMonth && day === targetDay) return true;
+    const actualDow = new Date(Date.UTC(year, targetMonth - 1, targetDay)).getUTCDay();
+    if (actualDow === 6) {
+      const obs = new Date(Date.UTC(year, targetMonth - 1, targetDay - 1));
+      return obs.getUTCMonth() + 1 === month && obs.getUTCDate() === day;
+    }
+    if (actualDow === 0) {
+      const obs = new Date(Date.UTC(year, targetMonth - 1, targetDay + 1));
+      return obs.getUTCMonth() + 1 === month && obs.getUTCDate() === day;
+    }
+    return false;
+  }
+
+  function isArizonaHoliday(year, month, day) {
+    if (isObservedFixedHoliday(year, month, day, 1, 1)) return true;   // New Year's Day
+    if (isObservedFixedHoliday(year, month, day, 6, 19)) return true;  // Juneteenth
+    if (isObservedFixedHoliday(year, month, day, 7, 4)) return true;   // Independence Day
+    if (isObservedFixedHoliday(year, month, day, 11, 11)) return true; // Veterans Day
+    if (isObservedFixedHoliday(year, month, day, 12, 25)) return true; // Christmas Day
+    if (month === 1 && day === nthWeekdayOfMonth(year, 1, 1, 3)) return true;  // MLK Day (3rd Mon Jan)
+    if (month === 2 && day === nthWeekdayOfMonth(year, 2, 1, 3)) return true;  // Presidents' Day (3rd Mon Feb)
+    if (month === 5 && day === lastWeekdayOfMonth(year, 5, 1)) return true;    // Memorial Day (Last Mon May)
+    if (month === 9 && day === nthWeekdayOfMonth(year, 9, 1, 1)) return true;  // Labor Day (1st Mon Sep)
+    if (month === 11 && day === nthWeekdayOfMonth(year, 11, 4, 4)) return true; // Thanksgiving (4th Thu Nov)
+    return false;
+  }
 
   function isPhoenixBusinessHoursNow() {
     try {
-      // America/Phoenix is UTC-7 year-round (zero DST)
-      const phx = new Date(Date.now() - 7 * 3600 * 1000);
-      const day = phx.getUTCDay();
-      const mins = phx.getUTCHours() * 60 + phx.getUTCMinutes();
-      return day >= 1 && day <= 5 && mins >= configuredStartMin && mins < configuredEndMin;
+      const parts = phoenixFmt.formatToParts(new Date());
+      const year = Number(parts.find((p) => p.type === 'year')?.value || 2026);
+      const month = Number(parts.find((p) => p.type === 'month')?.value || 1);
+      const day = Number(parts.find((p) => p.type === 'day')?.value || 1);
+      const weekday = parts.find((p) => p.type === 'weekday')?.value || 'Monday';
+      const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+      const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+
+      const isWeekday = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].includes(weekday);
+      if (!isWeekday) return false;
+      if (isArizonaHoliday(year, month, day)) return false;
+
+      const mins = hour * 60 + minute;
+      // Strict Business Hours: Monday–Friday, 8:00 AM (480) – 5:00 PM (1020) America/Phoenix (MST, no DST)
+      return mins >= 8 * 60 && mins < 17 * 60;
     } catch {
-      return true;
+      return false;
     }
   }
   let playReqCounter = 0;
@@ -97,7 +166,7 @@
         sarahAudioCtx = new AudioCtx();
       }
       if (sarahAudioCtx.state === 'suspended') {
-        sarahAudioCtx.resume().catch(() => {});
+        sarahAudioCtx.resume().catch(() => { });
       }
       return sarahAudioCtx;
     } catch {
@@ -134,6 +203,11 @@
         if (el.shadowRoot) {
           walk(el.shadowRoot);
         }
+        if (tag === 'IFRAME') {
+          try {
+            if (el.contentDocument) walk(el.contentDocument);
+          } catch { }
+        }
       }
     };
     walk(root);
@@ -149,20 +223,34 @@
       if (!style || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
         return false;
       }
-      const rect = el.getBoundingClientRect?.();
-      if (!rect || rect.width < 8 || rect.height < 8) return false;
+      // Allow occluded/minimized tabs (visibilityState === 'hidden') where getBoundingClientRect may report small/zero bounds
+      if (document.visibilityState === 'visible') {
+        const rect = el.getBoundingClientRect?.();
+        if (rect && (rect.width === 0 || rect.height === 0)) return false;
+      }
       return true;
     } catch {
       return true;
     }
   }
 
-  function clickSingleTarget(target) {
-    if (!target) return;
+  function clickSingleTarget(targetBtn) {
+    if (!targetBtn) return;
     try {
-      target.focus?.();
-      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((evtName) => {
-        target.dispatchEvent(
+      targetBtn.focus?.();
+      ['pointerdown', 'pointerup'].forEach((evtName) => {
+        if (typeof PointerEvent === 'function') {
+          targetBtn.dispatchEvent(
+            new PointerEvent(evtName, {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+            })
+          );
+        }
+      });
+      ['mousedown', 'mouseup'].forEach((evtName) => {
+        targetBtn.dispatchEvent(
           new MouseEvent(evtName, {
             bubbles: true,
             cancelable: true,
@@ -170,14 +258,15 @@
           })
         );
       });
-      target.click?.();
-      target.dispatchEvent(
+      targetBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      targetBtn.click();
+      targetBtn.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
       );
-      target.dispatchEvent(
+      targetBtn.dispatchEvent(
         new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
       );
-    } catch {}
+    } catch { }
   }
 
   function clickElement(el) {
@@ -234,8 +323,8 @@
     }
 
     const bases = cloudDaemonCfg?.apiBase
-      ? [cloudDaemonCfg.apiBase, 'https://iwillglobal.com']
-      : ['https://iwillglobal.com', 'http://localhost:4000'];
+      ? [cloudDaemonCfg.apiBase, 'https://voice.iwillglobal.com', 'http://localhost:4000']
+      : ['https://voice.iwillglobal.com', 'http://localhost:4000', 'https://iwillglobal.com'];
     for (const base of bases) {
       try {
         const res = await fetch(`${base}${endpoint}`, {
@@ -246,7 +335,7 @@
         if (res.ok) {
           return await res.json();
         }
-      } catch {}
+      } catch { }
     }
     return null;
   }
@@ -271,16 +360,17 @@
         };
       }
       if (closedTurn && closedTurn.audio_base64) {
-        if (closedTurn.reply) afterHoursGreetingText = closedTurn.reply;
         preloadedAfterHoursGreeting = {
           audio_base64: closedTurn.audio_base64,
           audio_mime: closedTurn.audio_mime || 'audio/wav',
           rest_audio_base64: null,
         };
       }
-    } catch {}
+    } catch { }
   }
-  preloadSarahNaturalGreeting();
+  if (IS_TOP_FRAME) {
+    preloadSarahNaturalGreeting();
+  }
 
   function playSingleWavBase64(base64, mime = 'audio/wav', maxMs = 18000) {
     return new Promise((resolve) => {
@@ -338,7 +428,7 @@
           try {
             activeAudio.pause();
             activeAudio.src = '';
-          } catch {}
+          } catch { }
           activeAudio = null;
         }
         ensureKeepAliveAudio();
@@ -377,7 +467,7 @@
       try {
         recognition.stop();
         recRunning = false;
-      } catch {}
+      } catch { }
     }
 
     let primaryBase64 = audioBase64;
@@ -401,8 +491,8 @@
         cleanRest && preloadedRestBase64
           ? Promise.resolve({ audio_base64: preloadedRestBase64, audio_mime: 'audio/wav' })
           : cleanRest
-          ? callSarahBackend('/api/sarah/tts', { text: cleanRest })
-          : Promise.resolve(null);
+            ? callSarahBackend('/api/sarah/tts', { text: cleanRest })
+            : Promise.resolve(null);
 
       await playSingleWavBase64(primaryBase64, primaryMime);
       if (cleanRest) {
@@ -420,7 +510,7 @@
   }
 
   async function processCallerTurn(turnPayload) {
-    if (!callActive || isSpeaking || turnInFlight) return;
+    if (!callActive || !activeCallIsBusinessHours || isSpeaking || turnInFlight) return;
     if (Date.now() - lastSpeechEndedAt < 500) return;
 
     const spokenText = String(turnPayload?.message || '').trim();
@@ -475,13 +565,24 @@
     );
   }
 
-  // Listen for WebRTC audio events from webrtc-bridge.js (MAIN world)
+  // Listen for WebRTC audio & connection events from webrtc-bridge.js (MAIN world)
   window.addEventListener('message', (ev) => {
     const data = ev?.data;
     if (!data || !data.__iwg_webrtc__) return;
     if (data.type === 'IWG_SARAH_PLAY_DONE' && data.requestId) {
       const fn = pendingPlayResolvers.get(data.requestId);
       if (fn) fn(Boolean(data.ok));
+    } else if (data.type === 'IWG_WEBRTC_CALL_CONNECTED' || data.type === 'IWG_SUBFRAME_CALL_ANSWERED') {
+      if (IS_TOP_FRAME && !callActive) {
+        pendingAnswerAttempt = false;
+        onIncomingCallAnswered(data.callerPhone || pendingCallerPhone);
+      }
+    } else if (data.type === 'IWG_WEBRTC_CALL_ENDED') {
+      if (callActive && Date.now() - lastCallStartTs > 1500) {
+        callActive = false;
+        pendingAnswerAttempt = false;
+        lastCallEndedTs = Date.now();
+      }
     } else if (data.type === 'IWG_CALLER_WEBRTC_AUDIO' && data.audioBase64) {
       processCallerTurn({
         caller_audio_base64: data.audioBase64,
@@ -532,7 +633,7 @@
               try {
                 rec.start();
                 recRunning = true;
-              } catch {}
+              } catch { }
             }
           }, 300);
         }
@@ -545,7 +646,7 @@
     try {
       recognition.start();
       recRunning = true;
-    } catch {}
+    } catch { }
   }
 
   function extractActiveCallerPhone() {
@@ -567,6 +668,7 @@
   }
 
   function hangupActiveGoogleVoiceCall() {
+    window.postMessage({ __iwg_webrtc__: true, type: 'IWG_SARAH_STOP_WAV' }, '*');
     try {
       const elements = queryAllDeep(document);
       for (const el of elements) {
@@ -579,21 +681,25 @@
           clickElement(el);
         }
       }
-    } catch {}
+    } catch { }
     callActive = false;
+    pendingAnswerAttempt = false;
+    lastCallEndedTs = Date.now();
   }
 
   function onIncomingCallAnswered(customCallerPhone, silentInternalOnly = false) {
-    if (callActive && Date.now() - lastCallStartTs < 15000) {
+    if (callActive && Date.now() - lastCallStartTs < 8000) {
       return;
     }
+    pendingAnswerAttempt = false;
     callActive = true;
     lastCallStartTs = Date.now();
     totalCallsAnswered += 1;
     callHistory = [];
     const callerPhone = customCallerPhone || extractActiveCallerPhone();
     const isBusinessHours = isPhoenixBusinessHoursNow();
-    const selectedGreetingText = isBusinessHours ? OPENING_GREETING : afterHoursGreetingText;
+    activeCallIsBusinessHours = isBusinessHours;
+    const selectedGreetingText = isBusinessHours ? OPENING_GREETING : AFTER_HOURS_GREETING;
     const selectedAudio = isBusinessHours ? preloadedGreeting : preloadedAfterHoursGreeting;
 
     sessionContext = {
@@ -609,68 +715,94 @@
     callHistory.push({ speaker: 'sarah', text: selectedGreetingText });
     updateStatusBanner(
       isBusinessHours
-        ? '🟢 Call Answered on 1st Ring (Business Hours) • (480) 331-9455'
-        : '🌙 Call Answered on 1st Ring (After-Hours Greeting) • (480) 331-9455',
+        ? '🟢 Call Answered on 1st Ring (Business Hours 8AM–5PM MST) • (480) 331-9455'
+        : '🌙 Call Answered on 1st Ring (After-Hours Closed Greeting) • (480) 331-9455',
       '#10b981'
     );
 
-    callSarahBackend('/api/sarah/inbound', {
-      from: callerPhone || '',
-      caller_name: '',
-      internal_only: true,
-      skip_inline_tts: true,
-      notes: isBusinessHours
-        ? 'Picked up immediately on 1st ring (Business Hours) on (480) 331-9455'
-        : 'Picked up immediately on 1st ring (After Hours) on (480) 331-9455',
-    }).catch(() => {});
-
-    callSarahBackend('/api/sarah/gv-heartbeat', {
-      runner: RUNNER_MODE,
-      instanceId: cloudDaemonCfg?.instanceId || undefined,
-      region: cloudDaemonCfg?.region || undefined,
-      extensionBuild: EXTENSION_BUILD,
-      url: window.location.href,
-      title: document.title || '',
-      callActive: true,
-      totalCallsAnswered,
-      lastAnswerClickTs,
-      event: 'call_answered_on_first_ring',
-      eventDetail: `Answered incoming call ${callerPhone || '(unknown caller)'} [${isBusinessHours ? 'business_hours' : 'after_hours'}]`,
-    }).catch(() => {});
-
+    // 1. Begin speaking immediately over the open WebRTC stream (decoupled from any CRM/DB network calls)
     if (!silentInternalOnly) {
-      setTimeout(() => {
-        speakSarahNaturalVoice(
-          selectedGreetingText,
-          selectedAudio?.audio_base64 || null,
-          selectedAudio?.audio_mime || 'audio/wav',
-          '',
-          null,
-          () => {
-            if (!isBusinessHours) {
-              // After hours: politely disconnect cleanly right after speaking the closed greeting
-              setTimeout(hangupActiveGoogleVoiceCall, 600);
-            }
+      window.postMessage({ __iwg_webrtc__: true, type: 'IWG_RESUME_AUDIO' }, '*');
+      speakSarahNaturalVoice(
+        selectedGreetingText,
+        selectedAudio?.audio_base64 || null,
+        selectedAudio?.audio_mime || 'audio/wav',
+        '',
+        null,
+        () => {
+          if (!isBusinessHours) {
+            // After hours: cleanly terminate the call right after delivering the deterministic closed message
+            setTimeout(hangupActiveGoogleVoiceCall, 350);
           }
-        );
-      }, 60);
+        }
+      );
     }
+
+    // 2. Fire CRM logging and watchdog telemetry asynchronously in parallel AFTER line pickup
+    setTimeout(() => {
+      callSarahBackend('/api/sarah/inbound', {
+        from: callerPhone || '',
+        caller_name: '',
+        internal_only: true,
+        skip_inline_tts: true,
+        notes: isBusinessHours
+          ? 'Picked up immediately on 1st ring (Business Hours 8AM-5PM MST) on (480) 331-9455'
+          : 'Picked up immediately on 1st ring (After Hours) on (480) 331-9455',
+      }).catch(() => { });
+
+      callSarahBackend('/api/sarah/gv-heartbeat', {
+        runner: RUNNER_MODE,
+        instanceId: cloudDaemonCfg?.instanceId || undefined,
+        region: cloudDaemonCfg?.region || undefined,
+        extensionBuild: EXTENSION_BUILD,
+        url: window.location.href,
+        title: document.title || '',
+        callActive: true,
+        totalCallsAnswered,
+        lastAnswerClickTs,
+        event: 'call_answered_on_first_ring',
+        eventDetail: `Answered incoming call ${callerPhone || '(unknown caller)'} [${isBusinessHours ? 'business_hours' : 'after_hours'}]`,
+      }).catch(() => { });
+    }, 0);
   }
 
-  // Match explicit Incoming Call Answer buttons and buttons inside an active Incoming Call alert banner
+  // Match explicit Incoming Call Answer buttons using multi-selector strategy + deep shadow/iframe traversal
   function findVisibleAnswerButtons(elements) {
     const matched = [];
+    const seen = new Set();
+    const combinedSelector = SELECTORS.join(', ');
+
+    try {
+      const directMatches = document.querySelectorAll(combinedSelector);
+      for (const el of directMatches) {
+        if (!isElementVisible(el)) continue;
+        const aria = String(el.getAttribute?.('aria-label') || '').trim();
+        if (/decline|reject|ignore|hang\s*up|end\s*call|dismiss/i.test(aria)) continue;
+        seen.add(el);
+        matched.push(el);
+      }
+    } catch { }
+
     for (const el of elements) {
-      if (!isElementVisible(el)) continue;
+      if (seen.has(el) || !isElementVisible(el)) continue;
+      let matchesSelector = false;
+      try {
+        matchesSelector = Boolean(el.matches?.(combinedSelector));
+      } catch { }
+
       const aria = String(el.getAttribute?.('aria-label') || '').trim();
       const title = String(
         el.getAttribute?.('title') ||
-          el.getAttribute?.('mattooltip') ||
-          el.getAttribute?.('data-tooltip') ||
-          ''
+        el.getAttribute?.('mattooltip') ||
+        el.getAttribute?.('data-tooltip') ||
+        ''
       ).trim();
       const testId = String(
-        el.getAttribute?.('gv-test-id') || el.getAttribute?.('data-e2e') || el.id || ''
+        el.getAttribute?.('gv-test-id') ||
+        el.getAttribute?.('data-call-action') ||
+        el.getAttribute?.('data-e2e') ||
+        el.id ||
+        ''
       ).trim();
       const classes = String(el.className || '').trim();
       const txt = String(el.textContent || '')
@@ -686,9 +818,10 @@
       if (isExcluded) continue;
 
       const isExplicitAnswerBtn =
+        matchesSelector ||
         /(answer|accept\s*call|pick\s*up)/i.test(aria) ||
         /(answer|accept\s*call|pick\s*up)/i.test(title) ||
-        /^(answer|answer\s*call|accept\s*call|call\s*answer|answer\s*call|phone_in_talk\s*answer|callanswer|answercall|accept)$/i.test(
+        /^(answer|answer\s*call|accept\s*call|call\s*answer|phone_in_talk\s*answer|callanswer|answercall|accept|pick\s*up)$/i.test(
           txt
         ) ||
         /(answer|accept[-_]?call|incoming[-_]?answer)/i.test(testId);
@@ -703,6 +836,7 @@
         /(answer|accept|call|phone)/i.test(`${combined} ${txt}`);
 
       if (isExplicitAnswerBtn || isButtonInIncomingBanner) {
+        seen.add(el);
         matched.push(el);
       }
     }
@@ -725,22 +859,21 @@
 
   function scanGoogleVoiceDom() {
     if (!autoAnswerEnabled) return;
-    if (RUNNER_MODE === 'chrome-extension' && standbyForCloud && !callActive) {
-      return;
-    }
     const now = Date.now();
     const elements = queryAllDeep(document);
 
-    // If a call is ALREADY active, NEVER scan for or click Answer buttons again! Only check if the call has ended.
+    // If a call is ALREADY confirmed active, monitor for call end
     if (callActive) {
-      if (now - lastCallStartTs > 5000 && !hasVisibleHangupButton(elements) && !isSpeaking) {
+      if (IS_TOP_FRAME && now - lastCallStartTs > 4500 && !hasVisibleHangupButton(elements) && !isSpeaking) {
         callActive = false;
+        pendingAnswerAttempt = false;
+        lastCallEndedTs = now;
         window.postMessage({ __iwg_webrtc__: true, type: 'IWG_SARAH_STOP_WAV' }, '*');
         if (recognition && recRunning) {
           try {
             recognition.stop();
             recRunning = false;
-          } catch {}
+          } catch { }
         }
         callSarahBackend('/api/sarah/gv-heartbeat', {
           runner: RUNNER_MODE,
@@ -752,20 +885,53 @@
           callActive: false,
           totalCallsAnswered,
           event: 'call_ended_ready_for_next',
-        }).catch(() => {});
+        }).catch(() => { });
         updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
       }
       return;
     }
 
-    // Check for VISIBLE Incoming Call "Answer" button ONLY when no call is active
     const answerBtns = findVisibleAnswerButtons(elements);
-    if (answerBtns.length > 0 && now - lastAnswerClickTs > 1500 && now - lastCallStartTs > 8000) {
-      lastAnswerClickTs = now;
-      for (const btn of answerBtns) {
-        clickElement(btn);
+
+    // Confirm pending click succeeded as soon as Answer button disappears or Hangup/WebRTC connects
+    if (pendingAnswerAttempt && IS_TOP_FRAME) {
+      const webrtcConnected = document.documentElement?.getAttribute('data-iwg-webrtc-connected') === 'true';
+      if (webrtcConnected || hasVisibleHangupButton(elements) || answerBtns.length === 0) {
+        pendingAnswerAttempt = false;
+        onIncomingCallAnswered(pendingCallerPhone);
+        return;
       }
-      onIncomingCallAnswered();
+      if (now - pendingAnswerStartedTs > 12000) {
+        pendingAnswerAttempt = false;
+      }
+    }
+
+    // Immediately click Answer on the 1st ring (<50ms — decoupled from Gemini session/audio buffers)
+    if (answerBtns.length > 0 && now - lastAnswerClickTs > 200 && now - lastCallEndedTs > 1200) {
+      lastAnswerClickTs = now;
+      const detectedCaller = extractActiveCallerPhone();
+      if (!pendingAnswerAttempt) {
+        pendingAnswerAttempt = true;
+        pendingAnswerStartedTs = now;
+        pendingCallerPhone = detectedCaller;
+        window.postMessage({ __iwg_webrtc__: true, type: 'IWG_RESUME_AUDIO' }, '*');
+      }
+      for (const targetBtn of answerBtns) {
+        clickElement(targetBtn);
+      }
+      if (!IS_TOP_FRAME) {
+        try {
+          window.top?.postMessage(
+            { __iwg_webrtc__: true, type: 'IWG_SUBFRAME_CALL_ANSWERED', callerPhone: detectedCaller },
+            '*'
+          );
+        } catch { }
+        return;
+      }
+      // Open the audio/Gemini session immediately upon clicking Answer (while continuing retry clicks if button lingers)
+      if (!callActive) {
+        onIncomingCallAnswered(pendingCallerPhone);
+      }
     }
   }
 
@@ -891,7 +1057,7 @@
           standbyForCloud = prevStandby;
         }, 2000);
       }
-    } catch {}
+    } catch { }
   }
 
   window.__IWG_GV_SCAN_NOW__ = scanGoogleVoiceDom;
@@ -916,22 +1082,44 @@
     });
   }
 
-  updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
-  const intervalId = setInterval(scanGoogleVoiceDom, 80);
-  const heartbeatIntervalId = setInterval(sendWatchdogHeartbeat, 4000);
-  setTimeout(sendWatchdogHeartbeat, 400);
-
+  // Attach MutationObserver immediately at document_start (on documentElement) so observers attach before elements render
   const observer = new MutationObserver(() => {
-    if (!callActive) {
-      scanGoogleVoiceDom();
-    }
+    scanGoogleVoiceDom();
   });
-  if (document.body) {
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-    });
+  const attachRootObserver = () => {
+    const targetNode = document.documentElement || document.body || document;
+    if (targetNode) {
+      try {
+        observer.observe(targetNode, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['aria-label', 'class', 'style', 'hidden', 'disabled', 'data-call-action'],
+        });
+      } catch { }
+    }
+  };
+  attachRootObserver();
+  if (document.readyState === 'loading') {
+    document.addEventListener(
+      'DOMContentLoaded',
+      () => {
+        attachRootObserver();
+        if (IS_TOP_FRAME) {
+          updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
+        }
+        scanGoogleVoiceDom();
+      },
+      { once: true }
+    );
+  } else if (IS_TOP_FRAME) {
+    updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
+  }
+
+  const intervalId = setInterval(scanGoogleVoiceDom, 50);
+  const heartbeatIntervalId = IS_TOP_FRAME ? setInterval(sendWatchdogHeartbeat, 4000) : null;
+  if (IS_TOP_FRAME) {
+    setTimeout(sendWatchdogHeartbeat, 400);
   }
 
   window.__IWG_GV_RECEPTIONIST_CLEANUP__ = () => {
@@ -939,18 +1127,18 @@
     clearInterval(heartbeatIntervalId);
     try {
       observer.disconnect();
-    } catch {}
+    } catch { }
     if (activeAudio) {
       try {
         activeAudio.pause();
         activeAudio.src = '';
-      } catch {}
+      } catch { }
       activeAudio = null;
     }
     if (recognition && recRunning) {
       try {
         recognition.stop();
-      } catch {}
+      } catch { }
       recRunning = false;
     }
   };

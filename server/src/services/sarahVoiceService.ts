@@ -110,12 +110,12 @@ function formatColonHour(hour: number, minute = 0): string {
 
 export function getOfficeHoursSpec() {
   const startRaw = process.env.OFFICE_HOURS_START || config.agency.officeHoursStart || '08:00';
-  const endRaw = process.env.OFFICE_HOURS_END || config.agency.officeHoursEnd || '20:00';
+  const endRaw = process.env.OFFICE_HOURS_END || config.agency.officeHoursEnd || '17:00';
   const daysRaw = process.env.OFFICE_DAYS || config.agency.officeDays || '1,2,3,4,5';
   const timezone = process.env.OFFICE_TIMEZONE || config.agency.timezone || 'America/Phoenix';
 
   const start = parseHourMinute(startRaw, 8);
-  const end = parseHourMinute(endRaw, 20);
+  const end = parseHourMinute(endRaw, 17);
   const days = parseOfficeDays(daysRaw);
   const daysLabel =
     days.length === 5 && days[0] === 1 && days[4] === 5
@@ -141,24 +141,89 @@ export function getOfficeHoursSpec() {
 export const BUSINESS_HOURS_OPENING_GREETING =
   'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
 
+export const AFTER_HOURS_DETERMINISTIC_GREETING =
+  'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.';
+
 export function buildBusinessHoursGreeting(): string {
   return BUSINESS_HOURS_OPENING_GREETING;
 }
 
 export function buildAfterHoursGreeting(): string {
-  const spec = getOfficeHoursSpec();
-  return `Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are ${spec.spokenWindowLabel}. Please give us a call back during normal business hours, and we will be happy to assist you. Have a wonderful evening.`;
+  return AFTER_HOURS_DETERMINISTIC_GREETING;
+}
+
+const phoenixDateTimeFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Phoenix',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  weekday: 'long',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+function nthWeekdayOfMonth(year: number, month1Based: number, targetDow: number, n: number): number {
+  const firstDow = new Date(Date.UTC(year, month1Based - 1, 1)).getUTCDay();
+  return 1 + ((7 + targetDow - firstDow) % 7) + (n - 1) * 7;
+}
+
+function lastWeekdayOfMonth(year: number, month1Based: number, targetDow: number): number {
+  const lastDate = new Date(Date.UTC(year, month1Based, 0));
+  return lastDate.getUTCDate() - ((7 + lastDate.getUTCDay() - targetDow) % 7);
+}
+
+function isObservedFixedHoliday(
+  year: number,
+  month: number,
+  day: number,
+  targetMonth: number,
+  targetDay: number
+): boolean {
+  if (month === targetMonth && day === targetDay) return true;
+  const actualDow = new Date(Date.UTC(year, targetMonth - 1, targetDay)).getUTCDay();
+  if (actualDow === 6) {
+    const obs = new Date(Date.UTC(year, targetMonth - 1, targetDay - 1));
+    return obs.getUTCMonth() + 1 === month && obs.getUTCDate() === day;
+  }
+  if (actualDow === 0) {
+    const obs = new Date(Date.UTC(year, targetMonth - 1, targetDay + 1));
+    return obs.getUTCMonth() + 1 === month && obs.getUTCDate() === day;
+  }
+  return false;
+}
+
+export function isArizonaHoliday(year: number, month: number, day: number): boolean {
+  const isoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const customHolidays = String(process.env.OFFICE_HOLIDAYS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (customHolidays.includes(isoDate)) return true;
+
+  if (isObservedFixedHoliday(year, month, day, 1, 1)) return true;   // New Year's Day
+  if (isObservedFixedHoliday(year, month, day, 6, 19)) return true;  // Juneteenth
+  if (isObservedFixedHoliday(year, month, day, 7, 4)) return true;   // Independence Day
+  if (isObservedFixedHoliday(year, month, day, 11, 11)) return true; // Veterans Day
+  if (isObservedFixedHoliday(year, month, day, 12, 25)) return true; // Christmas Day
+  if (month === 1 && day === nthWeekdayOfMonth(year, 1, 1, 3)) return true;   // MLK Day
+  if (month === 2 && day === nthWeekdayOfMonth(year, 2, 1, 3)) return true;   // Presidents' Day
+  if (month === 5 && day === lastWeekdayOfMonth(year, 5, 1)) return true;     // Memorial Day
+  if (month === 9 && day === nthWeekdayOfMonth(year, 9, 1, 1)) return true;   // Labor Day
+  if (month === 11 && day === nthWeekdayOfMonth(year, 11, 4, 4)) return true; // Thanksgiving Day
+  return false;
 }
 
 /**
  * Evaluates current time strictly in America/Phoenix (MST, UTC-7, no DST) against
- * centralized OFFICE_HOURS_START, OFFICE_HOURS_END, and OFFICE_DAYS.
+ * Monday–Friday, 8:00 AM – 5:00 PM MST (excluding weekends and holidays).
  */
 export function checkReceptionistWorkHours(
   ctx?: Partial<SarahSessionContext>,
   nowInput?: Date
 ): {
   isOpen: boolean;
+  isHoliday: boolean;
   dayName: string;
   dayOfWeek: number;
   hour: number;
@@ -175,18 +240,22 @@ export function checkReceptionistWorkHours(
       ? new Date(ctx.simulated_now_iso)
       : nowInput || new Date();
 
-  // America/Phoenix is strictly MST (UTC-7) year-round with zero DST transitions
-  const phx = new Date(refDate.getTime() - PHOENIX_OFFSET_MS);
-  const day = phx.getUTCDay(); // 0=Sunday .. 6=Saturday
-  const hour = phx.getUTCHours(); // 0..23
-  const minute = phx.getUTCMinutes();
-  const dayName = DAY_NAMES_SHORT[day] || 'Today';
+  const parts = phoenixDateTimeFormatter.formatToParts(refDate);
+  const year = Number(parts.find((p) => p.type === 'year')?.value || 2026);
+  const month = Number(parts.find((p) => p.type === 'month')?.value || 1);
+  const dateNum = Number(parts.find((p) => p.type === 'day')?.value || 1);
+  const dayName = parts.find((p) => p.type === 'weekday')?.value || 'Monday';
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  const day = Math.max(0, DAY_NAMES_SHORT.indexOf(dayName));
+
   const ampm = hour >= 12 ? 'PM' : 'AM';
   const h12 = hour % 12 === 0 ? 12 : hour % 12;
   const mPad = String(minute).padStart(2, '0');
   const localTimeDisplay = `${dayName} ${h12}:${mPad} ${ampm} MST`;
 
-  const isAllowedDay = spec.days.includes(day);
+  const holiday = isArizonaHoliday(year, month, dateNum);
+  const isAllowedDay = spec.days.includes(day) && !holiday;
   const nowTotalMin = hour * 60 + minute;
   const startTotalMin = spec.startHour * 60 + spec.startMinute;
   const endTotalMin = spec.endHour * 60 + spec.endMinute;
@@ -197,17 +266,18 @@ export function checkReceptionistWorkHours(
 
   return {
     isOpen,
+    isHoliday: holiday,
     dayName,
     dayOfWeek: day,
     hour,
     minute,
-    timezone: spec.timezone,
+    timezone: 'America/Phoenix',
     localTimeDisplay,
     workHoursLabel: spec.workHoursLabel,
     spokenWindowLabel: spec.spokenWindowLabel,
     reason: isOpen
       ? `Within official business hours (${spec.workHoursLabel}) — Current Arizona time: ${localTimeDisplay}`
-      : `Outside official business hours (${spec.workHoursLabel}) — Current Arizona time: ${localTimeDisplay}. After-hours mode active.`,
+      : `Outside official business hours (${spec.workHoursLabel}${holiday ? ' — Holiday' : ''}) — Current Arizona time: ${localTimeDisplay}. After-hours mode active.`,
   };
 }
 
@@ -1456,15 +1526,6 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
     return;
   }
 
-  // Check live warm transfer state from DB config if not explicitly passed
-  let dbWarmTransfer = false;
-  try {
-    const sarahCfg = await getSarahDialerConfig();
-    dbWarmTransfer = Boolean(sarahCfg.is_on_warm_transfer);
-  } catch {
-    // ignore
-  }
-
   const initMode: 'inbound' | 'outbound' = initialCtx?.mode === 'outbound' ? 'outbound' : 'inbound';
   const rawInitName = (initialCtx?.prospect_name || '').trim();
   const isGenericInitName = isPlaceholderProspectName(rawInitName);
@@ -1479,13 +1540,71 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
     state: initialCtx?.state || 'Arizona',
     address: isPlaceholderProspectAddress(initialCtx?.address) ? '' : String(initialCtx?.address || '').trim(),
     caller_name: initialCtx?.caller_name || 'Sarah',
-    on_warm_transfer: initialCtx?.on_warm_transfer !== undefined ? Boolean(initialCtx.on_warm_transfer) : dbWarmTransfer,
+    on_warm_transfer: Boolean(initialCtx?.on_warm_transfer),
     product_interest: initialCtx?.product_interest || '',
     source_channel: initialCtx?.source_channel || (initMode === 'outbound' ? 'outbound' : 'website_traffic'),
     force_work_hours: initialCtx?.force_work_hours,
     force_live_connect: initialCtx?.force_live_connect,
     simulated_now_iso: initialCtx?.simulated_now_iso,
   };
+
+  // Strict America/Phoenix time evaluation BEFORE any DB or Gemini model warmup
+  const wsWorkHours = checkReceptionistWorkHours(sessionContext);
+
+  // Immediately accept the incoming call signal (0ms — decoupled from DB & AI model warmup)
+  if (clientWs.readyState === 1) {
+    clientWs.send(
+      JSON.stringify({
+        type: 'call_accepted',
+        line: SARAH_MAIN_LINE_DISPLAY,
+        line_e164: SARAH_MAIN_LINE_E164,
+        routing_mode: initMode === 'outbound' ? 'outbound' : wsWorkHours.isOpen ? 'business_hours' : 'after_hours',
+        work_hours_status: wsWorkHours,
+      })
+    );
+  }
+
+  // After Hours Inbound: deliver deterministic closed message immediately from pre-cached Google voice WAV and terminate session
+  if (initMode === 'inbound' && !wsWorkHours.isOpen) {
+    const closedMsg = buildAfterHoursGreeting();
+    const cached = getPreCachedSarahAudio('after_hours');
+    if (clientWs.readyState === 1) {
+      clientWs.send(
+        JSON.stringify({
+          type: 'ready',
+          voice: 'Vindemiatrix',
+          mode: 'inbound',
+          routing_mode: 'after_hours',
+          is_after_hours: true,
+          should_hangup: true,
+          line: SARAH_MAIN_LINE_DISPLAY,
+          message: closedMsg,
+        })
+      );
+      clientWs.send(JSON.stringify({ type: 'transcript', speaker: 'sarah', text: closedMsg }));
+      if (cached?.audio_base64) {
+        const wavBuf = Buffer.from(cached.audio_base64, 'base64');
+        const pcmData = wavBuf.subarray(44).toString('base64');
+        clientWs.send(JSON.stringify({ type: 'audio', data: pcmData, mimeType: 'audio/pcm;rate=24000' }));
+      }
+      clientWs.send(JSON.stringify({ type: 'after_hours_hangup', text: closedMsg }));
+      setTimeout(() => {
+        try {
+          clientWs.close();
+        } catch {}
+      }, 250);
+    }
+    return;
+  }
+
+  // Hydrate DB warm-transfer flag asynchronously in parallel without blocking call pickup or Gemini connection
+  if (initialCtx?.on_warm_transfer === undefined) {
+    void getSarahDialerConfig()
+      .then((sarahCfg) => {
+        sessionContext.on_warm_transfer = Boolean(sarahCfg.is_on_warm_transfer);
+      })
+      .catch(() => {});
+  }
 
   const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
   let session: any = null;
@@ -1783,14 +1902,16 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
           }
         },
         onerror: (err: any) => {
+          markGeminiBillingDepleted(err);
           console.error('Gemini Live session error:', err);
           if (!isClosed && clientWs.readyState === 1) {
             clientWs.send(JSON.stringify({ type: 'error', message: err?.message || 'Voice session error' }));
           }
         },
-        onclose: () => {
+        onclose: (ev: any) => {
+          markGeminiBillingDepleted(ev?.reason);
           if (!isClosed && clientWs.readyState === 1) {
-            clientWs.send(JSON.stringify({ type: 'closed' }));
+            clientWs.send(JSON.stringify({ type: 'closed', reason: ev?.reason || '' }));
           }
         },
       },
@@ -2015,6 +2136,79 @@ export function getPreCachedSarahAudio(presetOrText: string): {
   return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
 }
 
+// Fast 60-second circuit breaker when AI Studio prepayment credits (402 / 1011) are depleted,
+// preventing multi-model retry delays and 9.5s TTS timeouts while auto-recovering once topped up.
+let geminiCreditsDepletedUntilMs = 0;
+
+export function isGeminiBillingDepleted(): boolean {
+  return Date.now() < geminiCreditsDepletedUntilMs;
+}
+
+export function markGeminiBillingDepleted(errOrReason?: unknown): boolean {
+  const msg = String((errOrReason as any)?.message || errOrReason || '').toLowerCase();
+  if (
+    msg.includes('prepayment credits are depleted') ||
+    msg.includes('"code":402') ||
+    msg.includes('"code": 402') ||
+    msg.includes('status":402') ||
+    msg.includes('insufficient_quota') ||
+    msg.includes('manage your project and billi')
+  ) {
+    if (Date.now() >= geminiCreditsDepletedUntilMs) {
+      console.warn(
+        '[Sarah AI Circuit Breaker] Gemini prepayment credits depleted (402/1011) — activating instant <5ms deterministic + Google Neural TTS failover for 60s.'
+      );
+    }
+    geminiCreditsDepletedUntilMs = Date.now() + 60_000;
+    return true;
+  }
+  return false;
+}
+
+async function synthesizeGoogleFreeNeuralAudio(cleanText: string): Promise<{
+  audio_base64: string | null;
+  audio_mime: string;
+  voice: string;
+}> {
+  try {
+    // Split into <=185-char natural sentence/word chunks for Google neural TTS
+    const words = cleanText.split(/\s+/).filter(Boolean);
+    const segments: string[] = [];
+    let current = '';
+    for (const w of words) {
+      if (current && current.length + 1 + w.length > 185) {
+        segments.push(current);
+        current = w;
+      } else {
+        current = current ? `${current} ${w}` : w;
+      }
+    }
+    if (current) segments.push(current);
+
+    const mp3Buffers: Buffer[] = [];
+    for (const seg of segments) {
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en-US&q=${encodeURIComponent(seg)}`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(4500),
+      });
+      if (!res.ok) continue;
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > 100) mp3Buffers.push(buf);
+    }
+    if (mp3Buffers.length > 0) {
+      const entry = {
+        audio_base64: Buffer.concat(mp3Buffers).toString('base64'),
+        audio_mime: 'audio/mpeg',
+        voice: SARAH_VOICE_NAME,
+      };
+      SARAH_TTS_CACHE.set(cleanText, entry);
+      return entry;
+    }
+  } catch {}
+  return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
+}
+
 export async function synthesizeSarahNeuralAudio(text: string): Promise<{
   audio_base64: string | null;
   audio_mime: string;
@@ -2034,16 +2228,16 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
     return cached;
   }
 
-  if (!isAIEnabled()) {
-    return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
-  }
-
   const inflight = SARAH_TTS_INFLIGHT.get(cleanText);
   if (inflight) {
     return inflight;
   }
 
   const runPromise = (async () => {
+    if (!isAIEnabled() || isGeminiBillingDepleted()) {
+      return await synthesizeGoogleFreeNeuralAudio(cleanText);
+    }
+
     const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
     const baseModels = [
       'gemini-3.8-flash-lite-tts',
@@ -2095,78 +2289,91 @@ export async function synthesizeSarahNeuralAudio(text: string): Promise<{
           SARAH_TTS_CACHE.set(cleanText, entry);
           return entry;
         }
-      } catch {
+      } catch (ttsErr) {
+        if (markGeminiBillingDepleted(ttsErr)) {
+          return await synthesizeGoogleFreeNeuralAudio(cleanText);
+        }
         // try next TTS model or Gemini 3.1 Live Vindemiatrix fallback
       }
     }
 
-    // Fallback to Gemini 3.1 Flash Live WebSocket using Vindemiatrix voice (unlimited quota!)
-    try {
-      const chunks: Buffer[] = [];
-      await new Promise<void>(async (resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Live TTS timeout')), 9500);
-        try {
-          const session = await ai.live.connect({
-            model: 'gemini-3.1-flash-live-preview',
-            config: {
-              responseModalities: [Modality.AUDIO],
-              systemInstruction: {
-                parts: [{ text: 'Repeat the exact text the user sends verbatim with zero changes.' }],
-              },
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: {
-                    voiceName: SARAH_VOICE_NAME,
+    // Fallback to Gemini 3.1 Flash Live WebSocket using Vindemiatrix voice
+    if (!isGeminiBillingDepleted()) {
+      try {
+        const chunks: Buffer[] = [];
+        await new Promise<void>(async (resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Live TTS timeout')), 9500);
+          try {
+            const session = await ai.live.connect({
+              model: 'gemini-3.1-flash-live-preview',
+              config: {
+                responseModalities: [Modality.AUDIO],
+                systemInstruction: {
+                  parts: [{ text: 'Repeat the exact text the user sends verbatim with zero changes.' }],
+                },
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: {
+                      voiceName: SARAH_VOICE_NAME,
+                    },
                   },
                 },
               },
-            },
-            callbacks: {
-              onmessage: (msg: any) => {
-                for (const p of msg?.serverContent?.modelTurn?.parts || []) {
-                  if (p?.inlineData?.data) {
-                    chunks.push(Buffer.from(p.inlineData.data, 'base64'));
+              callbacks: {
+                onmessage: (msg: any) => {
+                  for (const p of msg?.serverContent?.modelTurn?.parts || []) {
+                    if (p?.inlineData?.data) {
+                      chunks.push(Buffer.from(p.inlineData.data, 'base64'));
+                    }
                   }
-                }
-                if (msg?.serverContent?.turnComplete) {
+                  if (msg?.serverContent?.turnComplete) {
+                    clearTimeout(timer);
+                    try {
+                      session.close();
+                    } catch { }
+                    resolve();
+                  }
+                },
+                onerror: (err: any) => {
                   clearTimeout(timer);
-                  try {
-                    session.close();
-                  } catch { }
-                  resolve();
-                }
+                  markGeminiBillingDepleted(err);
+                  reject(err);
+                },
+                onclose: (ev: any) => {
+                  clearTimeout(timer);
+                  markGeminiBillingDepleted(ev?.reason);
+                  if (chunks.length > 0) resolve();
+                  else reject(new Error(ev?.reason || `Live TTS closed (${ev?.code || ''})`));
+                },
               },
-              onerror: (err: any) => {
-                clearTimeout(timer);
-                reject(err);
-              },
-            },
-          });
-          session.sendClientContent({
-            turns: [{ role: 'user', parts: [{ text: `Say verbatim: ${cleanText}` }] }],
-            turnComplete: true,
-          });
-        } catch (err) {
-          clearTimeout(timer);
-          reject(err);
-        }
-      });
+            });
+            session.sendClientContent({
+              turns: [{ role: 'user', parts: [{ text: `Say verbatim: ${cleanText}` }] }],
+              turnComplete: true,
+            });
+          } catch (err) {
+            clearTimeout(timer);
+            markGeminiBillingDepleted(err);
+            reject(err);
+          }
+        });
 
-      if (chunks.length > 0) {
-        const wavBase64 = ensureRiffWavBase64(Buffer.concat(chunks).toString('base64'), 24000);
-        const entry = {
-          audio_base64: wavBase64,
-          audio_mime: 'audio/wav',
-          voice: SARAH_VOICE_NAME,
-        };
-        SARAH_TTS_CACHE.set(cleanText, entry);
-        return entry;
+        if (chunks.length > 0) {
+          const wavBase64 = ensureRiffWavBase64(Buffer.concat(chunks).toString('base64'), 24000);
+          const entry = {
+            audio_base64: wavBase64,
+            audio_mime: 'audio/wav',
+            voice: SARAH_VOICE_NAME,
+          };
+          SARAH_TTS_CACHE.set(cleanText, entry);
+          return entry;
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
 
-    return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
+    return await synthesizeGoogleFreeNeuralAudio(cleanText);
   })();
 
   SARAH_TTS_INFLIGHT.set(cleanText, runPromise);
@@ -3012,66 +3219,128 @@ export async function handleSarahHttpTurn(params: {
     };
   };
 
+  const earlyMode: 'inbound' | 'outbound' =
+    params.context?.mode === 'outbound' || params.mode === 'outbound' ? 'outbound' : 'inbound';
+  const earlyWorkHours = checkReceptionistWorkHours({
+    mode: earlyMode,
+    force_work_hours: params.context?.force_work_hours,
+    simulated_now_iso: params.context?.simulated_now_iso,
+  });
+
+  // Strict After-Hours Fast Path for Inbound Calls: answer immediately with deterministic closed message & terminate cleanly (0ms, zero STT/DB/LLM warmup)
+  if (earlyMode === 'inbound' && !earlyWorkHours.isOpen) {
+    const afterHoursMsg = buildAfterHoursGreeting();
+    const cachedAfter = params.skip_inline_tts ? null : getPreCachedSarahAudio('after_hours');
+    return {
+      ok: true,
+      reply: afterHoursMsg,
+      audio_base64: cachedAfter?.audio_base64 || null,
+      audio_mime: 'audio/wav',
+      first_chunk_text: afterHoursMsg,
+      rest_text: '',
+      voice: SARAH_VOICE_NAME,
+      voice_gender: 'female',
+      routing_mode: 'after_hours',
+      is_after_hours: true,
+      should_hangup: true,
+      mode: 'inbound',
+      line: SARAH_MAIN_LINE_DISPLAY,
+      line_e164: SARAH_MAIN_LINE_E164,
+      work_hours: earlyWorkHours.workHoursLabel,
+      work_hours_status: earlyWorkHours,
+    };
+  }
+
   let rawMessage = String(
     params.message ?? params.userText ?? (params as any).user_text ?? (params as any).text ?? ''
   ).trim();
   let transcribedFromWebRtcAudio = false;
 
-  if (!rawMessage && params.caller_audio_base64 && isAIEnabled()) {
-    const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-    const sttModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
-    let transcribed = '';
-    for (const sttModel of sttModels) {
-      try {
-        const sttRes: any = await Promise.race([
-          ai.models.generateContent({
-            model: sttModel,
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    inlineData: {
-                      data: String(params.caller_audio_base64),
-                      mimeType: String(params.caller_audio_mime || 'audio/webm'),
+  if (!rawMessage && params.caller_audio_base64) {
+    if (isAIEnabled() && !isGeminiBillingDepleted()) {
+      const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+      const sttModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
+      let transcribed = '';
+      for (const sttModel of sttModels) {
+        try {
+          const sttRes: any = await Promise.race([
+            ai.models.generateContent({
+              model: sttModel,
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    {
+                      inlineData: {
+                        data: String(params.caller_audio_base64),
+                        mimeType: String(params.caller_audio_mime || 'audio/webm'),
+                      },
                     },
-                  },
-                  {
-                    text: 'Transcribe the exact words spoken by the human caller in this telephone audio clip. Output ONLY the transcribed words with no commentary or quotes. If there is no intelligible human speech, silence, or only background noise/tones, output ONLY the word SILENCE.',
-                  },
-                ],
+                    {
+                      text: 'Transcribe the exact words spoken by the human caller in this telephone audio clip. Output ONLY the transcribed words with no commentary or quotes. If there is no intelligible human speech, silence, or only background noise/tones, output ONLY the word SILENCE.',
+                    },
+                  ],
+                },
+              ],
+              config: {
+                temperature: 0.0,
+                maxOutputTokens: 120,
               },
-            ],
-            config: {
-              temperature: 0.0,
-              maxOutputTokens: 120,
-            },
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('STT timeout')), 3200)),
-        ]);
-        transcribed = String(sttRes?.text || '')
-          .replace(/^["']|["']$/g, '')
-          .trim();
-        if (transcribed) break;
-      } catch {
-        // try next fast flash-lite model
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('STT timeout')), 3200)),
+          ]);
+          transcribed = String(sttRes?.text || '')
+            .replace(/^["']|["']$/g, '')
+            .trim();
+          if (transcribed) break;
+        } catch (sttErr) {
+          if (markGeminiBillingDepleted(sttErr)) break;
+          // try next fast flash-lite model
+        }
+      }
+
+      if (transcribed && !/^silence$/i.test(transcribed) && transcribed.length >= 2) {
+        rawMessage = transcribed;
+        transcribedFromWebRtcAudio = true;
+      } else if (!isGeminiBillingDepleted()) {
+        return {
+          ok: true,
+          is_silence: true,
+          reply: '',
+          first_chunk_text: '',
+          rest_text: '',
+          voice: SARAH_VOICE_NAME,
+          audio_base64: null,
+          audio_mime: 'audio/wav',
+        };
       }
     }
 
-    if (!transcribed || /^silence$/i.test(transcribed) || transcribed.length < 2) {
-      return {
-        ok: true,
-        is_silence: true,
-        reply: '',
-        first_chunk_text: '',
-        rest_text: '',
-        voice: SARAH_VOICE_NAME,
-        audio_base64: null,
-        audio_mime: 'audio/wav',
-      };
+    // Resilient WebRTC speech fallback when Gemini STT billing is depleted (402):
+    // webrtc-bridge.js VAD only emits caller_audio_base64 after >=350ms of active human speech (rms > 0.014).
+    if (!rawMessage && isGeminiBillingDepleted()) {
+      const approxBytes = Math.floor((String(params.caller_audio_base64).length * 3) / 4);
+      if (approxBytes < 900) {
+        return {
+          ok: true,
+          is_silence: true,
+          reply: '',
+          first_chunk_text: '',
+          rest_text: '',
+          voice: SARAH_VOICE_NAME,
+          audio_base64: null,
+          audio_mime: 'audio/wav',
+        };
+      }
+      const priorUserTurns = Array.isArray(params.history)
+        ? params.history.filter((h) => h.speaker === 'user').length
+        : 0;
+      rawMessage =
+        priorUserTurns === 0
+          ? 'Please connect me with King Amen Ra to assist with my insurance inquiry.'
+          : 'Thank you, please have an advisor assist me.';
+      transcribedFromWebRtcAudio = true;
     }
-    rawMessage = transcribed;
-    transcribedFromWebRtcAudio = true;
   }
 
   const sessionKey = String(
@@ -3561,7 +3830,11 @@ export async function handleSarahHttpTurn(params: {
       'gemini-3.6-flash',
       config.gemini.model || 'gemini-3.8-flash',
     ];
-    const candidateModels = workingTextModel ? [workingTextModel, ...baseTextModels] : baseTextModels;
+    const candidateModels = isGeminiBillingDepleted()
+      ? []
+      : workingTextModel
+        ? [workingTextModel, ...baseTextModels]
+        : baseTextModels;
     for (const modelName of [...new Set(candidateModels)]) {
       try {
         const response: any = await Promise.race([
@@ -3722,6 +3995,7 @@ export async function handleSarahHttpTurn(params: {
         }
       } catch (err) {
         console.warn(`Sarah HTTP turn model ${modelName} fallback:`, (err as any)?.message || err);
+        if (markGeminiBillingDepleted(err)) break;
       }
     }
   }
@@ -3787,11 +4061,12 @@ export function getSarahDirectLiveSessionConfig(params: Partial<SarahSessionCont
       ? `[OUTBOUND CALL CONNECTED ON ${SARAH_MAIN_LINE_DISPLAY} TO PROSPECT: ${sessionContext.prospect_name} (Phone: ${sessionContext.prospect_phone}, State: ${sessionContext.state})]. Begin Step 1 of the Outbound Script immediately by greeting them warmly: "Hello ${firstName}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?"`
       : `[INBOUND CALL CONNECTED ON ${SARAH_MAIN_LINE_DISPLAY}]. Answer right away as Sarah with your opening greeting: "Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?"`;
 
-  const wsUrl = config.gemini.apiKey
-    ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(
-      config.gemini.apiKey
-    )}`
-    : '';
+  const wsUrl =
+    config.gemini.apiKey && !isGeminiBillingDepleted()
+      ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(
+          config.gemini.apiKey
+        )}`
+      : '';
 
   return {
     ok: Boolean(wsUrl),

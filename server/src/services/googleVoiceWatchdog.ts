@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from '../config.ts';
 import { one, q } from '../db/index.ts';
 
-export const CURRENT_GV_EXTENSION_BUILD = '2026-11-09-v10';
+export const CURRENT_GV_EXTENSION_BUILD = '2026-11-10-v12';
 export const DEFAULT_GV_BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 
 export interface GvButtonTelemetry {

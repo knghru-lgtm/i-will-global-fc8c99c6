@@ -3,6 +3,7 @@ import cors from 'cors';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, isAIEnabled, isGoogleEnabled } from './config.ts';
 import { getDb } from './db/index.ts';
@@ -44,7 +45,17 @@ export function createApp() {
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true, ai: isAIEnabled() ? 'gemini' : 'demo', google: isGoogleEnabled() }));
+  const healthPayload = () => ({
+    ok: true,
+    status: 'ok',
+    platform: 'google_cloud',
+    ai: isAIEnabled() ? 'gemini' : 'demo',
+    google: isGoogleEnabled(),
+    line: '+14803319455',
+    host: config.telephony.publicHostFqdn,
+  });
+  app.get('/health', (_req, res) => res.status(200).json(healthPayload()));
+  app.get('/api/health', (_req, res) => res.status(200).json(healthPayload()));
 
   // Direct sub-second Gemini 3.8 Live WebSocket session bootstrap for iwillglobal.com & local CRM
   app.post('/api/sarah/live-session', (req, res) => {
@@ -313,6 +324,8 @@ export function attachSarahWebSocket(server: http.Server) {
         wss.handleUpgrade(req, socket, head, (ws) => {
           wss.emit('connection', ws, req);
         });
+      } else {
+        socket.destroy();
       }
     } catch (err) {
       console.error('[Sarah Voice AI] WebSocket upgrade error:', err);
@@ -323,31 +336,47 @@ export function attachSarahWebSocket(server: http.Server) {
   return wss;
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url).toLowerCase() === process.argv[1].toLowerCase();
+const isMain =
+  Boolean(process.argv[1]) &&
+  path.resolve(fileURLToPath(import.meta.url)).toLowerCase() ===
+    path.resolve(process.argv[1]).toLowerCase();
 if (isMain) {
-  await getDb();
-  const { ensureSeeded } = await import('./db/seed.ts');
-  await ensureSeeded();
   const app = createApp();
   const server = http.createServer(app);
   attachSarahWebSocket(server);
-  server.listen(config.port, () => {
-    console.log(`\n  IWG CRM API  →  http://localhost:${config.port}`);
-    console.log(`  Sarah Voice AI  →  ws://localhost:${config.port}/api/sarah/live (Gemini Live 3.8 Aoede)`);
-    console.log(`  AI: ${isAIEnabled() ? 'Gemini (' + config.gemini.model + ')' : 'demo mode (set GEMINI_API_KEY)'}`);
+
+  // Bind 0.0.0.0:$PORT immediately (<50ms) on Google Cloud so 1st-ring calls & health checks never wait on DB warmup
+  server.listen(config.port, '0.0.0.0', () => {
+    console.log(`\n  IWG Google Cloud API   →  http://0.0.0.0:${config.port}`);
+    console.log(`  Health Check           →  http://0.0.0.0:${config.port}/health`);
+    console.log(`  Sarah Voice Turn API   →  http://0.0.0.0:${config.port}/api/sarah/turn`);
+    console.log(`  Sarah Live WebSocket   →  ws://0.0.0.0:${config.port}/api/sarah/live (${config.gemini.liveModel} Vindemiatrix)`);
+    console.log(`  AI: ${isAIEnabled() ? 'Gemini (' + config.gemini.liveModel + ')' : 'demo mode (set GOOGLE_GENAI_API_KEY)'}`);
     console.log(`  Google Workspace: ${isGoogleEnabled() ? 'configured' : 'not configured (Gmail actions are logged only)'}\n`);
+
+    setTimeout(() => {
+      void (async () => {
+        try {
+          await getDb();
+        } catch (err: any) {
+          console.error('[DB Warmup] Non-fatal startup error:', err?.message || err);
+        }
+      })();
+    }, 1500);
+
+    if (!config.telephony.cloudHeadlessOnly) {
+      startGoogleVoiceWatchdog();
+    }
+    void import('./services/sarahDialer.ts')
+      .then(({ runSarahAutoDialerTick }) => {
+        setInterval(() => {
+          runSarahAutoDialerTick({ reason: 'interval' }).catch((err) =>
+            console.error('Sarah auto-dialer error:', err?.message)
+          );
+        }, 60_000);
+      })
+      .catch(() => {});
   });
-}
-// Long-lived server (local / Cloud Run): run the Sarah Voice Engine autonomous dialer every 60 seconds.
-// It only dials Sarah-assigned prospects while the campaign is active and inside calling hours
-// (Mon–Fri 9 AM–7 PM, Sat–Sun 9 AM–6 PM Arizona time). Serverless deployments use the call-completion
-// webhook chain plus Vercel Cron every 15 minutes — no CRM login is ever required.
-if (isMain) {
-  startGoogleVoiceWatchdog();
-  const { runSarahAutoDialerTick } = await import('./services/sarahDialer.ts');
-  setInterval(() => {
-    runSarahAutoDialerTick({ reason: 'interval' }).catch((err) => console.error('Sarah auto-dialer error:', err?.message));
-  }, 60_000);
 }
 
 export default createApp(); 

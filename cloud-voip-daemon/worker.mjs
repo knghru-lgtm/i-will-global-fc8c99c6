@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
 
-const API_BASE = process.env.APP_URL || 'https://iwillglobal.com';
+const API_BASE = process.env.APP_URL || 'https://voice.iwillglobal.com';
 const BRIDGE_TOKEN = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-9455';
 const REGION = process.env.VERCEL_REGION || 'iad1';
 const INSTANCE_ID = `cloud-${REGION}-${randomUUID().slice(0, 8)}`;
@@ -19,7 +19,7 @@ process.on('SIGTERM', async () => {
   if (activeBrowser) {
     try {
       await activeBrowser.close();
-    } catch {}
+    } catch { }
   }
   process.exit(0);
 });
@@ -52,7 +52,7 @@ async function saveRefreshedCookies(cookies) {
         source: `cloud-daemon-${INSTANCE_ID}`,
       }),
     });
-  } catch {}
+  } catch { }
 }
 
 async function reportDaemonHeartbeat(extra = {}) {
@@ -68,7 +68,7 @@ async function reportDaemonHeartbeat(extra = {}) {
         ...extra,
       }),
     });
-  } catch {}
+  } catch { }
 }
 
 function normalizeCookiesForCdp(rawCookies) {
@@ -154,7 +154,7 @@ async function runBrowserSession(cookies) {
     // Click page once so Chromium unlocks WebAudio AudioContext at 48kHz immediately
     try {
       await page.mouse.click(80, 80);
-    } catch {}
+    } catch { }
 
     // Inject Cloud Auto-Answer & Conversational Controller
     await page.evaluate(`${configBootstrap}\n${contentControllerCode}`);
@@ -183,7 +183,7 @@ async function runBrowserSession(cookies) {
           if (Array.isArray(all?.cookies) && all.cookies.length > 0) {
             await saveRefreshedCookies(all.cookies);
           }
-        } catch {}
+        } catch { }
       }
 
       await new Promise((r) => setTimeout(r, 8000));
@@ -191,7 +191,7 @@ async function runBrowserSession(cookies) {
   } finally {
     try {
       await browser.close();
-    } catch {}
+    } catch { }
     if (activeBrowser === browser) activeBrowser = null;
   }
 }

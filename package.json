@@ -16,7 +16,7 @@
     "build:api": "npx esbuild server/src/index.ts --bundle --platform=node --format=esm --packages=external --outfile=api/index.js",
     "build": "npm run build:api && npm run build --workspace client",
     "publish": "npm run build",
-    "start": "npm run start --workspace server"
+    "start": "node api/index.js"
   },
   "dependencies": {
     "@neon/config": "^1.8.6",

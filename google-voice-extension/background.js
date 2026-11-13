@@ -1,6 +1,6 @@
-const EXTENSION_BUILD = '2026-11-09-v10';
+const EXTENSION_BUILD = '2026-11-10-v12';
 // Cloud-first so the extension never depends on localhost:4000 or laptop drives!
-const API_BASES = ['https://iwillglobal.com', 'http://localhost:4000'];
+const API_BASES = ['https://voice.iwillglobal.com', 'http://localhost:4000', 'https://iwillglobal.com'];
 const BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 let hasAutoOpenedGvTab = false;
 let lastCookieSyncTs = 0;
@@ -61,10 +61,10 @@ function syncGoogleVoiceCookiesToCloud(force = false) {
               source: `chrome-extension-${EXTENSION_BUILD}`,
             }),
           });
-        } catch {}
+        } catch { }
       }
     });
-  } catch {}
+  } catch { }
 }
 
 function ensureGoogleVoiceTabsHealthy() {
@@ -77,7 +77,7 @@ function ensureGoogleVoiceTabsHealthy() {
             chrome.tabs.create(
               {
                 url: 'https://voice.google.com/u/0/calls',
-                active: false,
+                active: true,
                 pinned: true,
               },
               (newTab) => {
@@ -89,7 +89,7 @@ function ensureGoogleVoiceTabsHealthy() {
                 }
               }
             );
-          } catch {}
+          } catch { }
         }
         return;
       }
@@ -100,7 +100,7 @@ function ensureGoogleVoiceTabsHealthy() {
           chrome.tabs.update(tab.id, { autoDiscardable: false, muted: true }, () => {
             void chrome.runtime.lastError;
           });
-        } catch {}
+        } catch { }
 
         if (tab.status === 'complete') {
           try {
@@ -116,16 +116,16 @@ function ensureGoogleVoiceTabsHealthy() {
                 }
               }
             });
-          } catch {}
+          } catch { }
         }
       }
     });
-  } catch {}
+  } catch { }
 }
 
 ensureGoogleVoiceTabsHealthy();
 syncGoogleVoiceCookiesToCloud(true);
-setInterval(ensureGoogleVoiceTabsHealthy, 5000);
+setInterval(ensureGoogleVoiceTabsHealthy, 2000);
 setInterval(() => syncGoogleVoiceCookiesToCloud(false), 60000);
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -159,7 +159,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     setTimeout(() => {
       try {
         chrome.runtime.reload();
-      } catch {}
+      } catch { }
     }, 100);
     return false;
   }
@@ -170,7 +170,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       caller_name: msg.callerName || '',
       internal_only: true,
       notes: 'Picked up internally by IWG Cloud Receptionist on (480) 331-9455',
-    }).catch(() => {});
+    }).catch(() => { });
     sendResponse({ ok: true, internal_only: true });
     return false;
   }

@@ -31,7 +31,7 @@ async function createAdapter(): Promise<Adapter> {
   const dir =
     process.env.NODE_ENV === 'test'
       ? 'memory://'
-      : process.env.VERCEL
+      : process.env.VERCEL || process.env.RENDER
         ? '/tmp/iwg-pg'
         : config.dataDir;
   if (!dir.startsWith('memory://')) {
@@ -68,12 +68,26 @@ async function createAdapter(): Promise<Adapter> {
   };
 }
 
+function loadSchemaSql(): string {
+  const candidates = [
+    new URL('./schema.sql', import.meta.url),
+    new URL('../server/src/db/schema.sql', import.meta.url),
+  ];
+  for (const url of candidates) {
+    try {
+      return readFileSync(url, 'utf8');
+    } catch {}
+  }
+  const cwdFallback = path.resolve(process.cwd(), 'server/src/db/schema.sql');
+  return readFileSync(cwdFallback, 'utf8');
+}
+
 export async function getDb(): Promise<Adapter> {
   if (adapter) return adapter;
   if (!ready) {
     ready = (async () => {
       const a = await createAdapter();
-      const schema = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
+      const schema = loadSchemaSql();
       await a.exec(schema);
       try {
         await a.exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_meet_url TEXT;`);
