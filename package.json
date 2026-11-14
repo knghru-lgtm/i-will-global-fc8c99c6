@@ -18,10 +18,6 @@
     "publish": "npm run build",
     "start": "node api/index.js"
   },
-  "dependencies": {
-    "@neon/config": "^1.8.6",
-    "@neon/env": "^1.5.3"
-  },
   "devDependencies": {
     "esbuild": "^0.28.2"
   },

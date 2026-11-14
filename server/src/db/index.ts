@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { config } from '../config.ts';
+import { config, repoRoot } from '../config.ts';
 
 /**
  * Thin database adapter. Uses embedded PGlite (real Postgres compiled to WASM) for local/dev,
@@ -31,9 +31,7 @@ async function createAdapter(): Promise<Adapter> {
   const dir =
     process.env.NODE_ENV === 'test'
       ? 'memory://'
-      : process.env.VERCEL || process.env.RENDER
-        ? '/tmp/iwg-pg'
-        : config.dataDir;
+      : config.dataDir;
   if (!dir.startsWith('memory://')) {
     mkdirSync(dir, { recursive: true });
     const pidFile = path.join(dir, 'postmaster.pid');
@@ -70,12 +68,14 @@ async function createAdapter(): Promise<Adapter> {
 
 function loadSchemaSql(): string {
   const candidates = [
+    path.join(repoRoot, 'server', 'src', 'db', 'schema.sql'),
+    path.join(repoRoot, 'api', 'schema.sql'),
     new URL('../server/src/db/schema.sql', import.meta.url),
     new URL('./schema.sql', import.meta.url),
   ];
-  for (const url of candidates) {
+  for (const candidate of candidates) {
     try {
-      return readFileSync(url, 'utf8');
+      return readFileSync(candidate as any, 'utf8');
     } catch {}
   }
   const cwdFallback = path.resolve(process.cwd(), 'server/src/db/schema.sql');

@@ -67,6 +67,8 @@ export interface GvHeartbeatState {
     reloadTab?: boolean;
     simulateIncomingCall?: boolean;
     callerPhone?: string;
+    dialOutboundPhone?: string;
+    leadId?: string;
   } | null;
 }
 

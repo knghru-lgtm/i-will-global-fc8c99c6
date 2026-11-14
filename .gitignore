@@ -3,12 +3,12 @@ dist/
 .env
 .env.*
 !.env.example
+data/
 server/data/
 *.log
 client/android/app/build/
 client/ios/App/Pods/
 screenshots/
-
-.vercel
-.neon
 api_build/
+.vercel/
+.neon/

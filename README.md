@@ -77,10 +77,11 @@ npm run test
 
 Runs the Node.js test suite covering auth, enrollment calculations, call dispositions, scheduler appointment routing, AI guardrails, website chat, and SOA e-signing.
 
-## Bland AI Agent Workspace
+## 100% Google Cloud + Google Voice 24/7 Sarah Voice AI
 
-The Bland AI agent definition (`bland.json`) and Norm tooling (`.bland/norm`) configure the voice telephony agent for inbound/outbound calls (`setup 3b13b658-e85d-4d14-a24a-868b61040c42`). To validate Bland configuration changes locally:
+Sarah (`Vindemiatrix`) runs 24/7 on Google Cloud (`https://voice.iwillglobal.com` / `https://iwillglobal.com`) connected directly to Google Voice `(480) 331-9455` (`+14803319455`) and Google GenAI (`@google/genai`), managed via `ecosystem.config.cjs`. To validate the Google Cloud build locally:
 
 ```bash
+npm run build
 node scripts/validate.cjs
 ```

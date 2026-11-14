@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, isAIEnabled, isGoogleEnabled } from './config.ts';
+import { config, repoRoot, isAIEnabled, isGoogleEnabled } from './config.ts';
 import { getDb, closeDb } from './db/index.ts';
 import { requireAuth } from './auth.ts';
 import { records } from './routes/records.ts';
@@ -256,10 +256,11 @@ export function createApp() {
   app.use('/api/public', publicAppointments);
   app.use('/api/google', googleCallback);
   app.use('/api/sarah', sarahPublic);
-  app.use('/api/telephony/twiml', sarahPublic);
   app.use('/api/voice', sarahPublic);
-  app.use('/api/twilio', sarahPublic);
-  app.use('/widget', express.static(fileURLToPath(new URL('../public', import.meta.url))));
+  const widgetDir = path.join(repoRoot, 'server', 'public');
+  if (existsSync(widgetDir)) {
+    app.use('/widget', express.static(widgetDir, { maxAge: '1h' }));
+  }
 
   // Authenticated API
   app.use('/api/auth', auth);
@@ -273,11 +274,25 @@ export function createApp() {
   app.use('/api/sarah', sarahAuth);
   app.use('/api', api);
 
-  // Serve the built web app (production / Cloud Run single container / iwillglobal.com)
-  const dist = fileURLToPath(new URL('../../client/dist', import.meta.url));
+  // Serve the built 100% online web app on Google Cloud (https://iwillglobal.com & https://voice.iwillglobal.com)
+  const dist = path.join(repoRoot, 'client', 'dist');
   if (existsSync(dist)) {
-    app.use(express.static(dist));
-    app.use((req, res, next) => (req.path.startsWith('/api') ? next() : res.sendFile('index.html', { root: dist })));
+    app.use(
+      express.static(dist, {
+        setHeaders(res, filePath) {
+          if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          } else if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-cache');
+          }
+        },
+      })
+    );
+    app.use((req, res, next) => {
+      if (req.path.startsWith('/api')) return next();
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile('index.html', { root: dist });
+    });
   }
 
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -336,10 +351,14 @@ export function attachSarahWebSocket(server: http.Server) {
   return wss;
 }
 
+const entryFile = path.resolve(fileURLToPath(import.meta.url)).toLowerCase();
+const argvFile = process.argv[1] ? path.resolve(process.argv[1]).toLowerCase() : '';
+const pm2ExecFile = process.env.pm_exec_path ? path.resolve(process.env.pm_exec_path).toLowerCase() : '';
 const isMain =
-  Boolean(process.argv[1]) &&
-  path.resolve(fileURLToPath(import.meta.url)).toLowerCase() ===
-    path.resolve(process.argv[1]).toLowerCase();
+  process.env.NODE_ENV !== 'test' &&
+  (entryFile === argvFile ||
+    entryFile === pm2ExecFile ||
+    argvFile.includes('processcontainer'));
 if (isMain) {
   const app = createApp();
   const server = http.createServer(app);

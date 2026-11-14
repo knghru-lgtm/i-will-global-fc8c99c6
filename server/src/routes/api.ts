@@ -869,21 +869,20 @@ api.post('/telephony/caller-id-registry/refresh', async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------------ Enterprise Carrier Trunk (STIR/SHAKEN Level-A & Branded Calling)
-api.get('/telephony/config', async (req, res) => {
+// ------------------------------------------------------------------ Google Cloud + Google Voice Telephony Configuration
+api.get('/telephony/config', async (_req, res) => {
   try {
     const cfg = await getTelephonyConfig();
     res.json({
-      provider: cfg.provider || 'twilio',
+      provider: cfg.provider && cfg.provider !== 'twilio' ? cfg.provider : 'google_voice',
       enabled: cfg.enabled !== false,
       account_sid: cfg.account_sid || '',
       has_auth_token: Boolean(cfg.auth_token),
-      caller_id: cfg.caller_id || '+16024569681',
+      caller_id: cfg.caller_id || '+14803319455',
       caller_name: cfg.caller_name || 'Medicare Helpline by IWG',
       cnam: cfg.cnam || 'MEDICARE BY IWG',
       stir_shaken_level: cfg.stir_shaken_level || 'A',
       branded_calling_enabled: cfg.branded_calling_enabled !== false,
-      twiml_app_sid: cfg.twiml_app_sid || '',
       connection_id: cfg.connection_id || '',
     });
   } catch (err: any) {
@@ -893,16 +892,16 @@ api.get('/telephony/config', async (req, res) => {
 
 api.post('/telephony/config', async (req, res) => {
   if (req.user?.role !== 'admin' && req.user?.role !== 'manager') {
-    return res.status(403).json({ error: 'Only administrators can configure carrier trunks' });
+    return res.status(403).json({ error: 'Only administrators can configure Google Cloud telephony settings' });
   }
   try {
-    const { provider, account_sid, auth_token, caller_id, caller_name, cnam, twiml_app_sid, connection_id } = req.body;
+    const { provider, account_sid, auth_token, caller_id, caller_name, cnam, connection_id } = req.body;
     const current = await getTelephonyConfig();
     const newAuthToken = auth_token ? String(auth_token).trim() : current.auth_token;
 
     await q(`
-      INSERT INTO telephony_config (id, provider, enabled, account_sid, auth_token, caller_id, caller_name, cnam, stir_shaken_level, branded_calling_enabled, twiml_app_sid, connection_id, updated_at)
-      VALUES ('main', $1, true, $2, $3, $4, $5, $6, 'A', true, $7, $8, now())
+      INSERT INTO telephony_config (id, provider, enabled, account_sid, auth_token, caller_id, caller_name, cnam, stir_shaken_level, branded_calling_enabled, connection_id, updated_at)
+      VALUES ('main', $1, true, $2, $3, $4, $5, $6, 'A', true, $7, now())
       ON CONFLICT (id) DO UPDATE SET
         provider = EXCLUDED.provider,
         account_sid = EXCLUDED.account_sid,
@@ -910,21 +909,19 @@ api.post('/telephony/config', async (req, res) => {
         caller_id = EXCLUDED.caller_id,
         caller_name = EXCLUDED.caller_name,
         cnam = EXCLUDED.cnam,
-        twiml_app_sid = EXCLUDED.twiml_app_sid,
         connection_id = EXCLUDED.connection_id,
         updated_at = now()
     `, [
-      provider || 'twilio',
+      provider && provider !== 'twilio' ? provider : 'google_voice',
       account_sid ? String(account_sid).trim() : null,
       newAuthToken,
-      caller_id || '+16024569681',
+      caller_id || '+14803319455',
       caller_name || 'Medicare Helpline by IWG',
       cnam || 'MEDICARE BY IWG',
-      twiml_app_sid || null,
       connection_id || null,
     ]);
 
-    res.json({ ok: true, message: 'Enterprise carrier trunk configuration saved successfully with STIR/SHAKEN Level-A!' });
+    res.json({ ok: true, message: 'Google Cloud + Google Voice telephony configuration saved successfully!' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

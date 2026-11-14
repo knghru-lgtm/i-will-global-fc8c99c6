@@ -1,6 +1,34 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import { performance } from 'node:perf_hooks';
 
-const TARGET_BASE = process.env.SARAH_TEST_BASE_URL || 'http://127.0.0.1:4000';
+let targetBase = (process.env.SARAH_TEST_BASE_URL || 'http://127.0.0.1:4000').replace(/\/+$/, '');
+let localEphemeralServer = null;
+let localCloseDb = null;
+
+async function ensureServerTarget() {
+  try {
+    const r = await fetch(`${targetBase}/health`, { signal: AbortSignal.timeout(2500) });
+    if (r.ok) {
+      return;
+    }
+  } catch {
+    // If no explicit external URL was forced, boot local Google Cloud app ephemerally
+  }
+  if (process.env.SARAH_TEST_BASE_URL) {
+    throw new Error(`Target server ${targetBase} is not reachable on /health`);
+  }
+  const { createApp } = await import('../server/src/index.ts');
+  const { getDb, closeDb } = await import('../server/src/db/index.ts');
+  await getDb();
+  localCloseDb = closeDb;
+  const app = createApp();
+  localEphemeralServer = http.createServer(app);
+  await new Promise((resolve) => localEphemeralServer.listen(0, '127.0.0.1', resolve));
+  const port = localEphemeralServer.address().port;
+  targetBase = `http://127.0.0.1:${port}`;
+  console.log(`[Diagnostic] Booted local Google Cloud API server at ${targetBase}`);
+}
 
 const TEN_INBOUND_CUSTOMERS = [
   {
@@ -136,89 +164,102 @@ const TEN_INBOUND_CUSTOMERS = [
 ];
 
 async function postJson(pathname, body) {
-  const res = await fetch(`${TARGET_BASE}${pathname}`, {
+  const t0 = performance.now();
+  const res = await fetch(`${targetBase}${pathname}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  const ms = +(performance.now() - t0).toFixed(1);
   const raw = await res.text();
-  return { status: res.status, raw, json: JSON.parse(raw) };
+  return { status: res.status, ms, raw, json: JSON.parse(raw) };
 }
 
-for (const c of TEN_INBOUND_CUSTOMERS) {
-  const sessionId = `inbound-lead-call-${c.num}-${Date.now()}`;
+try {
+  await ensureServerTarget();
 
-  // Turn 0: Ring-1 Pickup
-  const ring = await postJson('/api/sarah/inbound', {
-    from: c.phone,
-    session_id: sessionId,
-    simulated_now_iso: c.simIso,
-    skip_inline_tts: true,
-  });
-  assert.equal(ring.status, 200);
+  for (const c of TEN_INBOUND_CUSTOMERS) {
+    const sessionId = `inbound-lead-call-${c.num}-${Date.now()}`;
 
-  // Turn 1: Product Inquiry
-  const turn1 = await postJson('/api/sarah/turn', {
-    session_id: sessionId,
-    message: `${c.openingQuestion} Can I schedule a ${c.apptType} appointment for ${c.apptTime}?`,
-    history: [{ speaker: 'sarah', text: ring.json?.reply || '' }],
-    context: { mode: 'inbound', source_channel: 'inbound_lead', product_interest: c.product, simulated_now_iso: c.simIso },
-  });
-  assert.equal(turn1.status, 200);
-
-  // Turn 2: Name + Phone Collection
-  const turn2 = await postJson('/api/sarah/turn', {
-    session_id: sessionId,
-    message: `Sure, my full name is ${c.name} and my best phone number is ${c.phone}.`,
-    history: [
-      { speaker: 'sarah', text: ring.json?.reply || '' },
-      { speaker: 'user', text: c.openingQuestion },
-      { speaker: 'sarah', text: turn1.json?.reply || '' },
-    ],
-    context: {
-      mode: 'inbound',
-      source_channel: 'inbound_lead',
-      lead_id: turn1.json?.lead_id || undefined,
-      prospect_name: c.name,
-      prospect_phone: c.phone,
-      product_interest: c.product,
-      appointment_type: c.apptType,
-      preferred_datetime: c.apptTime,
+    // Turn 0: Ring-1 Pickup
+    const ring = await postJson('/api/sarah/inbound', {
+      from: c.phone,
+      session_id: sessionId,
       simulated_now_iso: c.simIso,
-    },
-  });
-  assert.equal(turn2.status, 200);
+      skip_inline_tts: true,
+    });
+    assert.equal(ring.status, 200);
 
-  // Turn 3: Address + How Heard + Appointment Booking & Inbound Lead Tag
-  const turn3 = await postJson('/api/sarah/turn', {
-    session_id: sessionId,
-    message: `My street address is ${c.address}, I heard about you through ${c.howHeard}, and please lock in that ${c.apptType} appointment for ${c.apptTime}.`,
-    history: [
-      { speaker: 'sarah', text: turn1.json?.reply || '' },
-      { speaker: 'user', text: `My full name is ${c.name} and my phone number is ${c.phone}.` },
-      { speaker: 'sarah', text: turn2.json?.reply || '' },
-    ],
-    context: {
-      mode: 'inbound',
-      source_channel: 'inbound_lead',
-      lead_id: turn2.json?.lead_id || turn1.json?.lead_id || undefined,
-      prospect_name: c.name,
-      prospect_phone: c.phone,
-      address: c.address,
-      state: c.state,
-      how_heard: c.howHeard,
-      product_interest: c.product,
-      appointment_type: c.apptType,
-      preferred_datetime: c.apptTime,
-      simulated_now_iso: c.simIso,
-    },
-  });
-  assert.equal(turn3.status, 200);
-  assert.equal(Boolean(turn3.json?.appointment?.success), true);
+    // Turn 1: Product Inquiry
+    const turn1 = await postJson('/api/sarah/turn', {
+      session_id: sessionId,
+      message: `${c.openingQuestion} Can I schedule a ${c.apptType} appointment for ${c.apptTime}?`,
+      history: [{ speaker: 'sarah', text: ring.json?.reply || '' }],
+      context: { mode: 'inbound', source_channel: 'inbound_lead', product_interest: c.product, simulated_now_iso: c.simIso },
+    });
+    assert.equal(turn1.status, 200);
 
-  console.log(
-    `[PASS Call #${String(c.num).padStart(2, '0')}] ${c.name} | ${c.phone} | ${c.product} | Tag: ${turn3.json?.lead_source} | Lead ID: ${turn3.json?.lead_id}`
-  );
+    // Turn 2: Name + Phone Collection
+    const turn2 = await postJson('/api/sarah/turn', {
+      session_id: sessionId,
+      message: `Sure, my full name is ${c.name} and my best phone number is ${c.phone}.`,
+      history: [
+        { speaker: 'sarah', text: ring.json?.reply || '' },
+        { speaker: 'user', text: c.openingQuestion },
+        { speaker: 'sarah', text: turn1.json?.reply || '' },
+      ],
+      context: {
+        mode: 'inbound',
+        source_channel: 'inbound_lead',
+        lead_id: turn1.json?.lead_id || undefined,
+        prospect_name: c.name,
+        prospect_phone: c.phone,
+        product_interest: c.product,
+        appointment_type: c.apptType,
+        preferred_datetime: c.apptTime,
+        simulated_now_iso: c.simIso,
+      },
+    });
+    assert.equal(turn2.status, 200);
+
+    // Turn 3: Address + How Heard + Appointment Booking & Inbound Lead Tag
+    const turn3 = await postJson('/api/sarah/turn', {
+      session_id: sessionId,
+      message: `My street address is ${c.address}, I heard about you through ${c.howHeard}, and please lock in that ${c.apptType} appointment for ${c.apptTime}.`,
+      history: [
+        { speaker: 'sarah', text: turn1.json?.reply || '' },
+        { speaker: 'user', text: `My full name is ${c.name} and my phone number is ${c.phone}.` },
+        { speaker: 'sarah', text: turn2.json?.reply || '' },
+      ],
+      context: {
+        mode: 'inbound',
+        source_channel: 'inbound_lead',
+        lead_id: turn2.json?.lead_id || turn1.json?.lead_id || undefined,
+        prospect_name: c.name,
+        prospect_phone: c.phone,
+        address: c.address,
+        state: c.state,
+        how_heard: c.howHeard,
+        product_interest: c.product,
+        appointment_type: c.apptType,
+        preferred_datetime: c.apptTime,
+        simulated_now_iso: c.simIso,
+      },
+    });
+    assert.equal(turn3.status, 200);
+    assert.equal(Boolean(turn3.json?.appointment?.success), true);
+    assert.equal(turn3.json?.lead_source, 'Inbound Lead');
+
+    console.log(
+      `[PASS Call #${String(c.num).padStart(2, '0')}] Ring1: ${ring.ms}ms | ${c.name} | ${c.phone} | ${c.product} | Tag: ${turn3.json?.lead_source} | Lead ID: ${turn3.json?.lead_id}`
+    );
+  }
+  console.log('=== ALL 10 COMPLETE INBOUND LEAD CALLS RECORDED IN CRM ===');
+} finally {
+  if (localEphemeralServer) {
+    await new Promise((resolve) => localEphemeralServer.close(resolve));
+  }
+  if (localCloseDb) {
+    await localCloseDb().catch(() => {});
+  }
 }
-console.log('=== ALL 10 COMPLETE INBOUND LEAD CALLS RECORDED IN CRM ===');
-
