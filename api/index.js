@@ -12297,9 +12297,12 @@ async function handleSarahHttpTurn(params) {
   ).trim();
   let transcribedFromWebRtcAudio = false;
   if (!rawMessage && params.caller_audio_base64) {
+    let sttModelSucceeded = false;
     if (isAIEnabled() && !isGeminiBillingDepleted()) {
       const ai2 = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-      const sttModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash"];
+      const sttModels = Array.from(
+        new Set(["gemini-2.5-flash", "gemini-2.5-flash-lite", config.gemini.model, "gemini-2.0-flash"].filter(Boolean))
+      );
       let transcribed = "";
       for (const sttModel of sttModels) {
         try {
@@ -12327,8 +12330,9 @@ async function handleSarahHttpTurn(params) {
                 maxOutputTokens: 120
               }
             }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("STT timeout")), 3200))
+            new Promise((_, reject) => setTimeout(() => reject(new Error("STT timeout")), 3500))
           ]);
+          sttModelSucceeded = true;
           transcribed = String(sttRes?.text || "").replace(/^["']|["']$/g, "").trim();
           if (transcribed) break;
         } catch (sttErr) {
@@ -12338,7 +12342,7 @@ async function handleSarahHttpTurn(params) {
       if (transcribed && !/^silence$/i.test(transcribed) && transcribed.length >= 2) {
         rawMessage = transcribed;
         transcribedFromWebRtcAudio = true;
-      } else if (!isGeminiBillingDepleted()) {
+      } else if (sttModelSucceeded) {
         return {
           ok: true,
           is_silence: true,
@@ -12351,7 +12355,7 @@ async function handleSarahHttpTurn(params) {
         };
       }
     }
-    if (!rawMessage && isGeminiBillingDepleted()) {
+    if (!rawMessage && !sttModelSucceeded) {
       const approxBytes = Math.floor(String(params.caller_audio_base64).length * 3 / 4);
       if (approxBytes < 900) {
         return {

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
 
@@ -117,8 +117,23 @@ function normalizeCookiesForCdp(rawCookies) {
   return out;
 }
 
+function resolveChromeBinary() {
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].filter(Boolean);
+  for (const bin of candidates) {
+    if (existsSync(bin)) return bin;
+  }
+  return '/usr/bin/google-chrome';
+}
+
 async function runBrowserSession(cookies) {
-  const execPath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+  const execPath = resolveChromeBinary();
   console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Launching Chromium with ${cookies.length} Google Voice cookies...`);
 
   const browser = await puppeteer.launch({
