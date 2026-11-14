@@ -6982,7 +6982,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEq
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import path3 from "node:path";
-var CURRENT_GV_EXTENSION_BUILD = "2026-11-14-v13";
+var CURRENT_GV_EXTENSION_BUILD = "2026-11-14-v14";
 var DEFAULT_GV_BRIDGE_TOKEN = "iwg-sarah-cloud-bridge-v10-9455";
 var DISK_COOKIE_VAULT_PATH = path3.resolve(repoRoot, "server/data/gv-cookie-vault.enc.json");
 var state = {
@@ -7322,12 +7322,16 @@ async function getGvWatchdogStatus() {
   const localExtensionOnline = Boolean(localAgeMs !== null && localAgeMs < 15e3);
   const online = cloudDaemonOnline || localExtensionOnline;
   const ageMs = cloudDaemonOnline ? cloudAgeMs : localExtensionOnline ? localAgeMs : state.lastHeartbeatAt ? now - state.lastHeartbeatAt : null;
+  const sessionAuthenticated = Boolean(
+    cloudDaemonOnline || localExtensionOnline && state.localExtension?.sessionAuthenticated !== false
+  );
   return {
     ok: true,
     online,
     cloudDaemonOnline,
     localExtensionOnline,
     laptopIndependent: cloudDaemonOnline,
+    sessionAuthenticated,
     activeMode: cloudDaemonOnline ? "cloud_daemon_24_7" : localExtensionOnline ? "laptop_extension_fallback" : "offline",
     heartbeatAgeMs: ageMs,
     cloudHeartbeatAgeMs: cloudAgeMs,

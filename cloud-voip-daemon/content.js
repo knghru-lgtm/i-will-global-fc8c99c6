@@ -7,7 +7,7 @@
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
-  const EXTENSION_BUILD = '2026-11-14-v13';
+  const EXTENSION_BUILD = '2026-11-14-v14';
   const SELECTORS = [
     'button[aria-label*="Answer" i]',
     'button[aria-label*="Accept" i]',
@@ -412,8 +412,9 @@
 
       // First route through the MAIN-world WebRTC Virtual Audio Bridge so the phone caller hears Sarah directly over WebRTC
       const hasWebRtcBridge =
-        typeof document !== 'undefined' &&
-        document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready';
+        Boolean(typeof window !== 'undefined' && window.__IWG_WEBRTC_BRIDGE_INSTALLED__) ||
+        (typeof document !== 'undefined' &&
+          document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready');
 
       if (hasWebRtcBridge) {
         const requestId = `wav-${++playReqCounter}-${Date.now()}`;
@@ -1085,6 +1086,7 @@
         title: document.title || '',
         visibilityState: document.visibilityState || 'visible',
         receivingCallsText:
+          window.__IWG_WEBRTC_BRIDGE_INSTALLED__ ||
           document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready'
             ? 'Zero-Echo Pure Digital WebRTC Isolation ACTIVE'
             : 'HTML5 Audio Fallback',

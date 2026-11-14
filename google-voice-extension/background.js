@@ -1,9 +1,10 @@
-const EXTENSION_BUILD = '2026-11-14-v13';
+const EXTENSION_BUILD = '2026-11-14-v14';
 // Cloud-first pointing strictly to Google Cloud VM (https://voice.iwillglobal.com) + IPv4 local fallback
 const API_BASES = ['https://voice.iwillglobal.com', 'http://127.0.0.1:4000'];
 const BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 let hasAutoOpenedGvTab = false;
 let lastCookieSyncTs = 0;
+let cookieSyncInFlight = false;
 let cookieChangeDebounceTimer = null;
 const tabReloadTimestamps = new Map();
 
@@ -31,44 +32,58 @@ async function callSarahApi(endpoint, payload, extraHeaders = {}) {
 
 function syncGoogleVoiceCookiesToCloud(force = false) {
   const now = Date.now();
-  if (!force && now - lastCookieSyncTs < 4 * 60 * 1000) return;
+  if (cookieSyncInFlight) return;
+  if (!force && lastCookieSyncTs > 0 && now - lastCookieSyncTs < 3 * 60 * 1000) return;
   if (!chrome.cookies || typeof chrome.cookies.getAll !== 'function') return;
 
+  cookieSyncInFlight = true;
   try {
     chrome.cookies.getAll({}, async (allCookies) => {
-      void chrome.runtime.lastError;
-      if (!Array.isArray(allCookies) || allCookies.length === 0) return;
-      const googleCookies = allCookies.filter((c) => {
-        const d = String(c.domain || '').toLowerCase();
-        return d.endsWith('google.com') || d === 'google.com';
-      });
-      const hasAuth = googleCookies.some((c) =>
-        ['SID', '__Secure-1PSID', '__Secure-3PSID'].includes(String(c.name))
-      );
-      if (!hasAuth) return;
+      try {
+        void chrome.runtime.lastError;
+        if (!Array.isArray(allCookies) || allCookies.length === 0) return;
+        const googleCookies = allCookies.filter((c) => {
+          const d = String(c.domain || '').toLowerCase();
+          return d.endsWith('google.com') || d === 'google.com';
+        });
+        const hasAuth = googleCookies.some((c) =>
+          ['SID', '__Secure-1PSID', '__Secure-3PSID'].includes(String(c.name))
+        );
+        if (!hasAuth) return;
 
-      lastCookieSyncTs = now;
-      for (const base of API_BASES) {
-        try {
-          const res = await fetch(`${base}/api/sarah/gv-session-sync`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-iwg-bridge-token': BRIDGE_TOKEN,
-            },
-            body: JSON.stringify({
-              cookies: googleCookies,
-              userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-              source: `chrome-extension-${EXTENSION_BUILD}`,
-            }),
-          });
-          if (res.ok) {
-            console.log(`[IWG Cloud Cookie Sync] Synced ${googleCookies.length} Google Voice cookies -> ${base}`);
-          }
-        } catch { }
+        for (const base of API_BASES) {
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 10000);
+            const res = await fetch(`${base}/api/sarah/gv-session-sync`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-iwg-bridge-token': BRIDGE_TOKEN,
+              },
+              body: JSON.stringify({
+                cookies: googleCookies,
+                userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+                source: `chrome-extension-${EXTENSION_BUILD}`,
+              }),
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+            if (res.ok) {
+              if (base.startsWith('https://')) {
+                lastCookieSyncTs = Date.now();
+              }
+              console.log(`[IWG Cloud Cookie Sync] Synced ${googleCookies.length} Google Voice cookies -> ${base}`);
+            }
+          } catch { }
+        }
+      } finally {
+        cookieSyncInFlight = false;
       }
     });
-  } catch { }
+  } catch {
+    cookieSyncInFlight = false;
+  }
 }
 
 // Auto-push rotated Google auth cookies (__Secure-1PSIDTS, SID, etc.) within 15s of rotation
@@ -149,7 +164,7 @@ function ensureGoogleVoiceTabsHealthy() {
 ensureGoogleVoiceTabsHealthy();
 syncGoogleVoiceCookiesToCloud(true);
 setInterval(ensureGoogleVoiceTabsHealthy, 3000);
-setInterval(() => syncGoogleVoiceCookiesToCloud(false), 60000);
+setInterval(() => syncGoogleVoiceCookiesToCloud(false), 15000);
 
 chrome.runtime.onInstalled.addListener(() => {
   ensureGoogleVoiceTabsHealthy();

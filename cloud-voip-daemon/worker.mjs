@@ -16,7 +16,7 @@ const API_BASES = Array.from(new Set([LOCAL_API_BASE, PUBLIC_API_BASE]));
 const BRIDGE_TOKEN = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-9455';
 const REGION = process.env.GOOGLE_CLOUD_REGION || 'us-west1';
 const INSTANCE_ID = `gcloud-${REGION}-${randomUUID().slice(0, 8)}`;
-const EXTENSION_BUILD = '2026-11-14-v13';
+const EXTENSION_BUILD = '2026-11-14-v14';
 const MAX_IDLE_SESSION_AGE_MS = 6 * 60 * 60 * 1000;
 
 async function fetchDaemonApi(pathname, init = {}) {
@@ -506,6 +506,9 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
         /sign\s*in/i.test(title);
 
       if (isSignedOut) {
+        try {
+          rmSync(nativeVmAuthMarker, { force: true });
+        } catch { }
         console.warn(
           `[Sarah Cloud Daemon ${INSTANCE_ID}] Session unauthenticated at ${currentUrl} — reload Chrome extension (v3.3.0) or run ./scripts/vm-gv-direct-login.sh once on VM.`
         );
@@ -517,6 +520,21 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
         });
         return { reason: 'signed_out' };
       }
+
+      // Ensure controller stays attached across SPA route updates & keep heartbeat <8s fresh
+      await page
+        .evaluate(
+          `${configBootstrap}\nif (!window.__IWG_GV_RECEPTIONIST_ACTIVE__ && location.hostname === 'voice.google.com') {\n${contentControllerCode}\n}`
+        )
+        .catch(() => { });
+      await reportDaemonHeartbeat({
+        url: currentUrl,
+        title: title || 'Google Voice',
+        visibilityState: 'visible',
+        sessionAuthenticated: true,
+        hasPreloadedGreeting: true,
+        receivingCallsText: 'Zero-Echo Pure Digital WebRTC Isolation ACTIVE',
+      });
 
       // Persist rotated Google cookies back to AES-256 Cloud Vault every 4 mins
       if (Date.now() - lastRefreshSave > 4 * 60 * 1000) {
@@ -581,14 +599,19 @@ async function main() {
       continue;
     }
 
-    if (consecutiveSignOuts >= 2 && updatedAt && updatedAt === lastFailedCookieStamp) {
+    if (
+      consecutiveSignOuts >= 2 &&
+      updatedAt &&
+      updatedAt === lastFailedCookieStamp &&
+      !existsSync(path.join(CHROME_PROFILE_DIR, '.native-vm-auth'))
+    ) {
       await reportDaemonHeartbeat({
         url: 'https://accounts.google.com',
         title: 'Awaiting fresh Google Voice cookie sync (v3.3.0) or one-time VM login',
         sessionAuthenticated: false,
         receivingCallsText: 'Paused Chromium — Reload Extension v3.3.0 or Run vm-gv-direct-login.sh',
       });
-      await new Promise((r) => setTimeout(r, 8000));
+      await new Promise((r) => setTimeout(r, 3000));
       continue;
     }
 

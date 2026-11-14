@@ -6,7 +6,7 @@ import path from 'node:path';
 import { config, repoRoot } from '../config.ts';
 import { one, q } from '../db/index.ts';
 
-export const CURRENT_GV_EXTENSION_BUILD = '2026-11-14-v13';
+export const CURRENT_GV_EXTENSION_BUILD = '2026-11-14-v14';
 export const DEFAULT_GV_BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 const DISK_COOKIE_VAULT_PATH = path.resolve(repoRoot, 'server/data/gv-cookie-vault.enc.json');
 
@@ -494,12 +494,17 @@ export async function getGvWatchdogStatus() {
   const online = cloudDaemonOnline || localExtensionOnline;
   const ageMs = cloudDaemonOnline ? cloudAgeMs : localExtensionOnline ? localAgeMs : state.lastHeartbeatAt ? now - state.lastHeartbeatAt : null;
 
+  const sessionAuthenticated = Boolean(
+    cloudDaemonOnline || (localExtensionOnline && state.localExtension?.sessionAuthenticated !== false)
+  );
+
   return {
     ok: true,
     online,
     cloudDaemonOnline,
     localExtensionOnline,
     laptopIndependent: cloudDaemonOnline,
+    sessionAuthenticated,
     activeMode: cloudDaemonOnline
       ? 'cloud_daemon_24_7'
       : localExtensionOnline

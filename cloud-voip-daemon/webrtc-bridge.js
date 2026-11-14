@@ -8,9 +8,21 @@
     return;
   }
   window.__IWG_WEBRTC_BRIDGE_INSTALLED__ = true;
-  try {
-    document.documentElement?.setAttribute('data-iwg-webrtc-bridge', 'ready');
-  } catch {}
+  function markBridgeReadyOnDom() {
+    try {
+      if (typeof document !== 'undefined' && document.documentElement) {
+        document.documentElement.setAttribute('data-iwg-webrtc-bridge', 'ready');
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+  if (!markBridgeReadyOnDom() && typeof document !== 'undefined') {
+    document.addEventListener('readystatechange', markBridgeReadyOnDom);
+    document.addEventListener('DOMContentLoaded', markBridgeReadyOnDom, { once: true });
+    setTimeout(markBridgeReadyOnDom, 50);
+    setTimeout(markBridgeReadyOnDom, 400);
+  }
 
   let bridgeAudioCtx = null;
   let virtualMicDest = null;
