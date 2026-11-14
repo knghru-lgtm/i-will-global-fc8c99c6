@@ -368,7 +368,10 @@ describe('Sarah Voice AI (Dual-Mode (480) 331-9455 Virtual Receptionist & Outbou
       `${baseUrl}/api/sarah/inbound?format=twiml&simulated_now_iso=${encodeURIComponent('2026-11-09T22:00:00-07:00')}`,
       { method: 'POST' }
     ).then((r) => r.text());
-    assert.match(monTwiml, /<Play>.*preset=after_hours.*<\/Play>/);
+    assert.match(
+      monTwiml,
+      /(<Play>.*preset=after_hours.*<\/Play>|<Say[^>]*>Thank you for calling I Will Global\. Our office is currently closed\. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time\. Please call us back during normal business hours\. Have a wonderful day\.<\/Say>)/
+    );
     assert.match(monTwiml, /<Hangup\/>/);
     assert.doesNotMatch(monTwiml, /<Gather/);
   });

@@ -154,6 +154,18 @@ function resolveChromeBinary() {
   return '/usr/bin/google-chrome';
 }
 
+async function waitForLocalApiReady(maxWaitMs = 20000) {
+  const deadline = Date.now() + maxWaitMs;
+  while (!shuttingDown && Date.now() < deadline) {
+    try {
+      const res = await fetchDaemonApi('/health');
+      if (res && res.ok) return true;
+    } catch { }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
+
 async function launchResilientBrowser(execPath) {
   const chromeArgs = [
     '--no-sandbox',
@@ -162,6 +174,7 @@ async function launchResilientBrowser(execPath) {
     '--disable-gpu',
     '--disable-software-rasterizer',
     '--disable-extensions',
+    '--user-data-dir=/tmp/iwg-gv-daemon-profile',
     '--autoplay-policy=no-user-gesture-required',
     '--use-fake-ui-for-media-stream',
     '--disable-background-timer-throttling',
@@ -298,6 +311,7 @@ async function runBrowserSession(cookies) {
 
 async function main() {
   console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Starting 24/7 Cloud Receptionist for +14803319455 -> ${PUBLIC_API_BASE}`);
+  await waitForLocalApiReady(20000);
   while (!shuttingDown) {
     const cookies = await fetchCloudCookies();
     if (!cookies || cookies.length === 0) {

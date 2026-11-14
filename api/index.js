@@ -3520,8 +3520,8 @@ async function createAdapter() {
 }
 function loadSchemaSql() {
   const candidates = [
-    new URL("./schema.sql", import.meta.url),
-    new URL("../server/src/db/schema.sql", import.meta.url)
+    new URL("../server/src/db/schema.sql", import.meta.url),
+    new URL("./schema.sql", import.meta.url)
   ];
   for (const url of candidates) {
     try {
@@ -3541,6 +3541,7 @@ async function getDb() {
       await a.exec(schema);
       try {
         await a.exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_meet_url TEXT;`);
+        await a.exec(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();`);
       } catch {
       }
       adapter = a;
@@ -3554,6 +3555,11 @@ async function getDb() {
     })();
   }
   return ready;
+}
+async function closeDb() {
+  if (adapter) await adapter.close();
+  adapter = null;
+  ready = null;
 }
 async function q(sql, params = []) {
   const db = await getDb();
@@ -14835,6 +14841,16 @@ if (isMain) {
     }).catch(() => {
     });
   });
+  const gracefulShutdown = (sig) => {
+    console.log(`[IWG Google Cloud API] ${sig} received \u2014 closing HTTP server and DB cleanly...`);
+    server.close(() => {
+      closeDb().catch(() => {
+      }).finally(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(0), 3500).unref();
+  };
+  process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.once("SIGINT", () => gracefulShutdown("SIGINT"));
 }
 var index_default = createApp();
 export {

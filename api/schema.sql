@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS users (
   google_tokens JSONB,
   google_meet_url TEXT,
   daily_call_goal INT NOT NULL DEFAULT 80,
+  caller_id_name TEXT DEFAULT 'Medicare Helpline by IWG',
+  cnam TEXT DEFAULT 'MEDICARE BY IWG',
+  spam_status TEXT DEFAULT 'Whitelisted',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -307,6 +310,48 @@ CREATE TABLE IF NOT EXISTS audit_log (
   entity_id TEXT,
   details JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS caller_id_registry (
+  id TEXT PRIMARY KEY,
+  phone_number TEXT NOT NULL UNIQUE,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  assigned_name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT 'Medicare Helpline by IWG',
+  cnam TEXT NOT NULL DEFAULT 'MEDICARE BY IWG',
+  carrier TEXT NOT NULL DEFAULT 'Google Voice / Bandwidth.com',
+  free_caller_registry_status TEXT NOT NULL DEFAULT 'Whitelisted',
+  hiya_status TEXT NOT NULL DEFAULT 'Clean (0% Spam Risk)',
+  first_orion_status TEXT NOT NULL DEFAULT 'Verified Business',
+  tns_status TEXT NOT NULL DEFAULT 'Approved Caller',
+  stir_shaken_status TEXT NOT NULL DEFAULT 'A-Attestation (Verified)',
+  call_reason TEXT NOT NULL DEFAULT 'Medicare Consultations & Annual Plan Reviews',
+  last_verified_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS telephony_config (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL DEFAULT 'google_voice',
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  account_sid TEXT,
+  auth_token TEXT,
+  caller_id TEXT DEFAULT '+14803319455',
+  caller_name TEXT DEFAULT 'Medicare Helpline by IWG',
+  cnam TEXT DEFAULT 'MEDICARE BY IWG',
+  stir_shaken_level TEXT DEFAULT 'A',
+  branded_calling_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  twiml_app_sid TEXT,
+  connection_id TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Generic key/value settings store (Google Voice encrypted cookie vault, dialer lease, feature flags)
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_leads_owner ON leads(owner_id);

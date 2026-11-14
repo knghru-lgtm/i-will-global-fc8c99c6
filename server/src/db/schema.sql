@@ -333,11 +333,11 @@ CREATE TABLE IF NOT EXISTS caller_id_registry (
 
 CREATE TABLE IF NOT EXISTS telephony_config (
   id TEXT PRIMARY KEY,
-  provider TEXT NOT NULL DEFAULT 'twilio',
+  provider TEXT NOT NULL DEFAULT 'google_voice',
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   account_sid TEXT,
   auth_token TEXT,
-  caller_id TEXT DEFAULT '+16024569681',
+  caller_id TEXT DEFAULT '+14803319455',
   caller_name TEXT DEFAULT 'Medicare Helpline by IWG',
   cnam TEXT DEFAULT 'MEDICARE BY IWG',
   stir_shaken_level TEXT DEFAULT 'A',
@@ -347,26 +347,11 @@ CREATE TABLE IF NOT EXISTS telephony_config (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS bland_config (
-  id TEXT PRIMARY KEY DEFAULT 'main',
-  api_key TEXT,
-  enabled BOOLEAN NOT NULL DEFAULT TRUE,
-  pathway_id TEXT DEFAULT '3b13b658-e85d-4d14-a24a-868b61040c42',
-  github_repo TEXT,
-  default_voice TEXT DEFAULT 'maya',
-  model TEXT DEFAULT 'enhanced',
-  language TEXT DEFAULT 'en-US',
-  from_number TEXT DEFAULT '+16024569681',
-  transfer_phone_number TEXT DEFAULT '+16024569681',
-  prompt_template TEXT,
-  webhook_url TEXT,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Generic key/value settings store (Bland AI config, dialer lease, feature flags)
+-- Generic key/value settings store (Google Voice encrypted cookie vault, dialer lease, feature flags)
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
-  value JSONB NOT NULL DEFAULT '{}'::jsonb
+  value JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_leads_owner ON leads(owner_id);

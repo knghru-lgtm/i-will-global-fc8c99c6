@@ -13,7 +13,7 @@
     "dev:client": "npm run dev --workspace client",
     "seed": "npm run seed --workspace server",
     "test": "npm run test --workspace server",
-    "build:api": "npx esbuild server/src/index.ts --bundle --platform=node --format=esm --packages=external --outfile=api/index.js",
+    "build:api": "npx esbuild server/src/index.ts --bundle --platform=node --format=esm --packages=external --outfile=api/index.js && node --input-type=module -e \"import { copyFileSync } from 'node:fs'; copyFileSync('server/src/db/schema.sql','api/schema.sql')\"",
     "build": "npm run build:api && npm run build --workspace client",
     "publish": "npm run build",
     "start": "node api/index.js"

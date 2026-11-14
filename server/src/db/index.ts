@@ -70,8 +70,8 @@ async function createAdapter(): Promise<Adapter> {
 
 function loadSchemaSql(): string {
   const candidates = [
-    new URL('./schema.sql', import.meta.url),
     new URL('../server/src/db/schema.sql', import.meta.url),
+    new URL('./schema.sql', import.meta.url),
   ];
   for (const url of candidates) {
     try {
@@ -91,6 +91,7 @@ export async function getDb(): Promise<Adapter> {
       await a.exec(schema);
       try {
         await a.exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_meet_url TEXT;`);
+        await a.exec(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();`);
       } catch {}
       adapter = a;
       try {

@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, isAIEnabled, isGoogleEnabled } from './config.ts';
-import { getDb } from './db/index.ts';
+import { getDb, closeDb } from './db/index.ts';
 import { requireAuth } from './auth.ts';
 import { records } from './routes/records.ts';
 import { calls } from './routes/calls.ts';
@@ -377,6 +377,18 @@ if (isMain) {
       })
       .catch(() => {});
   });
+
+  const gracefulShutdown = (sig: string) => {
+    console.log(`[IWG Google Cloud API] ${sig} received — closing HTTP server and DB cleanly...`);
+    server.close(() => {
+      closeDb()
+        .catch(() => {})
+        .finally(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(0), 3500).unref();
+  };
+  process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.once('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 export default createApp(); 
