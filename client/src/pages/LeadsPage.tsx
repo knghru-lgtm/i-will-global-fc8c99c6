@@ -1090,6 +1090,7 @@ export const LeadsPage: React.FC = () => {
           style={{ padding: '0.55rem 0.85rem', borderRadius: '6px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: '0.88rem' }}
         >
           <option value="">All Lead Tags / Sources</option>
+          <option value="Inbound Lead">📞 Inbound Lead</option>
           <option value="Call-In Lead">📞 Call-In Lead</option>
           <option value="Website Traffic">🌐 Website Traffic</option>
           <option value="Direct Lead">Direct Lead</option>
@@ -1181,7 +1182,7 @@ export const LeadsPage: React.FC = () => {
                               fontWeight: 700,
                             }}
                           >
-                            📞 Call-In Lead
+                            📞 {l.source || 'Inbound Lead'}
                           </span>
                         ) : /website/i.test(String(l.source || '')) ? (
                           <span
@@ -2020,7 +2021,8 @@ export const LeadsPage: React.FC = () => {
 
               <div>
                 <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Lead Tag / Source</label>
-                <select value={newLead.source || 'Call-In Lead'} onChange={(e) => setNewLead({ ...newLead, source: e.target.value })} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', color: '#fff' }}>
+                <select value={newLead.source || 'Inbound Lead'} onChange={(e) => setNewLead({ ...newLead, source: e.target.value })} style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', color: '#fff' }}>
+                  <option value="Inbound Lead">📞 Inbound Lead</option>
                   <option value="Call-In Lead">📞 Call-In Lead</option>
                   <option value="Website Traffic">🌐 Website Traffic</option>
                   <option value="Direct Lead">Direct Lead</option>

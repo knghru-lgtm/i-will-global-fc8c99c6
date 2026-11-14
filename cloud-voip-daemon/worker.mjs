@@ -95,23 +95,45 @@ function normalizeCookiesForCdp(rawCookies) {
   const out = [];
   for (const c of rawCookies) {
     if (!c?.name || typeof c.value !== 'string' || !c.domain) continue;
+    const name = String(c.name);
+    const cleanHost = String(c.domain).replace(/^\.+/, '');
+    if (!cleanHost) continue;
+
+    const isHostPrefix = name.startsWith('__Host-');
+    const isSecurePrefix = isHostPrefix || name.startsWith('__Secure-');
+    const ss = String(c.sameSite || '').toLowerCase();
+    let sameSite;
+    if (ss === 'no_restriction' || ss === 'none') sameSite = 'None';
+    else if (ss === 'lax') sameSite = 'Lax';
+    else if (ss === 'strict') sameSite = 'Strict';
+
+    const secure = Boolean(c.secure) || isSecurePrefix || sameSite === 'None';
     const entry = {
-      name: String(c.name),
+      name,
       value: String(c.value),
-      domain: String(c.domain),
-      path: String(c.path || '/'),
-      secure: Boolean(c.secure),
+      path: isHostPrefix ? '/' : String(c.path || '/'),
+      secure,
       httpOnly: Boolean(c.httpOnly),
     };
-    if (typeof c.expirationDate === 'number' && c.expirationDate > 0) {
-      entry.expires = c.expirationDate;
-    } else if (typeof c.expires === 'number' && c.expires > 0) {
-      entry.expires = c.expires;
+
+    // RFC 6265bis / Chromium CDP rule: __Host- cookies MUST omit `domain` and specify `url` instead
+    if (isHostPrefix) {
+      entry.url = `https://${cleanHost}/`;
+    } else {
+      entry.domain = String(c.domain);
     }
-    const ss = String(c.sameSite || '').toLowerCase();
-    if (ss === 'no_restriction' || ss === 'none') entry.sameSite = 'None';
-    else if (ss === 'lax') entry.sameSite = 'Lax';
-    else if (ss === 'strict') entry.sameSite = 'Strict';
+
+    if (sameSite) entry.sameSite = sameSite;
+
+    const exp =
+      typeof c.expirationDate === 'number' && c.expirationDate > 0
+        ? c.expirationDate
+        : typeof c.expires === 'number' && c.expires > 0
+          ? c.expires
+          : null;
+    if (exp && Number.isFinite(exp)) {
+      entry.expires = exp;
+    }
     out.push(entry);
   }
   return out;
@@ -132,31 +154,50 @@ function resolveChromeBinary() {
   return '/usr/bin/google-chrome';
 }
 
+async function launchResilientBrowser(execPath) {
+  const chromeArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--disable-extensions',
+    '--autoplay-policy=no-user-gesture-required',
+    '--use-fake-ui-for-media-stream',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults',
+    '--window-size=1280,800',
+  ];
+
+  const hasX11Display = Boolean(process.env.DISPLAY) && existsSync('/tmp/.X11-unix');
+  if (hasX11Display) {
+    try {
+      return await puppeteer.launch({
+        executablePath: execPath,
+        headless: false,
+        ignoreDefaultArgs: ['--mute-audio'],
+        args: chromeArgs,
+      });
+    } catch (xErr) {
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] X11 launch unavailable (${xErr?.message}); falling back to Chrome headless=new...`);
+    }
+  }
+
+  return await puppeteer.launch({
+    executablePath: execPath,
+    headless: 'new',
+    ignoreDefaultArgs: ['--mute-audio'],
+    args: chromeArgs,
+  });
+}
+
 async function runBrowserSession(cookies) {
   const execPath = resolveChromeBinary();
   console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Launching Chromium with ${cookies.length} Google Voice cookies...`);
 
-  const browser = await puppeteer.launch({
-    executablePath: execPath,
-    headless: false, // Runs inside Xvfb :99 so visibilityState === "visible" & WebAudio runs unthrottled
-    ignoreDefaultArgs: ['--mute-audio'],
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--disable-software-rasterizer',
-      '--disable-extensions',
-      '--renderer-process-limit=2',
-      '--js-flags=--max-old-space-size=256',
-      '--autoplay-policy=no-user-gesture-required',
-      '--use-fake-ui-for-media-stream',
-      '--disable-background-timer-throttling',
-      '--disable-renderer-backgrounding',
-      '--disable-backgrounding-occluded-windows',
-      '--window-size=1280,800',
-    ],
-  });
+  const browser = await launchResilientBrowser(execPath);
   activeBrowser = browser;
 
   try {
@@ -171,23 +212,42 @@ async function runBrowserSession(cookies) {
 
     const cdpCookies = normalizeCookiesForCdp(cookies);
     if (cdpCookies.length > 0) {
-      await client.send('Network.setCookies', { cookies: cdpCookies });
+      let applied = 0;
+      try {
+        await client.send('Network.setCookies', { cookies: cdpCookies });
+        applied = cdpCookies.length;
+      } catch {
+        for (const ck of cdpCookies) {
+          try {
+            await client.send('Network.setCookie', ck);
+            applied++;
+          } catch { }
+        }
+      }
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Injected ${applied}/${cdpCookies.length} Google Voice cookies into Chrome session.`);
     }
 
+    const visibilityShim = `
+      try {
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+      } catch {}
+    `;
     const configBootstrap = `window.__IWG_CLOUD_DAEMON_CONFIG__ = ${JSON.stringify({
       runner: 'cloud-daemon',
       instanceId: INSTANCE_ID,
       region: REGION,
-      apiBase: PUBLIC_API_BASE,
+      apiBase: 'https://voice.iwillglobal.com',
     })};`;
 
     // Inject Zero-Echo WebRTC Bridge BEFORE any page scripts run
-    await page.evaluateOnNewDocument(`${configBootstrap}\n${webrtcBridgeCode}`);
+    await page.evaluateOnNewDocument(`${visibilityShim}\n${configBootstrap}\n${webrtcBridgeCode}`);
 
     await page.goto('https://voice.google.com/u/0/calls', {
       waitUntil: 'domcontentloaded',
       timeout: 45000,
     });
+    console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Loaded Google Voice page: ${page.url()}`);
 
     await new Promise((r) => setTimeout(r, 3500));
 
@@ -254,10 +314,17 @@ async function main() {
     try {
       await runBrowserSession(cookies);
     } catch (err) {
-      console.error(`[Sarah Cloud Daemon ${INSTANCE_ID}] Browser loop error:`, err?.message);
+      const msg = err?.message || String(err);
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Browser loop error: ${msg}`);
+      await reportDaemonHeartbeat({
+        url: 'https://voice.google.com/u/0/calls',
+        title: `Session restart: ${msg.slice(0, 120)}`,
+        sessionAuthenticated: false,
+        receivingCallsText: `Recovering (${msg.slice(0, 80)})`,
+      });
     }
     if (!shuttingDown) {
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, 10000));
     }
   }
 }

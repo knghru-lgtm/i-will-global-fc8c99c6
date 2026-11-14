@@ -10,7 +10,7 @@ async function callSarahApi(endpoint, payload, extraHeaders = {}) {
   for (const base of API_BASES) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5500);
+      const timeout = setTimeout(() => controller.abort(), 15000);
       const res = await fetch(`${base}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...extraHeaders },

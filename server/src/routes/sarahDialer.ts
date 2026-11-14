@@ -352,7 +352,7 @@ sarahPublic.all('/inbound', async (req, res) => {
                     state: callerState,
                     how_heard: callerHowHeard,
                     product_interest: productLine,
-                    source_channel: 'call_in_lead',
+                    source_channel: 'inbound_lead',
                   },
                   req.body?.notes || 'Inbound call answered on 1st ring on (480) 331-9455 (Business Hours)'
                 );
@@ -445,7 +445,7 @@ sarahPublic.all('/inbound', async (req, res) => {
         work_hours: BUSINESS_HOURS_LABEL,
         work_hours_status: workHoursStatus,
         warm_transfers_allowed_now: true,
-        lead_source: 'Call-In Lead',
+        lead_source: 'Inbound Lead',
         lead_id: initState.lead_id || null,
         line: '(480) 331-9455',
         line_e164: '+14803319455',
@@ -621,7 +621,7 @@ sarahPublic.all('/inbound', async (req, res) => {
                 state: resolvedCallerState,
                 how_heard: resolvedHowHeard,
                 product_interest: productLine,
-                source_channel: 'call_in_lead',
+                source_channel: 'inbound_lead',
               },
               req.body?.notes || 'Inbound call turn handled by Sarah on (480) 331-9455'
             );
@@ -721,7 +721,7 @@ sarahPublic.all('/inbound', async (req, res) => {
       work_hours: BUSINESS_HOURS_LABEL,
       work_hours_status: workHoursStatus,
       warm_transfers_allowed_now: !cfg.is_on_warm_transfer,
-      lead_source: 'Call-In Lead',
+      lead_source: 'Inbound Lead',
       lead_id: inboundLeadId,
       line: '(480) 331-9455',
       line_e164: '+14803319455',

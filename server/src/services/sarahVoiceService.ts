@@ -55,7 +55,7 @@ export interface SarahSessionContext {
   caller_name?: string;
   on_warm_transfer?: boolean;
   product_interest?: string;
-  source_channel?: 'call_in_lead' | 'website_traffic' | 'outbound';
+  source_channel?: 'inbound_lead' | 'call_in_lead' | 'website_traffic' | 'outbound';
   preferred_datetime?: string;
   appointment_type?: 'Telephone' | 'In-Person' | 'Video';
   force_work_hours?: boolean;
@@ -305,13 +305,13 @@ export function resolveInboundLeadSource(ctx?: Partial<SarahSessionContext>): st
   if (ctx?.mode === 'outbound' || ctx?.source_channel === 'outbound') {
     return 'Outbound Caller';
   }
-  if (ctx?.source_channel === 'call_in_lead') {
-    return 'Call-In Lead';
-  }
   if (ctx?.source_channel === 'website_traffic') {
     return 'Website Traffic';
   }
-  return 'Call-In Lead';
+  if (ctx?.source_channel === 'call_in_lead') {
+    return 'Call-In Lead';
+  }
+  return 'Inbound Lead';
 }
 
 export function detectProductInterest(text: string, fallback = ''): string {
@@ -678,7 +678,7 @@ export async function upsertReceptionistLeadFromContext(
              phone = COALESCE(NULLIF($4, ''), phone),
              address = COALESCE(NULLIF($5, ''), address),
              state = CASE WHEN $9 != '' AND $9 != 'Arizona' AND $9 != 'AZ' THEN $9 ELSE COALESCE(NULLIF(state, ''), $9) END,
-             source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' OR source = 'Website Traffic' THEN $6 ELSE source END,
+             source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' OR source = 'Website Traffic' OR source = 'Call-In Lead' THEN $6 ELSE source END,
              interest = COALESCE(NULLIF($7, ''), interest),
              notes = CASE WHEN COALESCE(notes, '') LIKE '%' || $8 || '%' THEN notes ELSE COALESCE(notes, '') || ' | ' || $8 END,
              last_contacted_at = now(),
@@ -825,7 +825,7 @@ export async function executeSarahTool(
         );
       } else {
         await q(
-          `UPDATE leads SET first_name = CASE WHEN $4 != 'Valued' THEN $4 ELSE first_name END, last_name = CASE WHEN $5 != 'Client' THEN $5 ELSE last_name END, phone = COALESCE(NULLIF($6, ''), phone), address = COALESCE(NULLIF($7, ''), address), state = CASE WHEN $10 != '' AND $10 != 'Arizona' AND $10 != 'AZ' THEN $10 ELSE COALESCE(NULLIF(state, ''), $10) END, status = 'Appointment Set', source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' OR source = 'Website Traffic' THEN $8 ELSE source END, interest = COALESCE(NULLIF($9, ''), interest), notes = COALESCE(notes, '') || ' | ' || $2, last_disposition = $3, last_contacted_at = now(), updated_at = now() WHERE id = $1`,
+          `UPDATE leads SET first_name = CASE WHEN $4 != 'Valued' THEN $4 ELSE first_name END, last_name = CASE WHEN $5 != 'Client' THEN $5 ELSE last_name END, phone = COALESCE(NULLIF($6, ''), phone), address = COALESCE(NULLIF($7, ''), address), state = CASE WHEN $10 != '' AND $10 != 'Arizona' AND $10 != 'AZ' THEN $10 ELSE COALESCE(NULLIF(state, ''), $10) END, status = 'Appointment Set', source = CASE WHEN source IS NULL OR source = '' OR source LIKE 'Receptionist%' OR source = 'Direct Lead' OR source = 'Website Traffic' OR source = 'Call-In Lead' THEN $8 ELSE source END, interest = COALESCE(NULLIF($9, ''), interest), notes = COALESCE(notes, '') || ' | ' || $2, last_disposition = $3, last_contacted_at = now(), updated_at = now() WHERE id = $1`,
           [
             lead.id,
             notes,
