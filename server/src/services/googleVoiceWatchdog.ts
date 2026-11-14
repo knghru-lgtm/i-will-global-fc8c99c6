@@ -2,7 +2,8 @@ import { exec } from 'node:child_process';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { config } from '../config.ts';
+import path from 'node:path';
+import { config, repoRoot } from '../config.ts';
 import { one, q } from '../db/index.ts';
 
 export const CURRENT_GV_EXTENSION_BUILD = '2026-11-10-v12';
@@ -177,9 +178,35 @@ export async function saveCloudGvCookies(cookies: any[], source = 'extension'): 
   return { ok: true, count: googleCookies.length, updatedAt };
 }
 
+let checkedLegacyCookieMigration = false;
+
 export async function loadCloudGvCookies(): Promise<{ cookies: any[]; updatedAt: string | null; count: number }> {
   await ensureSettingsTable();
-  const row = await one<{ value: any }>(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+  let row = await one<{ value: any }>(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+  if ((!row?.value || !row.value.ciphertext) && !checkedLegacyCookieMigration && process.env.NODE_ENV !== 'test') {
+    checkedLegacyCookieMigration = true;
+    const altPgDir = path.join(repoRoot, 'data', 'pg');
+    if (altPgDir !== config.dataDir && existsSync(path.join(altPgDir, 'PG_VERSION'))) {
+      try {
+        const { PGlite } = await import('@electric-sql/pglite');
+        const altDb = await PGlite.create(altPgDir);
+        const altRes: any = await altDb.query(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+        await altDb.close().catch(() => {});
+        const altVal = altRes?.rows?.[0]?.value;
+        if (altVal?.ciphertext) {
+          await q(
+            `INSERT INTO settings (key, value, updated_at) VALUES ('sarah_gv_cloud_cookies', $1::jsonb, now())
+             ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = now()`,
+            [JSON.stringify(altVal)]
+          );
+          row = { value: altVal };
+          recordGvEvent('gv_cloud_cookies_migrated', 'Recovered encrypted Google Voice cookie vault from legacy data/pg');
+        }
+      } catch {
+        // ignore if legacy directory is locked or unreadable
+      }
+    }
+  }
   const val = row?.value;
   if (!val || !val.ciphertext || !val.iv || !val.tag) {
     return { cookies: [], updatedAt: null, count: 0 };

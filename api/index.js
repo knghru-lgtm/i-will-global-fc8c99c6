@@ -5059,7 +5059,7 @@ import cors from "cors";
 import http from "node:http";
 import { WebSocketServer } from "ws";
 import { existsSync as existsSync4 } from "node:fs";
-import path3 from "node:path";
+import path4 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // server/src/routes/records.ts
@@ -6579,6 +6579,7 @@ import { exec } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync as existsSync3 } from "node:fs";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
+import path3 from "node:path";
 var CURRENT_GV_EXTENSION_BUILD = "2026-11-10-v12";
 var DEFAULT_GV_BRIDGE_TOKEN = "iwg-sarah-cloud-bridge-v10-9455";
 var state = {
@@ -6676,9 +6677,34 @@ async function saveCloudGvCookies(cookies, source = "extension") {
   });
   return { ok: true, count: googleCookies.length, updatedAt };
 }
+var checkedLegacyCookieMigration = false;
 async function loadCloudGvCookies() {
   await ensureSettingsTable2();
-  const row = await one(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+  let row = await one(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+  if ((!row?.value || !row.value.ciphertext) && !checkedLegacyCookieMigration && process.env.NODE_ENV !== "test") {
+    checkedLegacyCookieMigration = true;
+    const altPgDir = path3.join(repoRoot, "data", "pg");
+    if (altPgDir !== config.dataDir && existsSync3(path3.join(altPgDir, "PG_VERSION"))) {
+      try {
+        const { PGlite } = await import("@electric-sql/pglite");
+        const altDb = await PGlite.create(altPgDir);
+        const altRes = await altDb.query(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+        await altDb.close().catch(() => {
+        });
+        const altVal = altRes?.rows?.[0]?.value;
+        if (altVal?.ciphertext) {
+          await q(
+            `INSERT INTO settings (key, value, updated_at) VALUES ('sarah_gv_cloud_cookies', $1::jsonb, now())
+             ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = now()`,
+            [JSON.stringify(altVal)]
+          );
+          row = { value: altVal };
+          recordGvEvent("gv_cloud_cookies_migrated", "Recovered encrypted Google Voice cookie vault from legacy data/pg");
+        }
+      } catch {
+      }
+    }
+  }
   const val = row?.value;
   if (!val || !val.ciphertext || !val.iv || !val.tag) {
     return { cookies: [], updatedAt: null, count: 0 };
@@ -14677,7 +14703,7 @@ function createApp() {
   app.use("/api/google", googleCallback);
   app.use("/api/sarah", sarahPublic);
   app.use("/api/voice", sarahPublic);
-  const widgetDir = path3.join(repoRoot, "server", "public");
+  const widgetDir = path4.join(repoRoot, "server", "public");
   if (existsSync4(widgetDir)) {
     app.use("/widget", express.static(widgetDir, { maxAge: "1h" }));
   }
@@ -14691,25 +14717,34 @@ function createApp() {
   app.use("/api/inbox", inbox);
   app.use("/api/sarah", sarahAuth);
   app.use("/api", api);
-  const dist = path3.join(repoRoot, "client", "dist");
-  if (existsSync4(dist)) {
-    app.use(
-      express.static(dist, {
-        setHeaders(res, filePath) {
-          if (filePath.includes(`${path3.sep}assets${path3.sep}`)) {
-            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-          } else if (filePath.endsWith("index.html")) {
-            res.setHeader("Cache-Control", "no-cache");
-          }
+  const dist = path4.join(repoRoot, "client", "dist");
+  const clientPublic = path4.join(repoRoot, "client", "public");
+  app.use(
+    express.static(dist, {
+      setHeaders(res, filePath) {
+        if (filePath.includes(`${path4.sep}assets${path4.sep}`)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else if (filePath.endsWith("index.html")) {
+          res.setHeader("Cache-Control", "no-cache");
         }
+      }
+    })
+  );
+  if (existsSync4(clientPublic)) {
+    app.use(
+      express.static(clientPublic, {
+        acceptRanges: true,
+        maxAge: "7d"
       })
     );
-    app.use((req, res, next) => {
-      if (req.path.startsWith("/api")) return next();
-      res.setHeader("Cache-Control", "no-cache");
-      res.sendFile("index.html", { root: dist });
-    });
   }
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api")) return next();
+    const indexHtml = path4.join(dist, "index.html");
+    if (!existsSync4(indexHtml)) return next();
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile("index.html", { root: dist });
+  });
   app.use((err, _req, res, _next) => {
     const status = err.status || 500;
     if (status >= 500) console.error(err);
@@ -14760,9 +14795,9 @@ function attachSarahWebSocket(server) {
   });
   return wss;
 }
-var entryFile = path3.resolve(fileURLToPath3(import.meta.url)).toLowerCase();
-var argvFile = process.argv[1] ? path3.resolve(process.argv[1]).toLowerCase() : "";
-var pm2ExecFile = process.env.pm_exec_path ? path3.resolve(process.env.pm_exec_path).toLowerCase() : "";
+var entryFile = path4.resolve(fileURLToPath3(import.meta.url)).toLowerCase();
+var argvFile = process.argv[1] ? path4.resolve(process.argv[1]).toLowerCase() : "";
+var pm2ExecFile = process.env.pm_exec_path ? path4.resolve(process.env.pm_exec_path).toLowerCase() : "";
 var isMain = process.env.NODE_ENV !== "test" && (entryFile === argvFile || entryFile === pm2ExecFile || argvFile.includes("processcontainer"));
 if (isMain) {
   const app = createApp();

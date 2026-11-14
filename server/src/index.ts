@@ -276,24 +276,33 @@ export function createApp() {
 
   // Serve the built 100% online web app on Google Cloud (https://iwillglobal.com & https://voice.iwillglobal.com)
   const dist = path.join(repoRoot, 'client', 'dist');
-  if (existsSync(dist)) {
+  const clientPublic = path.join(repoRoot, 'client', 'public');
+  app.use(
+    express.static(dist, {
+      setHeaders(res, filePath) {
+        if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } else if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+      },
+    })
+  );
+  if (existsSync(clientPublic)) {
     app.use(
-      express.static(dist, {
-        setHeaders(res, filePath) {
-          if (filePath.includes(`${path.sep}assets${path.sep}`)) {
-            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          } else if (filePath.endsWith('index.html')) {
-            res.setHeader('Cache-Control', 'no-cache');
-          }
-        },
+      express.static(clientPublic, {
+        acceptRanges: true,
+        maxAge: '7d',
       })
     );
-    app.use((req, res, next) => {
-      if (req.path.startsWith('/api')) return next();
-      res.setHeader('Cache-Control', 'no-cache');
-      res.sendFile('index.html', { root: dist });
-    });
   }
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    const indexHtml = path.join(dist, 'index.html');
+    if (!existsSync(indexHtml)) return next();
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile('index.html', { root: dist });
+  });
 
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const status = err.status || 500;
