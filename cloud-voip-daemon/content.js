@@ -279,17 +279,35 @@
   }
 
   function updateStatusBanner(text, color = '#10b981') {
-    if (typeof document === 'undefined' || !document.body) return;
-    let badge = document.getElementById('iwg-gv-receptionist-badge');
-    if (!badge) {
-      badge = document.createElement('div');
-      badge.id = 'iwg-gv-receptionist-badge';
-      badge.style.cssText =
-        'position:fixed;bottom:14px;left:14px;z-index:2147483647;background:rgba(15,23,42,0.95);border:2px solid #10b981;border-radius:12px;padding:8px 14px;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;font-size:12px;font-weight:700;box-shadow:0 8px 25px rgba(0,0,0,0.45);display:flex;align-items:center;gap:8px;';
-      document.body.appendChild(badge);
-    }
-    badge.style.borderColor = color;
-    badge.innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};"></span><span>${text}</span>`;
+    try {
+      if (typeof document === 'undefined' || !document.body) return;
+      let badge = document.getElementById('iwg-gv-receptionist-badge');
+      let dot = null;
+      let label = null;
+      if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'iwg-gv-receptionist-badge';
+        badge.style.cssText =
+          'position:fixed;bottom:14px;left:14px;z-index:2147483647;background:rgba(15,23,42,0.95);border:2px solid #10b981;border-radius:12px;padding:8px 14px;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;font-size:12px;font-weight:700;box-shadow:0 8px 25px rgba(0,0,0,0.45);display:flex;align-items:center;gap:8px;';
+        dot = document.createElement('span');
+        dot.setAttribute('data-iwg-role', 'dot');
+        label = document.createElement('span');
+        label.setAttribute('data-iwg-role', 'label');
+        badge.appendChild(dot);
+        badge.appendChild(label);
+        document.body.appendChild(badge);
+      } else {
+        dot = badge.querySelector('[data-iwg-role="dot"]') || badge.firstElementChild;
+        label = badge.querySelector('[data-iwg-role="label"]') || badge.lastElementChild;
+      }
+      badge.style.borderColor = color;
+      if (dot) {
+        dot.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};`;
+      }
+      if (label) {
+        label.textContent = String(text || '');
+      }
+    } catch {}
   }
 
   async function callSarahBackend(endpoint, payload) {
@@ -987,26 +1005,43 @@
     toast.setAttribute('aria-label', `Incoming call from ${callerPhone}`);
     toast.style.cssText =
       'position:fixed;top:16px;right:16px;z-index:2147483646;background:#0f172a;border:2px solid #22c55e;border-radius:12px;padding:12px 16px;color:#fff;font-family:system-ui,sans-serif;box-shadow:0 12px 30px rgba(0,0,0,0.5);';
-    toast.innerHTML = `
-      <div style="font-size:12px;font-weight:700;color:#4ade80;margin-bottom:6px;">Incoming call • ${callerPhone}</div>
-      <div style="display:flex;gap:8px;">
-        <button id="iwg-sim-answer-btn" aria-label="Answer call" gv-test-id="incoming-answer-button" style="background:#16a34a;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer;">Answer</button>
-        <button id="iwg-sim-decline-btn" aria-label="Decline call" style="background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer;">Decline</button>
-      </div>
-    `;
+
+    const header = document.createElement('div');
+    header.style.cssText = 'font-size:12px;font-weight:700;color:#4ade80;margin-bottom:6px;';
+    header.textContent = `Incoming call • ${callerPhone}`;
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;';
+
+    const ansBtn = document.createElement('button');
+    ansBtn.id = 'iwg-sim-answer-btn';
+    ansBtn.setAttribute('aria-label', 'Answer call');
+    ansBtn.setAttribute('gv-test-id', 'incoming-answer-button');
+    ansBtn.style.cssText =
+      'background:#16a34a;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer;';
+    ansBtn.textContent = 'Answer';
+
+    const decBtn = document.createElement('button');
+    decBtn.id = 'iwg-sim-decline-btn';
+    decBtn.setAttribute('aria-label', 'Decline call');
+    decBtn.style.cssText =
+      'background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer;';
+    decBtn.textContent = 'Decline';
+
+    btnRow.appendChild(ansBtn);
+    btnRow.appendChild(decBtn);
+    toast.appendChild(header);
+    toast.appendChild(btnRow);
     document.body.appendChild(toast);
 
-    const ansBtn = toast.querySelector('#iwg-sim-answer-btn');
     let answered = false;
-    if (ansBtn) {
-      ansBtn.addEventListener('click', () => {
-        if (answered) return;
-        answered = true;
-        toast.remove();
-      });
-    }
+    ansBtn.addEventListener('click', () => {
+      if (answered) return;
+      answered = true;
+      toast.remove();
+    });
 
-    scanGoogleVoiceDom();
+    scanGoogleVoiceDom(true);
     return { ok: true, answered, callerPhone };
   }
 

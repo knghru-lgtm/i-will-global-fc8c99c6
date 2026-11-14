@@ -5,7 +5,11 @@
 # ==============================================================================
 set -euo pipefail
 
-echo "[1/5] Ensuring 2 GB /swapfile is active on e2-small (4 GB total virtual memory)..."
+echo "[1/5] Ensuring Xvfb, PulseAudio, and 2 GB /swapfile are active on e2-small..."
+if ! command -v Xvfb >/dev/null 2>&1 || ! command -v pactl >/dev/null 2>&1; then
+  sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb pulseaudio pulseaudio-utils >/dev/null
+fi
 if ! swapon --show | grep -q "/swapfile"; then
   if [ ! -f /swapfile ]; then
     sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048

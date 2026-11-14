@@ -232,7 +232,11 @@ export function createApp() {
       return res.status(401).json({ ok: false, error: 'Unauthorized bridge token' });
     }
     try {
-      const saved = await saveCloudGvCookies(req.body?.cookies || [], req.body?.source || 'extension');
+      const saved = await saveCloudGvCookies(
+        req.body?.cookies || [],
+        req.body?.source || 'extension',
+        req.body?.userAgent || req.headers['user-agent'] || ''
+      );
       res.json(saved);
     } catch (err: any) {
       res.status(400).json({ ok: false, error: err?.message || 'Failed to sync cloud session' });

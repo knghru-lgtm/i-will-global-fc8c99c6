@@ -58,6 +58,7 @@ function syncGoogleVoiceCookiesToCloud(force = false) {
             },
             body: JSON.stringify({
               cookies: googleCookies,
+              userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
               source: `chrome-extension-${EXTENSION_BUILD}`,
             }),
           });

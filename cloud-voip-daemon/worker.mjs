@@ -1,7 +1,14 @@
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '..');
+const CHROME_PROFILE_DIR =
+  process.env.CHROME_USER_DATA_DIR || path.resolve(REPO_ROOT, 'server/data/chrome-gv-profile');
 
 const LOCAL_API_BASE = process.env.LOCAL_API_URL || 'http://127.0.0.1:4000';
 const PUBLIC_API_BASE = process.env.APP_URL || 'https://voice.iwillglobal.com';
@@ -10,7 +17,7 @@ const BRIDGE_TOKEN = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-
 const REGION = process.env.GOOGLE_CLOUD_REGION || 'us-west1';
 const INSTANCE_ID = `gcloud-${REGION}-${randomUUID().slice(0, 8)}`;
 const EXTENSION_BUILD = '2026-11-14-v13';
-const MAX_IDLE_SESSION_AGE_MS = 6 * 60 * 60 * 1000; // Proactive 6h idle heap recycle
+const MAX_IDLE_SESSION_AGE_MS = 6 * 60 * 60 * 1000;
 
 async function fetchDaemonApi(pathname, init = {}) {
   let lastErr = null;
@@ -42,8 +49,14 @@ let activeBrowser = null;
 function reapZombieChromeProcesses() {
   if (process.platform === 'win32') return;
   try {
+    execSync(`pkill -9 -f "${CHROME_PROFILE_DIR}" 2>/dev/null || true`, { stdio: 'ignore' });
     execSync('pkill -9 -f "/tmp/iwg-gv-daemon-profile" 2>/dev/null || true', { stdio: 'ignore' });
   } catch { }
+  for (const lockName of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    try {
+      rmSync(path.join(CHROME_PROFILE_DIR, lockName), { force: true });
+    } catch { }
+  }
 }
 
 async function cleanExit(signalName, exitCode = 0) {
@@ -85,19 +98,20 @@ async function fetchCloudCookieVault() {
     const res = await fetchDaemonApi('/api/sarah/gv-session-sync', {
       headers: { 'x-iwg-bridge-token': BRIDGE_TOKEN },
     });
-    if (!res || !res.ok) return { cookies: [], updatedAt: null };
+    if (!res || !res.ok) return { cookies: [], updatedAt: null, userAgent: null };
     const data = await res.json();
     return {
       cookies: Array.isArray(data?.cookies) ? data.cookies : [],
       updatedAt: data?.updatedAt || null,
+      userAgent: data?.userAgent || null,
     };
   } catch (err) {
     console.error('[Sarah Cloud Daemon] Cookie fetch error:', err?.message);
-    return { cookies: [], updatedAt: null };
+    return { cookies: [], updatedAt: null, userAgent: null };
   }
 }
 
-async function saveRefreshedCookies(cookies) {
+async function saveRefreshedCookies(cookies, userAgent = '') {
   try {
     if (!Array.isArray(cookies) || cookies.length === 0) return;
     await fetchDaemonApi('/api/sarah/gv-session-sync', {
@@ -108,6 +122,7 @@ async function saveRefreshedCookies(cookies) {
       },
       body: JSON.stringify({
         cookies,
+        userAgent,
         source: `cloud-daemon-${INSTANCE_ID}`,
       }),
     });
@@ -135,11 +150,14 @@ function normalizeCookiesForCdp(rawCookies) {
   for (const c of rawCookies) {
     if (!c?.name || typeof c.value !== 'string' || !c.domain) continue;
     const name = String(c.name);
-    const cleanHost = String(c.domain).replace(/^\.+/, '');
+    const rawDomain = String(c.domain);
+    const cleanHost = rawDomain.replace(/^\.+/, '');
     if (!cleanHost) continue;
 
     const isHostPrefix = name.startsWith('__Host-');
     const isSecurePrefix = isHostPrefix || name.startsWith('__Secure-');
+    const isHostOnly = isHostPrefix || c.hostOnly === true || !rawDomain.startsWith('.');
+
     const ss = String(c.sameSite || '').toLowerCase();
     let sameSite;
     if (ss === 'no_restriction' || ss === 'none') sameSite = 'None';
@@ -147,19 +165,23 @@ function normalizeCookiesForCdp(rawCookies) {
     else if (ss === 'strict') sameSite = 'Strict';
 
     const secure = Boolean(c.secure) || isSecurePrefix || sameSite === 'None';
+    const cookiePath = isHostPrefix ? '/' : String(c.path || '/');
     const entry = {
       name,
       value: String(c.value),
-      path: isHostPrefix ? '/' : String(c.path || '/'),
+      path: cookiePath,
       secure,
       httpOnly: Boolean(c.httpOnly),
     };
 
-    // RFC 6265bis / Chromium CDP rule: __Host- cookies MUST omit `domain` and specify `url` instead
-    if (isHostPrefix) {
-      entry.url = `https://${cleanHost}/`;
+    // CRITICAL RFC 6265 / Chromium CDP rule:
+    // Host-only cookies (such as LSID, __Secure-1PLSID, ACCOUNT_CHOOSER on accounts.google.com,
+    // and __Host-* cookies) MUST omit `domain` and specify `url` so CDP does NOT convert them
+    // into `.accounts.google.com` domain cookies!
+    if (isHostOnly) {
+      entry.url = `${secure ? 'https' : 'http'}://${cleanHost}${cookiePath.startsWith('/') ? cookiePath : '/' + cookiePath}`;
     } else {
-      entry.domain = String(c.domain);
+      entry.domain = rawDomain;
     }
 
     if (sameSite) entry.sameSite = sameSite;
@@ -205,10 +227,10 @@ async function waitForLocalApiReady(maxWaitMs = 25000) {
   return false;
 }
 
-// Ultra-slim Chromium flags tailored for e2-small (2 vCPUs, 2 GB RAM + 2 GB Swap) — cuts GPU/process bloat by ~50%
-// while keeping WebRTC Opus 48kHz streams and visibilityState="visible" 100% unthrottled in physical RAM.
 async function launchResilientBrowser(execPath) {
+  mkdirSync(CHROME_PROFILE_DIR, { recursive: true });
   reapZombieChromeProcesses();
+
   const chromeArgs = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -222,6 +244,7 @@ async function launchResilientBrowser(execPath) {
     '--disable-sync',
     '--disable-translate',
     '--disable-default-apps',
+    '--disable-blink-features=AutomationControlled',
     '--mute-audio=false',
     '--no-first-run',
     '--no-default-browser-check',
@@ -232,7 +255,7 @@ async function launchResilientBrowser(execPath) {
     '--js-flags=--max-old-space-size=384',
     '--disk-cache-size=33554432',
     '--media-cache-size=16777216',
-    '--user-data-dir=/tmp/iwg-gv-daemon-profile',
+    `--user-data-dir=${CHROME_PROFILE_DIR}`,
     '--autoplay-policy=no-user-gesture-required',
     '--use-fake-ui-for-media-stream',
     '--alsa-output-device=pulse',
@@ -268,9 +291,74 @@ async function launchResilientBrowser(execPath) {
   });
 }
 
-async function runBrowserSession(cookies) {
+function isGoogleVoiceAuthenticatedUrl(urlStr, titleStr = '') {
+  if (!urlStr) return false;
+  if (!urlStr.startsWith('https://voice.google.com')) return false;
+  if (urlStr.includes('/about') || urlStr.includes('/signup')) return false;
+  if (/sign\s*in/i.test(titleStr)) return false;
+  return true;
+}
+
+async function resolveAccountChooserIfNeeded(page) {
+  for (let step = 0; step < 3; step++) {
+    const curUrl = page.url();
+    if (!curUrl.includes('accounts.google.com')) return true;
+
+    // Wait briefly for passive CheckCookie redirects or account list animation
+    await new Promise((r) => setTimeout(r, 2200));
+    if (!page.url().includes('accounts.google.com')) return true;
+
+    if (page.url().includes('accountchooser')) {
+      const chooserInfo = await page
+        .evaluate(() => {
+          const items = Array.from(
+            document.querySelectorAll('[data-identifier], [data-email], li div[role="link"]')
+          );
+          const summary = items.map((el) => {
+            const id =
+              el.getAttribute('data-identifier') ||
+              el.getAttribute('data-email') ||
+              (el.textContent || '').trim().slice(0, 80);
+            const fullText = (el.closest('li')?.innerText || el.innerText || '').replace(/\s+/g, ' ').trim();
+            const signedOut = /signed\s*out|session\s*expired/i.test(fullText);
+            return { id, signedOut, fullText: fullText.slice(0, 120) };
+          });
+          // Click first account tile that is NOT marked "Signed out"
+          const activeIdx = summary.findIndex((s) => !s.signedOut);
+          if (activeIdx >= 0 && items[activeIdx]) {
+            items[activeIdx].click();
+            return { clicked: true, summary };
+          }
+          return { clicked: false, summary };
+        })
+        .catch(() => ({ clicked: false, summary: [] }));
+
+      console.log(
+        `[Sarah Cloud Daemon ${INSTANCE_ID}] AccountChooser inspection: ${JSON.stringify(chooserInfo)}`
+      );
+
+      if (chooserInfo.clicked) {
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => { });
+        await new Promise((r) => setTimeout(r, 2500));
+        if (!page.url().includes('accounts.google.com')) return true;
+      } else {
+        // Every listed account says "Signed out" (missing non-Secure SID/HSID cookie or Windows DBSC TPM-bound session)
+        return false;
+      }
+    }
+  }
+  return !page.url().includes('accounts.google.com');
+}
+
+async function runBrowserSession(cookies, syncedUserAgent = null) {
   const execPath = resolveChromeBinary();
-  console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Launching ultra-slim Chromium with ${cookies.length} Google Voice cookies...`);
+  const keyNames = new Set(cookies.map((c) => String(c?.name || '')));
+  const presentKeys = ['SID', 'HSID', 'SSID', 'SAPISID', 'LSID', '__Secure-1PSID', '__Secure-1PSIDTS'].filter((k) =>
+    keyNames.has(k)
+  );
+  console.log(
+    `[Sarah Cloud Daemon ${INSTANCE_ID}] Launching ultra-slim Chromium with ${cookies.length} cookies (keys: ${presentKeys.join(',') || 'none'})...`
+  );
 
   const browser = await launchResilientBrowser(execPath);
   activeBrowser = browser;
@@ -281,8 +369,13 @@ async function runBrowserSession(cookies) {
     const page = pages[0] || (await browser.newPage());
     await page.setViewport({ width: 800, height: 600 });
 
+    // Strip HeadlessChrome marker & match synced User-Agent so Google ServiceLogin allows passive grandcentral SSO
+    const defaultUa = (await browser.userAgent()).replace(/HeadlessChrome\//gi, 'Chrome/');
+    const effectiveUa =
+      syncedUserAgent && !/HeadlessChrome/i.test(syncedUserAgent) ? syncedUserAgent : defaultUa;
+    await page.setUserAgent(effectiveUa);
+
     // Zero-latency (<1ms) local Node IPC bridge from Chrome -> http://127.0.0.1:4000
-    // Eliminates Hairpin NAT TLS overhead, CORS, Mixed Content blocks, and IPv6 localhost delays!
     await page.exposeFunction('__iwgDaemonBridgeCall', async (endpoint, payload) => {
       const res = await fetchDaemonApi(String(endpoint || ''), {
         method: 'POST',
@@ -302,25 +395,30 @@ async function runBrowserSession(cookies) {
       permissions: ['audioCapture', 'notifications'],
     });
 
+    // Check if persistent VM Chrome profile ALREADY has a valid native Linux Google Voice session
+    const existingProfileCookies = await client.send('Network.getAllCookies').catch(() => ({ cookies: [] }));
+    const profileHasNativeGvAuth =
+      Array.isArray(existingProfileCookies?.cookies) &&
+      existingProfileCookies.cookies.some((c) => c.domain?.includes('voice.google.com')) &&
+      existingProfileCookies.cookies.some((c) => c.name === 'SID' || c.name === '__Secure-1PSID');
+
     const cdpCookies = normalizeCookiesForCdp(cookies);
-    if (cdpCookies.length > 0) {
+    if (cdpCookies.length > 0 && !profileHasNativeGvAuth) {
       let applied = 0;
-      try {
-        await client.send('Network.setCookies', { cookies: cdpCookies });
-        applied = cdpCookies.length;
-      } catch {
-        for (const ck of cdpCookies) {
-          try {
-            await client.send('Network.setCookie', ck);
-            applied++;
-          } catch { }
-        }
+      for (const ck of cdpCookies) {
+        try {
+          await client.send('Network.setCookie', ck);
+          applied++;
+        } catch { }
       }
-      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Injected ${applied}/${cdpCookies.length} Google Voice cookies into Chrome session.`);
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Injected ${applied}/${cdpCookies.length} Google Voice cookies (hostOnly-preserved).`);
+    } else if (profileHasNativeGvAuth) {
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Using persistent VM Chrome profile session (${existingProfileCookies.cookies.length} profile cookies).`);
     }
 
-    const visibilityShim = `
+    const stealthAndVisibilityShim = `
       try {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
         Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
         Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
       } catch {}
@@ -332,60 +430,94 @@ async function runBrowserSession(cookies) {
       apiBase: PUBLIC_API_BASE,
     })};`;
 
-    // Inject BOTH Zero-Echo WebRTC Bridge AND Auto-Answer Controller on every document navigation/redirect!
+    // Inject BOTH Zero-Echo WebRTC Bridge AND TrustedHTML-safe Auto-Answer Controller on every navigation!
     await page.evaluateOnNewDocument(
-      `${visibilityShim}\n${configBootstrap}\n${webrtcBridgeCode}\n;if (location.hostname === 'voice.google.com') {\n${contentControllerCode}\n}`
+      `${stealthAndVisibilityShim}\n${configBootstrap}\n${webrtcBridgeCode}\n;if (location.hostname === 'voice.google.com') {\n${contentControllerCode}\n}`
     );
 
     await page.goto('https://voice.google.com/u/0/calls', {
       waitUntil: 'domcontentloaded',
       timeout: 45000,
     });
-    console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Loaded Google Voice page: ${page.url()}`);
+    console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Initial navigation URL: ${page.url()}`);
+
+    if (page.url().includes('accounts.google.com')) {
+      const resolved = await resolveAccountChooserIfNeeded(page);
+      if (!resolved && profileHasNativeGvAuth && cdpCookies.length > 0) {
+        // Persistent profile expired — fall back to fresh vault cookies once
+        for (const ck of cdpCookies) {
+          try {
+            await client.send('Network.setCookie', ck);
+          } catch { }
+        }
+        await page.goto('https://voice.google.com/u/0/calls', {
+          waitUntil: 'domcontentloaded',
+          timeout: 45000,
+        }).catch(() => { });
+        await resolveAccountChooserIfNeeded(page);
+      }
+    }
 
     await new Promise((r) => setTimeout(r, 2500));
 
-    // Click page once so Chromium unlocks WebAudio AudioContext at 48kHz immediately
+    // Unlock WebAudio 48kHz AudioContext immediately
     try {
       await page.mouse.click(80, 80);
     } catch { }
 
-    // Ensure controller is running even if document_start fired prior to redirect finish
-    await page
-      .evaluate(`${configBootstrap}\nif (!window.__IWG_GV_RECEPTIONIST_ACTIVE__ && location.hostname === 'voice.google.com') {\n${contentControllerCode}\n}`)
-      .catch(() => { });
+    if (isGoogleVoiceAuthenticatedUrl(page.url(), await page.title().catch(() => ''))) {
+      await page
+        .evaluate(
+          `${configBootstrap}\nif (!window.__IWG_GV_RECEPTIONIST_ACTIVE__ && location.hostname === 'voice.google.com') {\n${contentControllerCode}\n}`
+        )
+        .catch(() => { });
+
+      const readyTitle = await page.title().catch(() => 'Google Voice');
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] AUTHENTICATED & LIVE on ${page.url()} (${readyTitle})`);
+      await reportDaemonHeartbeat({
+        url: page.url(),
+        title: readyTitle,
+        visibilityState: 'visible',
+        sessionAuthenticated: true,
+        hasPreloadedGreeting: true,
+        receivingCallsText: 'Zero-Echo Pure Digital WebRTC Isolation ACTIVE',
+      });
+    }
 
     let lastRefreshSave = Date.now();
     while (!shuttingDown && browser.connected && !page.isClosed()) {
       const currentUrl = page.url();
       const title = await page.title().catch(() => '');
       const isSignedOut =
-        currentUrl.includes('accounts.google.com/v3/signin') ||
-        currentUrl.includes('accounts.google.com/ServiceLogin') ||
-        (currentUrl.includes('accounts.google.com') && /sign in/i.test(title));
+        currentUrl.includes('accounts.google.com') ||
+        currentUrl.includes('voice.google.com/about') ||
+        /sign\s*in/i.test(title);
+
       if (isSignedOut) {
-        console.warn(`[Sarah Cloud Daemon ${INSTANCE_ID}] Session redirected to sign-in (${currentUrl}); signaling cookie refresh...`);
+        console.warn(
+          `[Sarah Cloud Daemon ${INSTANCE_ID}] Session unauthenticated at ${currentUrl} — reload Chrome extension (v3.3.0) or run ./scripts/vm-gv-direct-login.sh once on VM.`
+        );
         await reportDaemonHeartbeat({
           url: currentUrl,
           title,
           sessionAuthenticated: false,
-          receivingCallsText: 'Awaiting Refreshed Google Voice Cookies',
+          receivingCallsText: 'Awaiting Fresh Google Voice Session (Reload Extension v3.3.0 or Run vm-gv-direct-login.sh)',
         });
         return { reason: 'signed_out' };
       }
 
-      // Periodically persist rotated Google cookies (__Secure-1PSIDTS / SIDTS) back to AES-256 Cloud Vault every 4 mins
+      // Persist rotated Google cookies back to AES-256 Cloud Vault every 4 mins
       if (Date.now() - lastRefreshSave > 4 * 60 * 1000) {
         lastRefreshSave = Date.now();
         try {
           const all = await client.send('Network.getAllCookies');
           if (Array.isArray(all?.cookies) && all.cookies.length > 0) {
-            await saveRefreshedCookies(all.cookies);
+            await saveRefreshedCookies(all.cookies, effectiveUa);
           }
         } catch { }
       }
 
-      // Proactive idle memory hygiene: cleanly recycle Chromium after 6h ONLY when no call is active
+      // Proactive 6h idle memory hygiene when no call is active
       if (Date.now() - sessionStartedAt > MAX_IDLE_SESSION_AGE_MS) {
         const stateSnap = await page.evaluate(() => window.__IWG_GV_GET_STATE__?.() || null).catch(() => null);
         if (!stateSnap?.callActive && !stateSnap?.isSpeaking) {
@@ -423,8 +555,10 @@ async function main() {
   let consecutiveSignOuts = 0;
 
   while (!shuttingDown) {
-    const { cookies, updatedAt } = await fetchCloudCookieVault();
-    if (!cookies || cookies.length === 0) {
+    const { cookies, updatedAt, userAgent } = await fetchCloudCookieVault();
+    const hasPersistentProfile = existsSync(path.join(CHROME_PROFILE_DIR, 'Default'));
+
+    if ((!cookies || cookies.length === 0) && !hasPersistentProfile) {
       await reportDaemonHeartbeat({
         url: 'https://voice.google.com/u/0/calls',
         title: 'Waiting for initial cookie vault sync',
@@ -435,22 +569,19 @@ async function main() {
       continue;
     }
 
-    // Prevent infinite 15s Chromium crash-loops on stale/revoked cookies:
-    // After 2 consecutive sign-outs with the exact same vault timestamp, sleep Chrome (freeing 350MB RAM)
-    // and poll quietly until the extension pushes a newer cookie vault timestamp!
     if (consecutiveSignOuts >= 2 && updatedAt && updatedAt === lastFailedCookieStamp) {
       await reportDaemonHeartbeat({
         url: 'https://accounts.google.com',
-        title: 'Awaiting fresh Google Voice cookie sync from extension',
+        title: 'Awaiting fresh Google Voice cookie sync (v3.3.0) or one-time VM login',
         sessionAuthenticated: false,
-        receivingCallsText: 'Paused Chromium — Waiting for Fresh Cookie Sync',
+        receivingCallsText: 'Paused Chromium — Reload Extension v3.3.0 or Run vm-gv-direct-login.sh',
       });
       await new Promise((r) => setTimeout(r, 8000));
       continue;
     }
 
     try {
-      const outcome = await runBrowserSession(cookies);
+      const outcome = await runBrowserSession(cookies || [], userAgent);
       if (outcome?.reason === 'signed_out') {
         consecutiveSignOuts += 1;
         lastFailedCookieStamp = updatedAt || 'unknown';

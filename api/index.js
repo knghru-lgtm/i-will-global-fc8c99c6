@@ -7062,7 +7062,7 @@ function verifyBridgeToken(provided) {
     return false;
   }
 }
-async function saveCloudGvCookies(cookies, source = "extension") {
+async function saveCloudGvCookies(cookies, source = "extension", userAgent = "") {
   if (!Array.isArray(cookies) || cookies.length === 0) {
     throw new Error("No cookies provided");
   }
@@ -7092,6 +7092,7 @@ async function saveCloudGvCookies(cookies, source = "extension") {
     ciphertext: encrypted.toString("base64"),
     count: googleCookies.length,
     source,
+    userAgent: userAgent ? String(userAgent).slice(0, 300) : void 0,
     updatedAt
   };
   await q(
@@ -7168,7 +7169,8 @@ async function loadCloudGvCookies() {
   return {
     cookies,
     updatedAt: val.updatedAt || null,
-    count: cookies.length
+    count: cookies.length,
+    userAgent: val.userAgent || null
   };
 }
 async function loadGvStateFromDb() {
@@ -15172,7 +15174,11 @@ function createApp() {
       return res.status(401).json({ ok: false, error: "Unauthorized bridge token" });
     }
     try {
-      const saved = await saveCloudGvCookies(req.body?.cookies || [], req.body?.source || "extension");
+      const saved = await saveCloudGvCookies(
+        req.body?.cookies || [],
+        req.body?.source || "extension",
+        req.body?.userAgent || req.headers["user-agent"] || ""
+      );
       res.json(saved);
     } catch (err) {
       res.status(400).json({ ok: false, error: err?.message || "Failed to sync cloud session" });

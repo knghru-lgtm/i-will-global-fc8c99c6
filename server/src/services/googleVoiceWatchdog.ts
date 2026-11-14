@@ -159,7 +159,11 @@ export function verifyBridgeToken(provided?: string | null): boolean {
   }
 }
 
-export async function saveCloudGvCookies(cookies: any[], source = 'extension'): Promise<{ ok: boolean; count: number; updatedAt: string }> {
+export async function saveCloudGvCookies(
+  cookies: any[],
+  source = 'extension',
+  userAgent = ''
+): Promise<{ ok: boolean; count: number; updatedAt: string }> {
   if (!Array.isArray(cookies) || cookies.length === 0) {
     throw new Error('No cookies provided');
   }
@@ -191,6 +195,7 @@ export async function saveCloudGvCookies(cookies: any[], source = 'extension'): 
     ciphertext: encrypted.toString('base64'),
     count: googleCookies.length,
     source,
+    userAgent: userAgent ? String(userAgent).slice(0, 300) : undefined,
     updatedAt,
   };
 
@@ -217,7 +222,12 @@ export async function saveCloudGvCookies(cookies: any[], source = 'extension'): 
 
 let checkedLegacyCookieMigration = false;
 
-export async function loadCloudGvCookies(): Promise<{ cookies: any[]; updatedAt: string | null; count: number }> {
+export async function loadCloudGvCookies(): Promise<{
+  cookies: any[];
+  updatedAt: string | null;
+  count: number;
+  userAgent?: string | null;
+}> {
   await ensureSettingsTable();
   let row = await one<{ value: any }>(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
 
@@ -277,6 +287,7 @@ export async function loadCloudGvCookies(): Promise<{ cookies: any[]; updatedAt:
     cookies,
     updatedAt: val.updatedAt || null,
     count: cookies.length,
+    userAgent: val.userAgent || null,
   };
 }
 

@@ -2,12 +2,17 @@
 set -e
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+REPO_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+PROFILE_DIR="$REPO_DIR/server/data/chrome-gv-profile"
+
+mkdir -p "$PROFILE_DIR"
 
 # 1. Reap any stale orphaned Xvfb :99 or zombie daemon Chrome trees before starting fresh
+pkill -9 -f "$PROFILE_DIR" 2>/dev/null || true
 pkill -9 -f "/tmp/iwg-gv-daemon-profile" 2>/dev/null || true
 pkill -f "Xvfb :99" 2>/dev/null || true
 rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
-rm -rf /tmp/iwg-gv-daemon-profile/Singleton* 2>/dev/null || true
+rm -rf "$PROFILE_DIR"/Singleton* 2>/dev/null || true
 
 # 2. Ultra-low-latency 20ms mono 48kHz PulseAudio null-sink (zero physical mic/speaker, zero echo, half RAM)
 export PULSE_LATENCY_MSEC=20
@@ -40,7 +45,9 @@ elif [ -x /usr/bin/chromium-browser ]; then
   export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 fi
 
-# 4. Cap worker V8 heap at 160MB & run under nice -n 5 on e2-small (2 vCPUs, 2GB RAM) so Caddy (:443), sshd, and sarah-server (:4000) get top priority
+export CHROME_USER_DATA_DIR="$PROFILE_DIR"
+
+# 4. Cap worker V8 heap at 160MB & run under nice -n 5 on e2-small (2 vCPUs, 2GB RAM)
 if command -v nice >/dev/null 2>&1; then
   exec nice -n 5 node --max-old-space-size=160 "$SCRIPT_DIR/worker.mjs"
 else
