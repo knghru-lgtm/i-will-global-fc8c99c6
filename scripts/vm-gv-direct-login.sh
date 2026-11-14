@@ -54,6 +54,7 @@ Xvfb :99 -screen 0 1280x800x24 -nolisten tcp -ac -noreset >/tmp/iwg-xvfb-login.l
 XVFB_PID=$!
 sleep 1
 export DISPLAY=:99
+export DBUS_SESSION_BUS_ADDRESS=/dev/null
 
 CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)"
 "${CHROME_BIN}" \
@@ -63,6 +64,7 @@ CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || com
   --disable-gpu \
   --disable-blink-features=AutomationControlled \
   --password-store=basic \
+  --use-mock-keychain \
   --no-first-run \
   --no-default-browser-check \
   --remote-debugging-address=127.0.0.1 \
@@ -215,14 +217,18 @@ echo "     (This script auto-detects sign-in and updates the cookie vault,"
 echo "      or you can press ENTER manually once signed in!)"
 echo "=========================================================================="
 
-# Poll every 2s for either ENTER on stdin OR automatic detection of voice.google.com/u/0/calls
+# Poll every 2s for either ENTER on interactive tty OR automatic detection of voice.google.com/u/0/calls
 while true; do
-  if read -r -t 2 _; then
-    break
+  if [ -t 0 ]; then
+    if read -r -t 2 _; then
+      break
+    fi
+  else
+    sleep 2
   fi
-  if curl -fsS http://127.0.0.1:9222/json/list 2>/dev/null | node -e "const tabs=JSON.parse(require('fs').readFileSync(0,'utf8')); const ok=Array.isArray(tabs)&&tabs.some(t=>String(t.url||'').startsWith('https://voice.google.com/')&&!String(t.url||'').includes('/about')&&!String(t.title||'').toLowerCase().includes('sign in')); process.exit(ok?0:1);" 2>/dev/null; then
-    echo "✅ Detected authenticated Google Voice Calls page! Waiting 3s for cookies to settle..."
-    sleep 3
+  if curl -fsS http://127.0.0.1:9222/json/list 2>/dev/null | node -e "const tabs=JSON.parse(require('fs').readFileSync(0,'utf8')); const ok=Array.isArray(tabs)&&tabs.some(t=>String(t.url||'').startsWith('https://voice.google.com/')&&!String(t.url||'').includes('/about')&&!String(t.url||'').includes('/signup')&&!String(t.title||'').toLowerCase().includes('sign in')); process.exit(ok?0:1);" 2>/dev/null; then
+    echo "✅ Detected authenticated Google Voice Calls page! Waiting 4s for all cookies to settle..."
+    sleep 4
     LOGIN_COMPLETED=1
     break
   fi
