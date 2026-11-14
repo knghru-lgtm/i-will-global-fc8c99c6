@@ -1198,7 +1198,7 @@
     updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
   }
 
-  const intervalId = setInterval(() => scanGoogleVoiceDom(false), 250);
+  const intervalId = setInterval(() => scanGoogleVoiceDom(false), 200);
   const heartbeatIntervalId = IS_TOP_FRAME ? setInterval(sendWatchdogHeartbeat, 4000) : null;
   if (IS_TOP_FRAME) {
     setTimeout(sendWatchdogHeartbeat, 400);

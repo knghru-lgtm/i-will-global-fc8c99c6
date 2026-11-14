@@ -10,7 +10,11 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="${REPO_DIR}/server/data"
-PROFILE_DIR="${DATA_DIR}/chrome-gv-profile"
+if [ -d "/home/king" ]; then
+  PROFILE_DIR="/home/king/.sarah-chrome-profile"
+else
+  PROFILE_DIR="${CHROME_USER_DATA_DIR:-${DATA_DIR}/chrome-gv-profile}"
+fi
 TOKEN_FILE="${DATA_DIR}/gv-login-token.txt"
 BRIDGE_TOKEN="${GV_BRIDGE_TOKEN:-iwg-sarah-cloud-bridge-v10-9455}"
 PUBLIC_BASE="${APP_URL:-https://voice.iwillglobal.com}"
@@ -196,13 +200,15 @@ if ! curl -fsS "http://127.0.0.1:4000/gv-login/${LOGIN_TOKEN}/vnc.html" >/dev/nu
 fi
 
 DIRECT_URL="${PUBLIC_BASE}/gv-login/${LOGIN_TOKEN}"
+LOCAL_TUNNEL_URL="http://localhost:4000/gv-login/${LOGIN_TOKEN}"
 
 echo ""
 echo "=========================================================================="
 echo "  [5/5] ONE-TIME GOOGLE VOICE VM SIGN-IN READY"
 echo ""
 echo "  1. Open this link in your browser:"
-echo "     ${DIRECT_URL}"
+echo "     Local SSH Tunnel (instant): ${LOCAL_TUNNEL_URL}"
+echo "     Public Domain:              ${DIRECT_URL}"
 echo ""
 echo "  2. Sign into Google Voice (+14803319455) until the Calls page loads."
 echo "     (This script auto-detects sign-in and updates the cookie vault,"

@@ -3,12 +3,17 @@ set -e
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
-PROFILE_DIR="$REPO_DIR/server/data/chrome-gv-profile"
+if [ -d "/home/king" ]; then
+  PROFILE_DIR="/home/king/.sarah-chrome-profile"
+else
+  PROFILE_DIR="${CHROME_USER_DATA_DIR:-$REPO_DIR/server/data/chrome-gv-profile}"
+fi
 
 mkdir -p "$PROFILE_DIR"
 
 # 1. Reap any stale orphaned Xvfb :99 or zombie daemon Chrome trees before starting fresh
 pkill -9 -f "$PROFILE_DIR" 2>/dev/null || true
+pkill -9 -f "/home/king/sarah-server/server/data/chrome-gv-profile" 2>/dev/null || true
 pkill -9 -f "/tmp/iwg-gv-daemon-profile" 2>/dev/null || true
 pkill -f "Xvfb :99" 2>/dev/null || true
 rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
@@ -31,7 +36,11 @@ if command -v Xvfb >/dev/null 2>&1; then
   export DISPLAY=:99
 fi
 
-if [ -x /usr/bin/google-chrome ]; then
+if [ -f /usr/local/bin/sarah-chrome ]; then
+  chmod +x /usr/local/bin/sarah-chrome 2>/dev/null || true
+  export CHROME_PATH=/usr/local/bin/sarah-chrome
+  export PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/sarah-chrome
+elif [ -x /usr/bin/google-chrome ]; then
   export CHROME_PATH=/usr/bin/google-chrome
   export PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
 elif [ -x /usr/bin/google-chrome-stable ]; then

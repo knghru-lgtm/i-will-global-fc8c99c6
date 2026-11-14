@@ -8,7 +8,19 @@ import puppeteer from 'puppeteer-core';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const CHROME_PROFILE_DIR =
-  process.env.CHROME_USER_DATA_DIR || path.resolve(REPO_ROOT, 'server/data/chrome-gv-profile');
+  process.env.CHROME_USER_DATA_DIR ||
+  (existsSync('/home/king')
+    ? '/home/king/.sarah-chrome-profile'
+    : path.resolve(REPO_ROOT, 'server/data/chrome-gv-profile'));
+const CORE_GOOGLE_AUTH_COOKIES = [
+  'SID',
+  'HSID',
+  'SSID',
+  'APISID',
+  'SAPISID',
+  '__Secure-1PSID',
+  '__Secure-1PSIDTS',
+];
 
 const LOCAL_API_BASE = process.env.LOCAL_API_URL || 'http://127.0.0.1:4000';
 const PUBLIC_API_BASE = process.env.APP_URL || 'https://voice.iwillglobal.com';
@@ -202,6 +214,7 @@ function normalizeCookiesForCdp(rawCookies) {
 
 function resolveChromeBinary() {
   const candidates = [
+    '/usr/local/bin/sarah-chrome',
     process.env.PUPPETEER_EXECUTABLE_PATH,
     process.env.CHROME_PATH,
     '/usr/bin/google-chrome',
@@ -231,6 +244,7 @@ async function launchResilientBrowser(execPath) {
   mkdirSync(CHROME_PROFILE_DIR, { recursive: true });
   reapZombieChromeProcesses();
 
+  const usesSarahChromeWrapper = String(execPath || '').endsWith('sarah-chrome');
   const chromeArgs = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -246,6 +260,7 @@ async function launchResilientBrowser(execPath) {
     '--disable-default-apps',
     '--disable-blink-features=AutomationControlled',
     '--password-store=basic',
+    '--use-mock-keychain',
     '--mute-audio=false',
     '--no-first-run',
     '--no-default-browser-check',
@@ -256,7 +271,7 @@ async function launchResilientBrowser(execPath) {
     '--js-flags=--max-old-space-size=384',
     '--disk-cache-size=33554432',
     '--media-cache-size=16777216',
-    `--user-data-dir=${CHROME_PROFILE_DIR}`,
+    ...(usesSarahChromeWrapper ? [] : [`--user-data-dir=${CHROME_PROFILE_DIR}`]),
     '--autoplay-policy=no-user-gesture-required',
     '--use-fake-ui-for-media-stream',
     '--alsa-output-device=pulse',
@@ -273,6 +288,7 @@ async function launchResilientBrowser(execPath) {
     try {
       return await puppeteer.launch({
         executablePath: execPath,
+        userDataDir: CHROME_PROFILE_DIR,
         headless: false,
         protocolTimeout: 60000,
         ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
@@ -285,6 +301,7 @@ async function launchResilientBrowser(execPath) {
 
   return await puppeteer.launch({
     executablePath: execPath,
+    userDataDir: CHROME_PROFILE_DIR,
     headless: 'new',
     protocolTimeout: 60000,
     ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
@@ -354,11 +371,9 @@ async function resolveAccountChooserIfNeeded(page) {
 async function runBrowserSession(cookies, syncedUserAgent = null) {
   const execPath = resolveChromeBinary();
   const keyNames = new Set(cookies.map((c) => String(c?.name || '')));
-  const presentKeys = ['SID', 'HSID', 'SSID', 'SAPISID', 'LSID', '__Secure-1PSID', '__Secure-1PSIDTS'].filter((k) =>
-    keyNames.has(k)
-  );
+  const presentKeys = [...CORE_GOOGLE_AUTH_COOKIES, 'LSID'].filter((k) => keyNames.has(k));
   console.log(
-    `[Sarah Cloud Daemon ${INSTANCE_ID}] Launching ultra-slim Chromium with ${cookies.length} cookies (keys: ${presentKeys.join(',') || 'none'})...`
+    `[Sarah Cloud Daemon ${INSTANCE_ID}] Launching ${execPath} (profile=${CHROME_PROFILE_DIR}) with ${cookies.length} vault cookies (keys: ${presentKeys.join(',') || 'none'})...`
   );
 
   const browser = await launchResilientBrowser(execPath);
@@ -376,15 +391,21 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
       permissions: ['audioCapture', 'notifications'],
     });
 
-    // Check if persistent VM Chrome profile ALREADY has a valid native Linux Google Voice session
+    // Check if persistent VM Chrome profile ALREADY has all 7 core Google auth cookies + voice.google.com
     const nativeVmAuthMarker = path.join(CHROME_PROFILE_DIR, '.native-vm-auth');
     const hasNativeVmAuthMarker = existsSync(nativeVmAuthMarker);
     const existingProfileCookies = await client.send('Network.getAllCookies').catch(() => ({ cookies: [] }));
+    const existingNames = new Set(
+      Array.isArray(existingProfileCookies?.cookies)
+        ? existingProfileCookies.cookies.map((c) => String(c?.name || ''))
+        : []
+    );
+    const profileHasAllCoreAuth = CORE_GOOGLE_AUTH_COOKIES.every((k) => existingNames.has(k));
     const profileHasNativeGvAuth =
-      hasNativeVmAuthMarker ||
-      (Array.isArray(existingProfileCookies?.cookies) &&
-        existingProfileCookies.cookies.some((c) => c.domain?.includes('voice.google.com')) &&
-        existingProfileCookies.cookies.some((c) => c.name === 'SID' || c.name === '__Secure-1PSID'));
+      hasNativeVmAuthMarker &&
+      profileHasAllCoreAuth &&
+      Array.isArray(existingProfileCookies?.cookies) &&
+      existingProfileCookies.cookies.some((c) => c.domain?.includes('voice.google.com'));
 
     // Strip HeadlessChrome marker; if using native Linux VM profile, keep Linux UA instead of synced Windows UA
     const defaultUa = (await browser.userAgent()).replace(/HeadlessChrome\//gi, 'Chrome/');
@@ -417,7 +438,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
           applied++;
         } catch { }
       }
-      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Injected ${applied}/${cdpCookies.length} Google Voice cookies (hostOnly-preserved).`);
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Injected ${applied}/${cdpCookies.length} Google Voice cookies into ${CHROME_PROFILE_DIR}.`);
     } else if (profileHasNativeGvAuth) {
       console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Using persistent VM Chrome profile session (${existingProfileCookies?.cookies?.length || 0} profile cookies).`);
     }
@@ -447,9 +468,19 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
     });
     console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Initial navigation URL: ${page.url()}`);
 
+    if (page.url().includes('workspace.google.com')) {
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Redirected to workspace.google.com — invoking ServiceLogin passive grandcentral SSO...`);
+      await page
+        .goto(
+          'https://accounts.google.com/ServiceLogin?service=grandcentral&passive=true&continue=https%3A%2F%2Fvoice.google.com%2Fu%2F0%2Fcalls',
+          { waitUntil: 'domcontentloaded', timeout: 30000 }
+        )
+        .catch(() => { });
+    }
+
     if (page.url().includes('accounts.google.com')) {
       const resolved = await resolveAccountChooserIfNeeded(page);
-      if (!resolved && profileHasNativeGvAuth && !hasNativeVmAuthMarker && cdpCookies.length > 0) {
+      if (!resolved && profileHasNativeGvAuth && cdpCookies.length > 0) {
         // Persistent profile expired — fall back to fresh vault cookies once
         for (const ck of cdpCookies) {
           try {
@@ -501,6 +532,8 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
       const currentUrl = page.url();
       const title = await page.title().catch(() => '');
       const isSignedOut =
+        !isGoogleVoiceAuthenticatedUrl(currentUrl, title) ||
+        currentUrl.includes('workspace.google.com') ||
         currentUrl.includes('accounts.google.com') ||
         currentUrl.includes('voice.google.com/about') ||
         /sign\s*in/i.test(title);
