@@ -10,6 +10,12 @@ client/dist/*
 !.env.example
 data/
 server/data/
+backups/
+*.tar.gz
+*.sql.gz
+*.json.gz
+*.jks
+*.keystore
 *.log
 client/android/app/build/
 client/ios/App/Pods/

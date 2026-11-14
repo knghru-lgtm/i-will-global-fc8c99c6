@@ -404,6 +404,12 @@ if (isMain) {
         }, 60_000);
       })
       .catch(() => {});
+
+    void import('./services/cloudBackup.ts')
+      .then(({ startAutomatedCloudBackupScheduler }) => {
+        startAutomatedCloudBackupScheduler();
+      })
+      .catch(() => {});
   });
 
   const gracefulShutdown = (sig: string) => {

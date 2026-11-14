@@ -7,6 +7,7 @@ import { WebSocket } from 'ws';
 import { createApp, attachSarahWebSocket } from '../src/index.ts';
 import { getDb, closeDb, one } from '../src/db/index.ts';
 import { ensureSeeded } from '../src/db/seed.ts';
+import { signToken } from '../src/auth.ts';
 import {
   executeSarahTool,
   SARAH_SYSTEM_INSTRUCTION,
@@ -434,5 +435,43 @@ describe('Sarah Voice AI (Dual-Mode (480) 331-9455 Virtual Receptionist & Outbou
     assert.equal(toolRes.ok, true);
     assert.equal(toolRes.result.success, true);
     assert.match(toolRes.result.medicare_2027.part_a_hospital_deductible, /1,788/i);
+  });
+
+  test('100% Google Cloud Backup Engine creates checksummed snapshots and exports full CRM JSON', async () => {
+    const admin = await one<any>(`SELECT * FROM users WHERE role = 'admin' LIMIT 1`);
+    assert.ok(admin);
+    const token = signToken(admin);
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+
+    const backupRes = await fetch(`${baseUrl}/api/backup/cloud`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({}),
+    }).then((r) => r.json());
+
+    assert.equal(backupRes.ok, true);
+    assert.equal(backupRes.platform, 'google_cloud');
+    assert.ok(backupRes.total_tables >= 18);
+    assert.ok(backupRes.total_rows > 0);
+    assert.match(backupRes.sha256, /^[a-f0-9]{64}$/);
+
+    const statusRes = await fetch(`${baseUrl}/api/backup/status`, {
+      headers: authHeaders,
+    }).then((r) => r.json());
+
+    assert.equal(statusRes.ok, true);
+    assert.equal(statusRes.platform, 'google_cloud');
+    assert.equal(statusRes.latest_backup?.backup_id, backupRes.backup_id);
+
+    const downloadRes = await fetch(`${baseUrl}/api/backup/download`, {
+      headers: authHeaders,
+    }).then((r) => r.json());
+
+    assert.equal(downloadRes.platform, 'google_cloud');
+    assert.ok(Array.isArray(downloadRes.tables?.leads));
+    assert.ok(Array.isArray(downloadRes.tables?.users));
   });
 });

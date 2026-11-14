@@ -105,6 +105,13 @@ export const SettingsPage: React.FC = () => {
   const [sarahTesting, setSarahTesting] = useState<boolean>(false);
   const [sarahTestResult, setSarahTestResult] = useState<string>('');
 
+  // Google Cloud Backup & Disaster Recovery State
+  const [backupStatus, setBackupStatus] = useState<any>(null);
+  const [backupRunning, setBackupRunning] = useState<boolean>(false);
+  const [backupDownloading, setBackupDownloading] = useState<boolean>(false);
+  const [backupMsg, setBackupMsg] = useState<string>('');
+  const [backupErr, setBackupErr] = useState<string>('');
+
   // Password Management State
   const [curPassword, setCurPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -330,12 +337,61 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const fetchCloudBackupStatus = async () => {
+    try {
+      const res = await api.get('/backup/status');
+      setBackupStatus(res);
+    } catch {
+      // Non-admin roles skip backup status silently
+    }
+  };
+
+  const handleRunCloudBackup = async () => {
+    setBackupRunning(true);
+    setBackupMsg('');
+    setBackupErr('');
+    try {
+      const receipt = await api.post('/backup/cloud', {});
+      const dest = receipt.gcs_uri ? `Google Cloud Storage (${receipt.gcs_uri}) + Persistent Disk` : 'Google Cloud Persistent Disk';
+      setBackupMsg(`✅ Backed up ${receipt.total_rows} records across ${receipt.total_tables} tables to ${dest} (SHA-256: ${String(receipt.sha256).slice(0, 12)}…)`);
+      await fetchCloudBackupStatus();
+    } catch (err: any) {
+      setBackupErr(err.message || 'Google Cloud backup failed');
+    } finally {
+      setBackupRunning(false);
+    }
+  };
+
+  const handleDownloadCloudBackup = async () => {
+    setBackupDownloading(true);
+    setBackupErr('');
+    try {
+      const snapshot = await api.get('/backup/download');
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const slug = (snapshot?.created_at || new Date().toISOString()).slice(0, 10);
+      a.href = url;
+      a.download = `iwg-google-cloud-backup-${slug}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupMsg(`✅ Downloaded full CRM cloud snapshot (${snapshot?.total_rows || 0} rows).`);
+    } catch (err: any) {
+      setBackupErr(err.message || 'Failed to download cloud snapshot');
+    } finally {
+      setBackupDownloading(false);
+    }
+  };
+
   useEffect(() => {
     fetchDnsStatus();
     runSpamTest();
     fetchCallerIdRegistry();
     fetchTrunkConfig();
     fetchSarahDialerConfig();
+    fetchCloudBackupStatus();
   }, []);
 
   const runSpamTest = async () => {
@@ -384,6 +440,109 @@ export const SettingsPage: React.FC = () => {
           Account security credentials, email deliverability, Google Workspace integration, and CMS Medicare compliance
         </div>
       </div>
+
+      {/* ------------------------------------------------------------------ GOOGLE CLOUD AUTOMATED BACKUP & DISASTER RECOVERY */}
+      {(user?.role === 'admin' || user?.role === 'manager') && (
+        <div style={{ background: 'var(--bg-card)', border: '1.5px solid #38bdf8', borderRadius: '16px', padding: '1.75rem', boxShadow: '0 8px 30px rgba(0,0,0,0.4)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.1rem' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '1.5rem' }}>☁️</span>
+                <h2 style={{ fontSize: '1.22rem', fontWeight: 800, margin: 0, color: '#7dd3fc' }}>
+                  100% Google Cloud Backup & Disaster Recovery
+                </h2>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '3px 9px', borderRadius: '10px', background: 'rgba(56,189,248,0.16)', border: '1px solid #38bdf8', color: '#bae6fd' }}>
+                  AUTO-SYNC EVERY 6H + DAILY GCS
+                </span>
+              </div>
+              <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                Backs up all CRM tables, Inbound Leads, scheduled appointments, policies, and the AES-256 encrypted Google Voice vault to Google Cloud Storage & persistent disk.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleRunCloudBackup}
+                disabled={backupRunning}
+                style={{
+                  padding: '0.65rem 1.1rem',
+                  borderRadius: '10px',
+                  border: '1px solid #38bdf8',
+                  background: 'linear-gradient(135deg, #0284c7, #0369a1)',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: '0.84rem',
+                  cursor: backupRunning ? 'wait' : 'pointer',
+                }}
+              >
+                {backupRunning ? '☁️ Backing Up to Google Cloud…' : '☁️ Backup Everything to Google Cloud Now'}
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadCloudBackup}
+                disabled={backupDownloading}
+                style={{
+                  padding: '0.65rem 1rem',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-elevated)',
+                  color: 'var(--text)',
+                  fontWeight: 700,
+                  fontSize: '0.84rem',
+                  cursor: backupDownloading ? 'wait' : 'pointer',
+                }}
+              >
+                {backupDownloading ? '⬇️ Preparing…' : '⬇️ Download Cloud Snapshot (.json)'}
+              </button>
+            </div>
+          </div>
+
+          {backupMsg && (
+            <div style={{ padding: '0.75rem', background: 'rgba(16,185,129,0.14)', border: '1px solid rgba(16,185,129,0.4)', color: '#6ee7b7', borderRadius: '8px', fontSize: '0.84rem', marginBottom: '0.9rem' }}>
+              {backupMsg}
+            </div>
+          )}
+          {backupErr && (
+            <div style={{ padding: '0.75rem', background: 'var(--danger-bg)', color: 'var(--danger)', borderRadius: '8px', fontSize: '0.84rem', marginBottom: '0.9rem' }}>
+              ⚠️ {backupErr}
+            </div>
+          )}
+
+          {backupStatus && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem', fontSize: '0.82rem' }}>
+              <div style={{ padding: '0.7rem 0.85rem', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>Total Leads / Inbound</div>
+                <div style={{ fontWeight: 800, fontSize: '1.05rem', marginTop: '2px' }}>
+                  {backupStatus.live_counts?.leads ?? 0} <span style={{ color: '#6ee7b7', fontSize: '0.82rem' }}>({backupStatus.live_counts?.inbound_leads ?? 0} Inbound)</span>
+                </div>
+              </div>
+              <div style={{ padding: '0.7rem 0.85rem', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>Scheduled Appointments</div>
+                <div style={{ fontWeight: 800, fontSize: '1.05rem', marginTop: '2px' }}>{backupStatus.live_counts?.appointments ?? 0}</div>
+              </div>
+              <div style={{ padding: '0.7rem 0.85rem', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>Clients & Activities</div>
+                <div style={{ fontWeight: 800, fontSize: '1.05rem', marginTop: '2px' }}>
+                  {backupStatus.live_counts?.clients ?? 0} / {backupStatus.live_counts?.activities ?? 0}
+                </div>
+              </div>
+              <div style={{ padding: '0.7rem 0.85rem', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>Latest Cloud Snapshot</div>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', marginTop: '2px', color: '#bae6fd' }}>
+                  {backupStatus.latest_backup?.created_at
+                    ? new Date(backupStatus.latest_backup.created_at).toLocaleString()
+                    : `${backupStatus.local_backups_count || 0} rolling archives`}
+                </div>
+                {backupStatus.latest_backup?.gcs_uri && (
+                  <div style={{ fontSize: '0.7rem', color: '#6ee7b7', marginTop: '2px', wordBreak: 'break-all' }}>
+                    {backupStatus.latest_backup.gcs_uri}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ------------------------------------------------------------------ SECTION 0: ACCOUNT SECURITY & PASSWORD UPDATE */}
       <div style={{ background: 'var(--bg-card)', border: '1.5px solid var(--accent)', borderRadius: '16px', padding: '1.75rem', boxShadow: '0 8px 30px rgba(0,0,0,0.4)' }}>

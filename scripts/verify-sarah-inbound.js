@@ -54,7 +54,7 @@ async function runVerificationSuite(targetUrl) {
   console.log(`• Configured Office Hours   : ${process.env.OFFICE_HOURS_START || '08:00'} -> ${process.env.OFFICE_HOURS_END || '17:00'} (Days: ${process.env.OFFICE_DAYS || '1,2,3,4,5'})`);
   console.log(`• Test Target Endpoint      : ${targetUrl}`);
 
-  await fetch(`${targetUrl}/api/health`).catch(() => {});
+  await fetch(`${targetUrl}/api/health`).catch(() => { });
 
   const gvStatus = await fetch(`${targetUrl}/api/sarah/gv-status`).then((r) => r.json()).catch(() => null);
   console.log(`• Google Voice Cloud Bridge : ${JSON.stringify(gvStatus)}`);

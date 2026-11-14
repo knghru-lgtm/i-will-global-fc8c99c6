@@ -137,7 +137,7 @@ export async function placeCarrierTrunkCall(params: {
     targetRunner: 'cloud-daemon',
     dialOutboundPhone: e164,
     leadId: params.leadId || undefined,
-  }).catch(() => {});
+  }).catch(() => { });
 
   return {
     success: true,

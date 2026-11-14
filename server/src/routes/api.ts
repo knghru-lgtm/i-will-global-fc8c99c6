@@ -5,6 +5,7 @@ import { config, isAIEnabled, isGoogleEnabled, TPMO_DISCLAIMER } from '../config
 import { currentPeriod, nextPeriod } from '../services/enrollment.ts';
 import { authUrl, exchangeCode, googleStatus, disconnectGoogle, sendGmail, syncGmail } from '../services/google.ts';
 import { getTelephonyConfig, placeCarrierTrunkCall } from '../services/telephony.ts';
+import { createFullCrmBackupSnapshot, getCloudBackupStatus, runFullCloudBackup } from '../services/cloudBackup.ts';
 import jwt from 'jsonwebtoken';
 
 export const auth = Router();
@@ -978,6 +979,55 @@ api.post('/telephony/twiml/outbound', (req, res) => {
     <Number>${to}</Number>
   </Dial>
 </Response>`);
+});
+
+// ------------------------------------------------------------------ Google Cloud Automated Backup & Disaster Recovery
+api.get('/backup/status', async (req, res) => {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'manager') {
+    return res.status(403).json({ error: 'Only administrators can inspect Google Cloud backups' });
+  }
+  try {
+    res.json(await getCloudBackupStatus());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to read Google Cloud backup status' });
+  }
+});
+
+api.post('/backup/cloud', async (req, res) => {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'manager') {
+    return res.status(403).json({ error: 'Only administrators can trigger Google Cloud backups' });
+  }
+  try {
+    const receipt = await runFullCloudBackup('manual_admin');
+    await audit(req.user.id, 'cloud_backup', 'system', receipt.backup_id, {
+      sha256: receipt.sha256,
+      total_rows: receipt.total_rows,
+      gcs_uploaded: receipt.gcs_uploaded,
+      gcs_uri: receipt.gcs_uri,
+    });
+    res.json(receipt);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Google Cloud backup failed' });
+  }
+});
+
+api.get('/backup/download', async (req, res) => {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'manager') {
+    return res.status(403).json({ error: 'Only administrators can download full CRM cloud snapshots' });
+  }
+  try {
+    const snapshot = await createFullCrmBackupSnapshot({ trigger: 'browser_download', redactSecrets: true });
+    await audit(req.user.id, 'cloud_backup_download', 'system', snapshot.backup_id, {
+      sha256: snapshot.sha256,
+      total_rows: snapshot.total_rows,
+    });
+    const dateSlug = snapshot.created_at.slice(0, 10);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="iwg-google-cloud-backup-${dateSlug}.json"`);
+    res.send(JSON.stringify(snapshot, null, 2));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to export Google Cloud snapshot' });
+  }
 });
 
 // ------------------------------------------------------------------ Google OAuth

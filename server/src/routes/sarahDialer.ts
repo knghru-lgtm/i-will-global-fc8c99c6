@@ -137,30 +137,30 @@ sarahPublic.all('/inbound', async (req, res) => {
   try {
     const callSessionKey = String(
       req.body?.CallSid ||
-        req.query?.CallSid ||
-        req.body?.session_id ||
-        req.query?.session_id ||
-        req.body?.call_id ||
-        req.query?.call_id ||
-        req.body?.From ||
-        req.body?.from ||
-        req.query?.From ||
-        req.query?.from ||
-        req.body?.caller_phone ||
-        req.query?.caller_phone ||
-        'inbound-default'
+      req.query?.CallSid ||
+      req.body?.session_id ||
+      req.query?.session_id ||
+      req.body?.call_id ||
+      req.query?.call_id ||
+      req.body?.From ||
+      req.body?.from ||
+      req.query?.From ||
+      req.query?.from ||
+      req.body?.caller_phone ||
+      req.query?.caller_phone ||
+      'inbound-default'
     );
     const memSession: any = inboundCallHistoryMap.get(callSessionKey) || { history: [] };
 
     const callerPhone = String(
       req.body?.From ||
-        req.body?.from ||
-        req.query?.From ||
-        req.query?.from ||
-        req.body?.caller_phone ||
-        req.query?.caller_phone ||
-        memSession.prospect_phone ||
-        ''
+      req.body?.from ||
+      req.query?.From ||
+      req.query?.from ||
+      req.body?.caller_phone ||
+      req.query?.caller_phone ||
+      memSession.prospect_phone ||
+      ''
     );
     const callerName = String(
       req.body?.caller_name || req.query?.caller_name || req.body?.CallerName || memSession.prospect_name || ''
@@ -174,23 +174,23 @@ sarahPublic.all('/inbound', async (req, res) => {
     const productLine = req.body?.product_line || req.query?.product_line || memSession.product_interest;
     const userSpeech = String(
       req.body?.SpeechResult ||
-        req.body?.speech ||
-        req.body?.message ||
-        req.body?.transcript ||
-        req.body?.text ||
-        req.query?.SpeechResult ||
-        req.query?.speech ||
-        req.query?.message ||
-        req.query?.transcript ||
-        ''
+      req.body?.speech ||
+      req.body?.message ||
+      req.body?.transcript ||
+      req.body?.text ||
+      req.query?.SpeechResult ||
+      req.query?.speech ||
+      req.query?.message ||
+      req.query?.transcript ||
+      ''
     ).trim();
     const isGatherTimeout = String(req.query?.timeout || '') === '1';
 
     const isTwimlRequest = Boolean(
       req.body?.CallSid ||
-        req.query?.CallSid ||
-        req.query?.format === 'twiml' ||
-        String(req.headers.accept || '').includes('xml')
+      req.query?.CallSid ||
+      req.query?.format === 'twiml' ||
+      String(req.headers.accept || '').includes('xml')
     );
 
     const rawForceWorkHours = req.body?.force_work_hours ?? req.query?.force_work_hours;
@@ -266,7 +266,7 @@ sarahPublic.all('/inbound', async (req, res) => {
                   },
                 });
               }
-            } catch {}
+            } catch { }
           })();
         });
       }
@@ -402,7 +402,7 @@ sarahPublic.all('/inbound', async (req, res) => {
                 routing_mode: 'business_hours',
                 answered_immediately: true,
               });
-            } catch {}
+            } catch { }
           })();
         });
       }
@@ -548,7 +548,7 @@ sarahPublic.all('/inbound', async (req, res) => {
         product_interest: turnResult?.product_interest || productLine,
       };
       inboundCallHistoryMap.set(callSessionKey, nextState);
-      void saveSarahCallSession(callSessionKey, nextState).catch(() => {});
+      void saveSarahCallSession(callSessionKey, nextState).catch(() => { });
     }
 
     if (requestedPerson && workHoursStatus.isOpen && !cfg.is_on_warm_transfer && !transferResult) {
@@ -677,7 +677,7 @@ sarahPublic.all('/inbound', async (req, res) => {
             reply: spokenReply,
             answered_immediately: true,
           });
-        } catch {}
+        } catch { }
       })();
     });
 
