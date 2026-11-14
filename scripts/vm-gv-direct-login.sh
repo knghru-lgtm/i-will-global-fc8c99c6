@@ -91,7 +91,7 @@ LOGIN_COMPLETED=0
 CLEANED_UP=0
 
 sync_profile_cookies_to_vault() {
-  node --input-type=module - "${BRIDGE_TOKEN}" <<'NODE_EOF'
+  (cd "${REPO_DIR}/cloud-voip-daemon" && node --input-type=module - "${BRIDGE_TOKEN}" <<'NODE_EOF'
 import puppeteer from 'puppeteer-core';
 
 const bridgeToken = process.argv[2];
@@ -138,6 +138,7 @@ try {
 }
 process.exit(1);
 NODE_EOF
+  )
 }
 
 cleanup() {
