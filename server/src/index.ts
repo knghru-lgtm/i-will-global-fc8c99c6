@@ -1,8 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import http from 'node:http';
+import net from 'node:net';
 import { WebSocketServer } from 'ws';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, repoRoot, isAIEnabled, isGoogleEnabled } from './config.ts';
@@ -38,10 +39,82 @@ import {
   verifyBridgeToken,
 } from './services/googleVoiceWatchdog.ts';
 
+const GV_LOGIN_TOKEN_FILE = path.join(repoRoot, 'server', 'data', 'gv-login-token.txt');
+
+function getGvVncPort(): number {
+  const n = Number(process.env.GV_VNC_PORT || 6080);
+  return Number.isFinite(n) && n > 0 ? n : 6080;
+}
+
+export function getActiveGvLoginToken(): string | null {
+  try {
+    if (!existsSync(GV_LOGIN_TOKEN_FILE)) return null;
+    const raw = readFileSync(GV_LOGIN_TOKEN_FILE, 'utf8').trim();
+    return /^[a-f0-9]{16,64}$/i.test(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createApp() {
   const app = express();
   app.set('trust proxy', true);
   app.use(cors());
+
+  // Ephemeral, random-token-protected one-time Google Voice VM noVNC sign-in tunnel (127.0.0.1:6080)
+  // Returns 404 whenever server/data/gv-login-token.txt does not exist.
+  app.use('/gv-login/:token', (req, res) => {
+    const activeToken = getActiveGvLoginToken();
+    const suppliedToken = String(req.params.token || '');
+    if (!activeToken || suppliedToken !== activeToken) {
+      res.status(404).type('text/plain').send('One-time Google Voice VM login session is not active.');
+      return;
+    }
+
+    if (req.path === '/' || req.url === '/') {
+      const wsPath = encodeURIComponent(`gv-login/${activeToken}/websockify`);
+      res.redirect(302, `/gv-login/${encodeURIComponent(activeToken)}/vnc.html?autoconnect=true&resize=scale&path=${wsPath}`);
+      return;
+    }
+
+    const vncPort = getGvVncPort();
+    const proxyHeaders: http.OutgoingHttpHeaders = {
+      ...req.headers,
+      host: `127.0.0.1:${vncPort}`,
+      'accept-encoding': 'identity',
+    };
+
+    const proxyReq = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: vncPort,
+        path: req.url || '/',
+        method: req.method,
+        headers: proxyHeaders,
+      },
+      (proxyRes) => {
+        res.status(proxyRes.statusCode || 502);
+        for (const [k, v] of Object.entries(proxyRes.headers)) {
+          if (v !== undefined && k.toLowerCase() !== 'transfer-encoding') {
+            res.setHeader(k, v);
+          }
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        proxyRes.pipe(res);
+      },
+    );
+
+    proxyReq.on('error', (err) => {
+      if (!res.headersSent) {
+        res.status(502).type('text/plain').send(`Local VM VNC bridge (:6080) unavailable: ${err.message}`);
+      } else {
+        res.end();
+      }
+    });
+
+    req.pipe(proxyReq);
+  });
+
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
@@ -352,9 +425,48 @@ export function attachSarahWebSocket(server: http.Server) {
         wss.handleUpgrade(req, socket, head, (ws) => {
           wss.emit('connection', ws, req);
         });
-      } else {
-        socket.destroy();
+        return;
       }
+
+      const gvLoginMatch = url.pathname.match(/^\/gv-login\/([a-f0-9]{16,64})(\/.*)?$/i);
+      const activeToken = gvLoginMatch ? getActiveGvLoginToken() : null;
+      if (gvLoginMatch && activeToken && gvLoginMatch[1] === activeToken) {
+        const vncPort = getGvVncPort();
+        const subPath = gvLoginMatch[2] && gvLoginMatch[2] !== '/' ? gvLoginMatch[2] : '/websockify';
+        const upstreamTarget = `${subPath}${url.search || ''}`;
+        const upstream = net.connect(vncPort, '127.0.0.1', () => {
+          const headerLines: string[] = [`${req.method || 'GET'} ${upstreamTarget} HTTP/${req.httpVersion || '1.1'}`];
+          for (let i = 0; i < req.rawHeaders.length; i += 2) {
+            const k = req.rawHeaders[i];
+            const v = req.rawHeaders[i + 1] ?? '';
+            if (!k) continue;
+            const lower = k.toLowerCase();
+            if (lower === 'host') {
+              headerLines.push(`Host: 127.0.0.1:${vncPort}`);
+            } else if (lower === 'origin') {
+              headerLines.push(`Origin: http://127.0.0.1:${vncPort}`);
+            } else {
+              headerLines.push(`${k}: ${v}`);
+            }
+          }
+          headerLines.push('', '');
+          upstream.write(headerLines.join('\r\n'));
+          if (head && head.length > 0) {
+            upstream.write(head);
+          }
+          socket.pipe(upstream);
+          upstream.pipe(socket);
+        });
+        if ('setNoDelay' in socket && typeof socket.setNoDelay === 'function') {
+          socket.setNoDelay(true);
+        }
+        upstream.setNoDelay(true);
+        upstream.on('error', () => socket.destroy());
+        socket.on('error', () => upstream.destroy());
+        return;
+      }
+
+      socket.destroy();
     } catch (err) {
       console.error('[Sarah Voice AI] WebSocket upgrade error:', err);
       socket.destroy();

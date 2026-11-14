@@ -245,6 +245,7 @@ async function launchResilientBrowser(execPath) {
     '--disable-translate',
     '--disable-default-apps',
     '--disable-blink-features=AutomationControlled',
+    '--password-store=basic',
     '--mute-audio=false',
     '--no-first-run',
     '--no-default-browser-check',
@@ -369,10 +370,28 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
     const page = pages[0] || (await browser.newPage());
     await page.setViewport({ width: 800, height: 600 });
 
-    // Strip HeadlessChrome marker & match synced User-Agent so Google ServiceLogin allows passive grandcentral SSO
+    const client = await page.createCDPSession();
+    await client.send('Browser.grantPermissions', {
+      origin: 'https://voice.google.com',
+      permissions: ['audioCapture', 'notifications'],
+    });
+
+    // Check if persistent VM Chrome profile ALREADY has a valid native Linux Google Voice session
+    const nativeVmAuthMarker = path.join(CHROME_PROFILE_DIR, '.native-vm-auth');
+    const hasNativeVmAuthMarker = existsSync(nativeVmAuthMarker);
+    const existingProfileCookies = await client.send('Network.getAllCookies').catch(() => ({ cookies: [] }));
+    const profileHasNativeGvAuth =
+      hasNativeVmAuthMarker ||
+      (Array.isArray(existingProfileCookies?.cookies) &&
+        existingProfileCookies.cookies.some((c) => c.domain?.includes('voice.google.com')) &&
+        existingProfileCookies.cookies.some((c) => c.name === 'SID' || c.name === '__Secure-1PSID'));
+
+    // Strip HeadlessChrome marker; if using native Linux VM profile, keep Linux UA instead of synced Windows UA
     const defaultUa = (await browser.userAgent()).replace(/HeadlessChrome\//gi, 'Chrome/');
     const effectiveUa =
-      syncedUserAgent && !/HeadlessChrome/i.test(syncedUserAgent) ? syncedUserAgent : defaultUa;
+      !profileHasNativeGvAuth && syncedUserAgent && !/HeadlessChrome/i.test(syncedUserAgent)
+        ? syncedUserAgent
+        : defaultUa;
     await page.setUserAgent(effectiveUa);
 
     // Zero-latency (<1ms) local Node IPC bridge from Chrome -> http://127.0.0.1:4000
@@ -389,19 +408,6 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
       return await res.json();
     });
 
-    const client = await page.createCDPSession();
-    await client.send('Browser.grantPermissions', {
-      origin: 'https://voice.google.com',
-      permissions: ['audioCapture', 'notifications'],
-    });
-
-    // Check if persistent VM Chrome profile ALREADY has a valid native Linux Google Voice session
-    const existingProfileCookies = await client.send('Network.getAllCookies').catch(() => ({ cookies: [] }));
-    const profileHasNativeGvAuth =
-      Array.isArray(existingProfileCookies?.cookies) &&
-      existingProfileCookies.cookies.some((c) => c.domain?.includes('voice.google.com')) &&
-      existingProfileCookies.cookies.some((c) => c.name === 'SID' || c.name === '__Secure-1PSID');
-
     const cdpCookies = normalizeCookiesForCdp(cookies);
     if (cdpCookies.length > 0 && !profileHasNativeGvAuth) {
       let applied = 0;
@@ -413,7 +419,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
       }
       console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Injected ${applied}/${cdpCookies.length} Google Voice cookies (hostOnly-preserved).`);
     } else if (profileHasNativeGvAuth) {
-      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Using persistent VM Chrome profile session (${existingProfileCookies.cookies.length} profile cookies).`);
+      console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Using persistent VM Chrome profile session (${existingProfileCookies?.cookies?.length || 0} profile cookies).`);
     }
 
     const stealthAndVisibilityShim = `
@@ -443,7 +449,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
 
     if (page.url().includes('accounts.google.com')) {
       const resolved = await resolveAccountChooserIfNeeded(page);
-      if (!resolved && profileHasNativeGvAuth && cdpCookies.length > 0) {
+      if (!resolved && profileHasNativeGvAuth && !hasNativeVmAuthMarker && cdpCookies.length > 0) {
         // Persistent profile expired — fall back to fresh vault cookies once
         for (const ck of cdpCookies) {
           try {
@@ -474,6 +480,12 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
 
       const readyTitle = await page.title().catch(() => 'Google Voice');
       console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] AUTHENTICATED & LIVE on ${page.url()} (${readyTitle})`);
+      try {
+        const all = await client.send('Network.getAllCookies');
+        if (Array.isArray(all?.cookies) && all.cookies.length > 0) {
+          await saveRefreshedCookies(all.cookies, effectiveUa);
+        }
+      } catch { }
       await reportDaemonHeartbeat({
         url: page.url(),
         title: readyTitle,

@@ -88,7 +88,7 @@ voice.iwillglobal.com, iwillglobal.com, www.iwillglobal.com {
     encode zstd gzip
 
     @realtime {
-        path /api/sarah/live* /api/sarah/turn* /api/sarah/inbound* /api/sarah/audio.wav* /api/stream*
+        path /api/sarah/live* /api/sarah/turn* /api/sarah/inbound* /api/sarah/audio.wav* /api/stream* /gv-login/*
     }
     reverse_proxy @realtime 127.0.0.1:4000 {
         flush_interval -1
