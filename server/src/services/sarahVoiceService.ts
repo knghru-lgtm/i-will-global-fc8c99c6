@@ -308,9 +308,6 @@ export function resolveInboundLeadSource(ctx?: Partial<SarahSessionContext>): st
   if (ctx?.source_channel === 'website_traffic') {
     return 'Website Traffic';
   }
-  if (ctx?.source_channel === 'call_in_lead') {
-    return 'Call-In Lead';
-  }
   return 'Inbound Lead';
 }
 

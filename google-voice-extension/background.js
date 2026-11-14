@@ -1,9 +1,10 @@
-const EXTENSION_BUILD = '2026-11-10-v12';
-// Cloud-first pointing strictly to Google Cloud VM (https://voice.iwillglobal.com) + local fallback
-const API_BASES = ['https://voice.iwillglobal.com', 'http://localhost:4000'];
+const EXTENSION_BUILD = '2026-11-14-v13';
+// Cloud-first pointing strictly to Google Cloud VM (https://voice.iwillglobal.com) + IPv4 local fallback
+const API_BASES = ['https://voice.iwillglobal.com', 'http://127.0.0.1:4000'];
 const BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 let hasAutoOpenedGvTab = false;
 let lastCookieSyncTs = 0;
+let cookieChangeDebounceTimer = null;
 const tabReloadTimestamps = new Map();
 
 async function callSarahApi(endpoint, payload, extraHeaders = {}) {
@@ -30,7 +31,7 @@ async function callSarahApi(endpoint, payload, extraHeaders = {}) {
 
 function syncGoogleVoiceCookiesToCloud(force = false) {
   const now = Date.now();
-  if (!force && now - lastCookieSyncTs < 5 * 60 * 1000) return;
+  if (!force && now - lastCookieSyncTs < 4 * 60 * 1000) return;
   if (!chrome.cookies || typeof chrome.cookies.getAll !== 'function') return;
 
   try {
@@ -47,7 +48,6 @@ function syncGoogleVoiceCookiesToCloud(force = false) {
       if (!hasAuth) return;
 
       lastCookieSyncTs = now;
-      // Sync directly to Google Cloud VM (https://voice.iwillglobal.com) and local dev if running
       for (const base of API_BASES) {
         try {
           const res = await fetch(`${base}/api/sarah/gv-session-sync`, {
@@ -68,6 +68,25 @@ function syncGoogleVoiceCookiesToCloud(force = false) {
       }
     });
   } catch { }
+}
+
+// Auto-push rotated Google auth cookies (__Secure-1PSIDTS, SID, etc.) within 15s of rotation
+if (chrome.cookies && chrome.cookies.onChanged) {
+  chrome.cookies.onChanged.addListener((changeInfo) => {
+    if (changeInfo?.removed) return;
+    const c = changeInfo?.cookie;
+    if (!c) return;
+    const dom = String(c.domain || '').toLowerCase();
+    if (!dom.endsWith('google.com')) return;
+    if (!['SID', '__Secure-1PSID', '__Secure-3PSID', '__Secure-1PSIDTS', '__Secure-3PSIDTS'].includes(String(c.name))) {
+      return;
+    }
+    if (cookieChangeDebounceTimer) clearTimeout(cookieChangeDebounceTimer);
+    cookieChangeDebounceTimer = setTimeout(() => {
+      cookieChangeDebounceTimer = null;
+      syncGoogleVoiceCookiesToCloud(true);
+    }, 15000);
+  });
 }
 
 function ensureGoogleVoiceTabsHealthy() {
@@ -128,7 +147,7 @@ function ensureGoogleVoiceTabsHealthy() {
 
 ensureGoogleVoiceTabsHealthy();
 syncGoogleVoiceCookiesToCloud(true);
-setInterval(ensureGoogleVoiceTabsHealthy, 2000);
+setInterval(ensureGoogleVoiceTabsHealthy, 3000);
 setInterval(() => syncGoogleVoiceCookiesToCloud(false), 60000);
 
 chrome.runtime.onInstalled.addListener(() => {

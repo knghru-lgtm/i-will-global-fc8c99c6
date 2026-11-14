@@ -3,22 +3,26 @@ set -e
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
-# Clean up any stale orphaned Xvfb :99 or previous daemon Chrome instances before starting fresh
+# 1. Reap any stale orphaned Xvfb :99 or zombie daemon Chrome trees before starting fresh
+pkill -9 -f "/tmp/iwg-gv-daemon-profile" 2>/dev/null || true
 pkill -f "Xvfb :99" 2>/dev/null || true
-pkill -f "/tmp/iwg-gv-daemon-profile" 2>/dev/null || true
-rm -f /tmp/.X99-lock
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+rm -rf /tmp/iwg-gv-daemon-profile/Singleton* 2>/dev/null || true
 
-# Start virtual PulseAudio null-sink (48kHz stereo clock, zero physical mic/speaker, zero echo)
+# 2. Ultra-low-latency 20ms mono 48kHz PulseAudio null-sink (zero physical mic/speaker, zero echo, half RAM)
+export PULSE_LATENCY_MSEC=20
 if command -v pulseaudio >/dev/null 2>&1; then
-  pulseaudio -D --exit-idle-time=-1 --system=false 2>/dev/null || true
-  pactl load-module module-null-sink sink_name=SarahCloudNullSink sink_properties=device.description="SarahCloudNullSink" 2>/dev/null || true
+  pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true
+  if ! pactl list short sinks 2>/dev/null | grep -q "SarahCloudNullSink"; then
+    pactl load-module module-null-sink sink_name=SarahCloudNullSink rate=48000 channels=1 sink_properties=device.description="SarahCloudNullSink" 2>/dev/null || true
+  fi
   pactl set-default-sink SarahCloudNullSink 2>/dev/null || true
 fi
 
-# Start virtual X11 display if Xvfb is installed (worker.mjs automatically falls back to headless=new if not)
+# 3. Ultra-slim 16-bit 800x600 Xvfb (no GLX/TCP bloat — saves ~45 MB RAM on e2-small)
 if command -v Xvfb >/dev/null 2>&1; then
-  Xvfb :99 -screen 0 1280x800x24 -ac +extension GLX +render -noreset >/dev/null 2>&1 &
-  sleep 1
+  Xvfb :99 -screen 0 800x600x16 -nolisten tcp -ac -noreset >/dev/null 2>&1 &
+  sleep 0.6
   export DISPLAY=:99
 fi
 
@@ -36,9 +40,9 @@ elif [ -x /usr/bin/chromium-browser ]; then
   export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 fi
 
-# Run daemon under nice -n 10 so Caddy TLS (:443) and sarah-server (:4000) always get top CPU priority
+# 4. Cap worker V8 heap at 160MB & run under nice -n 5 on e2-small (2 vCPUs, 2GB RAM) so Caddy (:443), sshd, and sarah-server (:4000) get top priority
 if command -v nice >/dev/null 2>&1; then
-  exec nice -n 10 node "$SCRIPT_DIR/worker.mjs"
+  exec nice -n 5 node --max-old-space-size=160 "$SCRIPT_DIR/worker.mjs"
 else
-  exec node "$SCRIPT_DIR/worker.mjs"
+  exec node --max-old-space-size=160 "$SCRIPT_DIR/worker.mjs"
 fi

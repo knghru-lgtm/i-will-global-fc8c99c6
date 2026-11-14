@@ -1,13 +1,14 @@
 import { exec } from 'node:child_process';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { config, repoRoot } from '../config.ts';
 import { one, q } from '../db/index.ts';
 
-export const CURRENT_GV_EXTENSION_BUILD = '2026-11-10-v12';
+export const CURRENT_GV_EXTENSION_BUILD = '2026-11-14-v13';
 export const DEFAULT_GV_BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
+const DISK_COOKIE_VAULT_PATH = path.resolve(repoRoot, 'server/data/gv-cookie-vault.enc.json');
 
 export interface GvButtonTelemetry {
   tag: string;
@@ -113,9 +114,38 @@ async function ensureSettingsTable() {
   }
 }
 
-function getVaultKey(): Buffer {
-  const material = `${process.env.GV_BRIDGE_SECRET || ''}|${config.jwtSecret}|iwg-gv-cloud-vault-v10`;
-  return scryptSync(material, 'iwg-sarah-9455-salt', 32);
+function getVaultKeys(): Buffer[] {
+  const bridgeToken = process.env.GV_BRIDGE_TOKEN || DEFAULT_GV_BRIDGE_TOKEN;
+  const stablePrimary = scryptSync(
+    `${process.env.GV_BRIDGE_SECRET || bridgeToken}|iwg-gv-cloud-vault-v13`,
+    'iwg-sarah-9455-salt',
+    32
+  );
+  const legacyJwtKey = scryptSync(
+    `${process.env.GV_BRIDGE_SECRET || ''}|${config.jwtSecret}|iwg-gv-cloud-vault-v10`,
+    'iwg-sarah-9455-salt',
+    32
+  );
+  return [stablePrimary, legacyJwtKey];
+}
+
+function decryptVaultRecord(val: any): any[] | null {
+  if (!val || !val.ciphertext || !val.iv || !val.tag) return null;
+  for (const key of getVaultKeys()) {
+    try {
+      const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(val.iv, 'base64'));
+      decipher.setAuthTag(Buffer.from(val.tag, 'base64'));
+      const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(val.ciphertext, 'base64')),
+        decipher.final(),
+      ]);
+      const parsed = JSON.parse(decrypted.toString('utf8'));
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch {
+      // try next candidate key
+    }
+  }
+  return null;
 }
 
 export function verifyBridgeToken(provided?: string | null): boolean {
@@ -145,7 +175,7 @@ export async function saveCloudGvCookies(cookies: any[], source = 'extension'): 
   }
 
   await ensureSettingsTable();
-  const key = getVaultKey();
+  const [key] = getVaultKeys();
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const plaintext = Buffer.from(JSON.stringify(googleCookies), 'utf8');
@@ -154,7 +184,7 @@ export async function saveCloudGvCookies(cookies: any[], source = 'extension'): 
   const updatedAt = new Date().toISOString();
 
   const record = {
-    v: 1,
+    v: 2,
     alg: 'aes-256-gcm',
     iv: iv.toString('base64'),
     tag: tag.toString('base64'),
@@ -170,6 +200,13 @@ export async function saveCloudGvCookies(cookies: any[], source = 'extension'): 
     [JSON.stringify(record)]
   );
 
+  if (process.env.NODE_ENV !== 'test') {
+    try {
+      mkdirSync(path.dirname(DISK_COOKIE_VAULT_PATH), { recursive: true });
+      writeFileSync(DISK_COOKIE_VAULT_PATH, JSON.stringify(record, null, 2), { mode: 0o600 });
+    } catch { }
+  }
+
   state.cookieVaultUpdatedAt = updatedAt;
   state.cookieVaultCount = googleCookies.length;
   recordGvEvent('gv_cloud_cookies_synced', `Saved ${googleCookies.length} encrypted Google Voice cookies (${source})`);
@@ -183,6 +220,23 @@ let checkedLegacyCookieMigration = false;
 export async function loadCloudGvCookies(): Promise<{ cookies: any[]; updatedAt: string | null; count: number }> {
   await ensureSettingsTable();
   let row = await one<{ value: any }>(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+
+  // Self-healing fallback 1: encrypted on-disk vault file (survives any PGlite directory reset)
+  if ((!row?.value || !row.value.ciphertext) && process.env.NODE_ENV !== 'test' && existsSync(DISK_COOKIE_VAULT_PATH)) {
+    try {
+      const diskRecord = JSON.parse(readFileSync(DISK_COOKIE_VAULT_PATH, 'utf8'));
+      if (diskRecord?.ciphertext) {
+        row = { value: diskRecord };
+        await q(
+          `INSERT INTO settings (key, value, updated_at) VALUES ('sarah_gv_cloud_cookies', $1::jsonb, now())
+           ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = now()`,
+          [JSON.stringify(diskRecord)]
+        ).catch(() => { });
+      }
+    } catch { }
+  }
+
+  // Self-healing fallback 2: legacy data/pg PGlite vault migration
   if ((!row?.value || !row.value.ciphertext) && !checkedLegacyCookieMigration && process.env.NODE_ENV !== 'test') {
     checkedLegacyCookieMigration = true;
     const altPgDir = path.join(repoRoot, 'data', 'pg');
@@ -191,7 +245,7 @@ export async function loadCloudGvCookies(): Promise<{ cookies: any[]; updatedAt:
         const { PGlite } = await import('@electric-sql/pglite');
         const altDb = await PGlite.create(altPgDir);
         const altRes: any = await altDb.query(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
-        await altDb.close().catch(() => {});
+        await altDb.close().catch(() => { });
         const altVal = altRes?.rows?.[0]?.value;
         if (altVal?.ciphertext) {
           await q(
@@ -207,27 +261,23 @@ export async function loadCloudGvCookies(): Promise<{ cookies: any[]; updatedAt:
       }
     }
   }
+
   const val = row?.value;
-  if (!val || !val.ciphertext || !val.iv || !val.tag) {
+  const cookies = decryptVaultRecord(val);
+  if (!cookies || cookies.length === 0) {
+    // Reset stale metadata so `needsCookieSync` immediately signals extension to push fresh cookies
+    state.cookieVaultCount = 0;
+    state.cookieVaultUpdatedAt = null;
     return { cookies: [], updatedAt: null, count: 0 };
   }
-  try {
-    const key = getVaultKey();
-    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(val.iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(val.tag, 'base64'));
-    const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(val.ciphertext, 'base64')),
-      decipher.final(),
-    ]);
-    const cookies = JSON.parse(decrypted.toString('utf8'));
-    return {
-      cookies: Array.isArray(cookies) ? cookies : [],
-      updatedAt: val.updatedAt || null,
-      count: Array.isArray(cookies) ? cookies.length : 0,
-    };
-  } catch {
-    return { cookies: [], updatedAt: val.updatedAt || null, count: 0 };
-  }
+
+  state.cookieVaultCount = cookies.length;
+  state.cookieVaultUpdatedAt = val.updatedAt || state.cookieVaultUpdatedAt;
+  return {
+    cookies,
+    updatedAt: val.updatedAt || null,
+    count: cookies.length,
+  };
 }
 
 async function loadGvStateFromDb(): Promise<GvHeartbeatState> {
@@ -398,16 +448,26 @@ export async function handleGvHeartbeat(payload: any) {
     Boolean(payload?.extensionBuild) &&
     String(payload.extensionBuild) !== CURRENT_GV_EXTENSION_BUILD;
 
+  const cloudNeedsFreshCookies = Boolean(
+    !state.cookieVaultUpdatedAt ||
+    state.cookieVaultCount === 0 ||
+    (state.cloudDaemon &&
+      now - state.cloudDaemon.lastHeartbeatAt < 30_000 &&
+      state.cloudDaemon.sessionAuthenticated === false)
+  );
+
   return {
     ok: true,
     targetBuild: CURRENT_GV_EXTENSION_BUILD,
     cloudDaemonOnline,
     standbyForCloud: runner === 'chrome-extension' && cloudDaemonOnline,
-    needsCookieSync: !state.cookieVaultUpdatedAt,
+    needsCookieSync: cloudNeedsFreshCookies,
     reloadExtension: cmdToDeliver?.reloadExtension || needsReload || false,
     reloadTab: cmdToDeliver?.reloadTab || false,
     simulateIncomingCall: cmdToDeliver?.simulateIncomingCall || false,
     callerPhone: cmdToDeliver?.callerPhone || '',
+    dialOutboundPhone: cmdToDeliver?.dialOutboundPhone || '',
+    leadId: cmdToDeliver?.leadId || '',
   };
 }
 

@@ -38,20 +38,37 @@ async function createAdapter(): Promise<Adapter> {
     if (existsSync(pidFile)) {
       try {
         unlinkSync(pidFile);
-      } catch {}
+      } catch { }
     }
   }
-  let db: any;
-  try {
-    db = await PGlite.create(dir.startsWith('memory://') ? undefined : dir);
-  } catch {
+  let db: any = null;
+  const openTarget = dir.startsWith('memory://') ? undefined : dir;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (openTarget) {
+        const pidFile = path.join(openTarget, 'postmaster.pid');
+        if (existsSync(pidFile)) {
+          try {
+            unlinkSync(pidFile);
+          } catch { }
+        }
+      }
+      db = await PGlite.create(openTarget);
+      break;
+    } catch (err) {
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, attempt * 400));
+      }
+    }
+  }
+  if (!db) {
     const recoveryDir = `${dir}-live`;
     mkdirSync(recoveryDir, { recursive: true });
     const recPid = path.join(recoveryDir, 'postmaster.pid');
     if (existsSync(recPid)) {
       try {
         unlinkSync(recPid);
-      } catch {}
+      } catch { }
     }
     try {
       db = await PGlite.create(recoveryDir);
@@ -76,7 +93,7 @@ function loadSchemaSql(): string {
   for (const candidate of candidates) {
     try {
       return readFileSync(candidate as any, 'utf8');
-    } catch {}
+    } catch { }
   }
   const cwdFallback = path.resolve(process.cwd(), 'server/src/db/schema.sql');
   return readFileSync(cwdFallback, 'utf8');
@@ -92,7 +109,7 @@ export async function getDb(): Promise<Adapter> {
       try {
         await a.exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_meet_url TEXT;`);
         await a.exec(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();`);
-      } catch {}
+      } catch { }
       adapter = a;
       try {
         const { ensureSeeded } = await import('./seed.ts');

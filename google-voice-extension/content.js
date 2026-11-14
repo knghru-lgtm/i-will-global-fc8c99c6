@@ -7,7 +7,7 @@
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
-  const EXTENSION_BUILD = '2026-11-10-v12';
+  const EXTENSION_BUILD = '2026-11-14-v13';
   const SELECTORS = [
     'button[aria-label*="Answer" i]',
     'button[aria-label*="Accept" i]',
@@ -323,8 +323,8 @@
     }
 
     const bases = cloudDaemonCfg?.apiBase
-      ? [cloudDaemonCfg.apiBase, 'https://voice.iwillglobal.com', 'http://localhost:4000']
-      : ['https://voice.iwillglobal.com', 'http://localhost:4000'];
+      ? [cloudDaemonCfg.apiBase, 'https://voice.iwillglobal.com', 'http://127.0.0.1:4000']
+      : ['https://voice.iwillglobal.com', 'http://127.0.0.1:4000'];
     for (const base of bases) {
       try {
         const res = await fetch(`${base}${endpoint}`, {
@@ -358,6 +358,10 @@
           audio_mime: openTurn.audio_mime || 'audio/wav',
           rest_audio_base64: null,
         };
+        window.postMessage(
+          { __iwg_webrtc__: true, type: 'IWG_SARAH_PREWARM_WAV', base64: openTurn.audio_base64 },
+          '*'
+        );
       }
       if (closedTurn && closedTurn.audio_base64) {
         preloadedAfterHoursGreeting = {
@@ -365,6 +369,10 @@
           audio_mime: closedTurn.audio_mime || 'audio/wav',
           rest_audio_base64: null,
         };
+        window.postMessage(
+          { __iwg_webrtc__: true, type: 'IWG_SARAH_PREWARM_WAV', base64: closedTurn.audio_base64 },
+          '*'
+        );
       }
     } catch { }
   }
@@ -857,9 +865,31 @@
     return false;
   }
 
-  function scanGoogleVoiceDom() {
+  const FAST_INCOMING_HINT_SELECTOR = [
+    ...SELECTORS,
+    '[class*="incoming" i]',
+    '[id*="incoming" i]',
+    '[gv-test-id*="incoming" i]',
+    '[aria-label*="Incoming call" i]',
+    '[role="alertdialog"]',
+    'iframe',
+  ].join(', ');
+
+  function scanGoogleVoiceDom(forceDeep = false) {
     if (!autoAnswerEnabled) return;
+    if (RUNNER_MODE === 'chrome-extension' && standbyForCloud) return;
     const now = Date.now();
+
+    if (!forceDeep && !callActive && !pendingAnswerAttempt) {
+      let hasCandidate = false;
+      try {
+        hasCandidate = Boolean(document.querySelector(FAST_INCOMING_HINT_SELECTOR));
+      } catch {
+        hasCandidate = true;
+      }
+      if (!hasCandidate) return;
+    }
+
     const elements = queryAllDeep(document);
 
     // If a call is ALREADY confirmed active, monitor for call end
@@ -1082,9 +1112,14 @@
     });
   }
 
-  // Attach MutationObserver immediately at document_start (on documentElement) so observers attach before elements render
+  let mutationScanScheduled = false;
   const observer = new MutationObserver(() => {
-    scanGoogleVoiceDom();
+    if (mutationScanScheduled) return;
+    mutationScanScheduled = true;
+    setTimeout(() => {
+      mutationScanScheduled = false;
+      scanGoogleVoiceDom(false);
+    }, 12);
   });
   const attachRootObserver = () => {
     const targetNode = document.documentElement || document.body || document;
@@ -1108,7 +1143,7 @@
         if (IS_TOP_FRAME) {
           updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
         }
-        scanGoogleVoiceDom();
+        scanGoogleVoiceDom(true);
       },
       { once: true }
     );
@@ -1116,7 +1151,7 @@
     updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
   }
 
-  const intervalId = setInterval(scanGoogleVoiceDom, 50);
+  const intervalId = setInterval(() => scanGoogleVoiceDom(false), 200);
   const heartbeatIntervalId = IS_TOP_FRAME ? setInterval(sendWatchdogHeartbeat, 4000) : null;
   if (IS_TOP_FRAME) {
     setTimeout(sendWatchdogHeartbeat, 400);
