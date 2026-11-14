@@ -1,6 +1,6 @@
 const EXTENSION_BUILD = '2026-11-10-v12';
-// Cloud-first so the extension never depends on localhost:4000 or laptop drives!
-const API_BASES = ['https://voice.iwillglobal.com', 'http://localhost:4000', 'https://iwillglobal.com'];
+// Cloud-first pointing strictly to Google Cloud VM (https://voice.iwillglobal.com) + local fallback
+const API_BASES = ['https://voice.iwillglobal.com', 'http://localhost:4000'];
 const BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 let hasAutoOpenedGvTab = false;
 let lastCookieSyncTs = 0;
@@ -47,10 +47,10 @@ function syncGoogleVoiceCookiesToCloud(force = false) {
       if (!hasAuth) return;
 
       lastCookieSyncTs = now;
-      // Sync to BOTH cloud (https://iwillglobal.com) and local dev if running
+      // Sync directly to Google Cloud VM (https://voice.iwillglobal.com) and local dev if running
       for (const base of API_BASES) {
         try {
-          await fetch(`${base}/api/sarah/gv-session-sync`, {
+          const res = await fetch(`${base}/api/sarah/gv-session-sync`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -61,6 +61,9 @@ function syncGoogleVoiceCookiesToCloud(force = false) {
               source: `chrome-extension-${EXTENSION_BUILD}`,
             }),
           });
+          if (res.ok) {
+            console.log(`[IWG Cloud Cookie Sync] Synced ${googleCookies.length} Google Voice cookies -> ${base}`);
+          }
         } catch { }
       }
     });

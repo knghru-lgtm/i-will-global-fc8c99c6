@@ -324,7 +324,7 @@
 
     const bases = cloudDaemonCfg?.apiBase
       ? [cloudDaemonCfg.apiBase, 'https://voice.iwillglobal.com', 'http://localhost:4000']
-      : ['https://voice.iwillglobal.com', 'http://localhost:4000', 'https://iwillglobal.com'];
+      : ['https://voice.iwillglobal.com', 'http://localhost:4000'];
     for (const base of bases) {
       try {
         const res = await fetch(`${base}${endpoint}`, {
@@ -1120,6 +1120,13 @@
   const heartbeatIntervalId = IS_TOP_FRAME ? setInterval(sendWatchdogHeartbeat, 4000) : null;
   if (IS_TOP_FRAME) {
     setTimeout(sendWatchdogHeartbeat, 400);
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
+      try {
+        chrome.runtime.sendMessage({ type: 'IWG_SYNC_COOKIES_NOW' }, () => {
+          void chrome.runtime.lastError;
+        });
+      } catch { }
+    }
   }
 
   window.__IWG_GV_RECEPTIONIST_CLEANUP__ = () => {

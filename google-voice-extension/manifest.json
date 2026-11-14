@@ -1,16 +1,18 @@
 {
   "manifest_version": 3,
   "name": "IWG Receptionist — 24/7 Cloud & Google Voice Bridge (480) 331-9455",
-  "version": "3.1.0",
-  "description": "Cloud-First Zero-Echo Pure Digital WebRTC Receptionist Bridge for (480) 331-9455.",
+  "version": "3.2.0",
+  "description": "Cloud-First Zero-Echo Pure Digital WebRTC Receptionist Bridge for (480) 331-9455 on voice.iwillglobal.com.",
   "permissions": [
+    "cookies",
     "storage",
     "tabs",
     "activeTab"
   ],
   "host_permissions": [
     "https://voice.google.com/*",
-    "https://iwillglobal.com/*",
+    "https://*.google.com/*",
+    "https://google.com/*",
     "https://voice.iwillglobal.com/*",
     "http://localhost:4000/*",
     "http://localhost:5173/*"
@@ -42,7 +44,6 @@
     },
     {
       "matches": [
-        "https://iwillglobal.com/*",
         "https://voice.iwillglobal.com/*",
         "http://localhost:4000/*",
         "http://localhost:5173/*"
