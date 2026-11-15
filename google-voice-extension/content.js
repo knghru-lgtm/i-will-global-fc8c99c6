@@ -865,11 +865,11 @@
         .trim();
       const combined = `${aria} ${title} ${testId} ${classes}`;
 
-      // Never click Decline, End Call, Hang Up, Keypad, or the normal Outbound dialpad "Call" button
+      // Never click Decline, End Call, Hang Up, Call Back history rows, Keypad, or Outbound dialpad "Call" button
       const isExcluded =
-        /decline|reject|ignore|hang\s*up|end\s*call|leave\s*call|dismiss|voicemail|settings|auto-answer|keypad|mute|hold|transfer|screen|call_end|make\s*a\s*call|dialpad/i.test(
+        /decline|reject|ignore|hang\s*up|end\s*call|leave\s*call|dismiss|voicemail|settings|auto-answer|keypad|mute|hold|transfer|screen|call_end|call_received|call_missed|call_made|call\s*back|make\s*a\s*call|dialpad/i.test(
           `${combined} ${txt}`
-        ) || /^call(\s+\+?[\d\s()-]+)?$/i.test(aria);
+        ) || (/^call(\s+.+)?$/i.test(aria) && !/answer|accept|pick\s*up/i.test(aria));
       if (isExcluded) continue;
 
       const isExplicitAnswerBtn =

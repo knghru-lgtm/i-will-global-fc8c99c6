@@ -410,22 +410,24 @@ async function verifyGoogleVoiceWebSettings(browser, effectiveUa) {
         }
       }
 
-      // 2. Ensure "Web" answering device toggle is ON and "Screen calls" toggle is OFF
-      const switches = Array.from(
-        document.querySelectorAll('[role="switch"], button[aria-checked], mat-slide-toggle button')
-      );
+      // 2. Ensure "Web" answering device toggle is ON, "Screen calls" is OFF, and "Do not disturb" is OFF
+      const switches = Array.from(document.querySelectorAll('button[role="switch"], [role="switch"][aria-checked]'));
       for (const sw of switches) {
-        const rowText = (
-          sw.getAttribute('aria-label') ||
-          sw.closest('section, li, [class*="row" i], [class*="item" i], div')?.innerText ||
-          ''
-        )
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 160);
+        const ariaLabel = String(sw.getAttribute('aria-label') || '').trim();
+        let parentLabel = '';
+        let p = sw.parentElement;
+        for (let d = 0; d < 6 && p; d++) {
+          const t = String(p.innerText || '').replace(/\s+/g, ' ').trim();
+          if (t.length > 3) {
+            parentLabel = t.slice(0, 220);
+            break;
+          }
+          p = p.parentElement;
+        }
+        const combined = `${ariaLabel} ${parentLabel}`;
         const isOn = sw.getAttribute('aria-checked') === 'true';
 
-        if (/\bweb\b/i.test(rowText) && /turn on the devices|answer calls|web browser/i.test(rowText)) {
+        if (/forward calls to web/i.test(ariaLabel) || (/\bweb\b/i.test(combined) && /turn on the devices|answer calls|desktop_windows\s+web/i.test(combined))) {
           if (!isOn) {
             sw.click();
             actions.push('enabled_web_device_ringing');
@@ -433,12 +435,20 @@ async function verifyGoogleVoiceWebSettings(browser, effectiveUa) {
             actions.push('verified_web_device_ringing_on');
           }
         }
-        if (/screen\s+calls/i.test(rowText) && /hear a caller/i.test(rowText)) {
+        if (/screen\s+calls/i.test(combined) && /hear a caller/i.test(combined)) {
           if (isOn) {
             sw.click();
             actions.push('disabled_call_screening');
           } else {
             actions.push('verified_call_screening_off');
+          }
+        }
+        if (/enable do not disturb/i.test(ariaLabel)) {
+          if (isOn) {
+            sw.click();
+            actions.push('disabled_dnd_schedule');
+          } else {
+            actions.push('verified_dnd_off');
           }
         }
       }
@@ -453,7 +463,7 @@ async function verifyGoogleVoiceWebSettings(browser, effectiveUa) {
     console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Settings check skipped: ${err?.message || err}`);
   } finally {
     if (settingsPage) {
-      await settingsPage.close().catch(() => {});
+      await settingsPage.close().catch(() => { });
     }
   }
 }
@@ -471,7 +481,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
     for (const f of ['Cookies', 'Cookies-journal']) {
       try {
         rmSync(path.join(CHROME_PROFILE_DIR, 'Default', f), { force: true });
-      } catch {}
+      } catch { }
     }
     console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Purged stale SQLite cookie jar prior to fresh vault injection.`);
   }
@@ -552,7 +562,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
     const cdpCookies = normalizeCookiesForCdp(cookies);
     if (cdpCookies.length > 0 && shouldInjectVaultCookies) {
       if (forceClearCookies) {
-        await client.send('Network.clearBrowserCookies').catch(() => {});
+        await client.send('Network.clearBrowserCookies').catch(() => { });
       }
       let applied = 0;
       for (const ck of cdpCookies) {
@@ -564,7 +574,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
       if (vaultUpdatedAt) {
         try {
           writeFileSync(lastVaultStampFile, String(vaultUpdatedAt), 'utf8');
-        } catch {}
+        } catch { }
       }
       console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Injected ${applied}/${cdpCookies.length} Google Voice cookies into ${CHROME_PROFILE_DIR}.`);
     } else if (profileHasAllCoreAuth && profileHasGvCookies) {
@@ -642,11 +652,11 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
 
       // Verify Google Voice Web ringing ("Prefer Wi-Fi and mobile data" + Web ON + Call Screening OFF)
       await verifyGoogleVoiceWebSettings(browser, effectiveUa);
-      await page.bringToFront().catch(() => {});
-      await page.mouse.click(80, 80).catch(() => {});
+      await page.bringToFront().catch(() => { });
+      await page.mouse.click(80, 80).catch(() => { });
       await page.evaluate(() => {
         window.postMessage({ __iwg_webrtc__: true, type: 'IWG_RESUME_AUDIO' }, '*');
-      }).catch(() => {});
+      }).catch(() => { });
 
       try {
         const all = await client.send('Network.getAllCookies');
