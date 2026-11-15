@@ -3,7 +3,7 @@
   if (typeof window.__IWG_GV_RECEPTIONIST_CLEANUP__ === 'function') {
     try {
       window.__IWG_GV_RECEPTIONIST_CLEANUP__();
-    } catch { }
+    } catch {}
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
@@ -166,7 +166,7 @@
         sarahAudioCtx = new AudioCtx();
       }
       if (sarahAudioCtx.state === 'suspended') {
-        sarahAudioCtx.resume().catch(() => { });
+        sarahAudioCtx.resume().catch(() => {});
       }
       return sarahAudioCtx;
     } catch {
@@ -206,7 +206,7 @@
         if (tag === 'IFRAME') {
           try {
             if (el.contentDocument) walk(el.contentDocument);
-          } catch { }
+          } catch {}
         }
       }
     };
@@ -266,12 +266,23 @@
       targetBtn.dispatchEvent(
         new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
       );
-    } catch { }
+    } catch {}
   }
 
   function clickElement(el) {
     if (!el) return;
     const parentBtn = el.closest?.('button, [role="button"]');
+    const primaryTarget = parentBtn || el;
+    if (typeof window !== 'undefined' && typeof window.__iwgTrustedClick === 'function') {
+      try {
+        const rect = primaryTarget.getBoundingClientRect?.();
+        if (rect && rect.width > 0 && rect.height > 0) {
+          const cx = Math.round(rect.left + rect.width / 2);
+          const cy = Math.round(rect.top + rect.height / 2);
+          window.__iwgTrustedClick(cx, cy).catch?.(() => {});
+        }
+      } catch {}
+    }
     if (parentBtn && parentBtn !== el) {
       clickSingleTarget(parentBtn);
     }
@@ -307,10 +318,18 @@
       if (label) {
         label.textContent = String(text || '');
       }
-    } catch { }
+    } catch {}
   }
 
   async function callSarahBackend(endpoint, payload) {
+    // Ultra-fast (<1ms) Node IPC bridge when running inside cloud-voip-daemon Puppeteer on Google Cloud
+    if (typeof window !== 'undefined' && typeof window.__iwgDaemonBridgeCall === 'function') {
+      try {
+        const directRes = await window.__iwgDaemonBridgeCall(endpoint, payload);
+        if (directRes) return directRes;
+      } catch {}
+    }
+
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
       const viaBg = await new Promise((resolve) => {
         let done = false;
@@ -342,7 +361,7 @@
 
     const bases = cloudDaemonCfg?.apiBase
       ? [cloudDaemonCfg.apiBase, 'https://voice.iwillglobal.com', 'http://127.0.0.1:4000']
-      : ['https://voice.iwillglobal.com', 'http://127.0.0.1:4000'];
+      : ['https://voice.iwillglobal.com', 'http://127.0.0.1:4000', 'https://iwillglobal.com'];
     for (const base of bases) {
       try {
         const res = await fetch(`${base}${endpoint}`, {
@@ -353,7 +372,7 @@
         if (res.ok) {
           return await res.json();
         }
-      } catch { }
+      } catch {}
     }
     return null;
   }
@@ -392,7 +411,7 @@
           '*'
         );
       }
-    } catch { }
+    } catch {}
   }
   if (IS_TOP_FRAME) {
     preloadSarahNaturalGreeting();
@@ -455,7 +474,7 @@
           try {
             activeAudio.pause();
             activeAudio.src = '';
-          } catch { }
+          } catch {}
           activeAudio = null;
         }
         ensureKeepAliveAudio();
@@ -494,7 +513,7 @@
       try {
         recognition.stop();
         recRunning = false;
-      } catch { }
+      } catch {}
     }
 
     let primaryBase64 = audioBase64;
@@ -503,6 +522,9 @@
       if (text === OPENING_GREETING && preloadedGreeting?.audio_base64) {
         primaryBase64 = preloadedGreeting.audio_base64;
         primaryMime = preloadedGreeting.audio_mime || 'audio/wav';
+      } else if (text === AFTER_HOURS_GREETING && preloadedAfterHoursGreeting?.audio_base64) {
+        primaryBase64 = preloadedAfterHoursGreeting.audio_base64;
+        primaryMime = preloadedAfterHoursGreeting.audio_mime || 'audio/mpeg';
       } else {
         const ttsRes = await callSarahBackend('/api/sarah/tts', { text });
         if (ttsRes?.audio_base64) {
@@ -518,8 +540,8 @@
         cleanRest && preloadedRestBase64
           ? Promise.resolve({ audio_base64: preloadedRestBase64, audio_mime: 'audio/wav' })
           : cleanRest
-            ? callSarahBackend('/api/sarah/tts', { text: cleanRest })
-            : Promise.resolve(null);
+          ? callSarahBackend('/api/sarah/tts', { text: cleanRest })
+          : Promise.resolve(null);
 
       await playSingleWavBase64(primaryBase64, primaryMime);
       if (cleanRest) {
@@ -660,7 +682,7 @@
               try {
                 rec.start();
                 recRunning = true;
-              } catch { }
+              } catch {}
             }
           }, 300);
         }
@@ -673,7 +695,7 @@
     try {
       recognition.start();
       recRunning = true;
-    } catch { }
+    } catch {}
   }
 
   function extractActiveCallerPhone() {
@@ -694,8 +716,12 @@
     return '';
   }
 
+  let nextForcedBusinessHours = null;
+  let lastHangupClickTs = 0;
+
   function hangupActiveGoogleVoiceCall() {
     window.postMessage({ __iwg_webrtc__: true, type: 'IWG_SARAH_STOP_WAV' }, '*');
+    lastHangupClickTs = Date.now();
     try {
       const elements = queryAllDeep(document);
       for (const el of elements) {
@@ -708,7 +734,7 @@
           clickElement(el);
         }
       }
-    } catch { }
+    } catch {}
     callActive = false;
     pendingAnswerAttempt = false;
     lastCallEndedTs = Date.now();
@@ -724,7 +750,9 @@
     totalCallsAnswered += 1;
     callHistory = [];
     const callerPhone = customCallerPhone || extractActiveCallerPhone();
-    const isBusinessHours = isPhoenixBusinessHoursNow();
+    const isBusinessHours =
+      typeof nextForcedBusinessHours === 'boolean' ? nextForcedBusinessHours : isPhoenixBusinessHoursNow();
+    nextForcedBusinessHours = null;
     activeCallIsBusinessHours = isBusinessHours;
     const selectedGreetingText = isBusinessHours ? OPENING_GREETING : AFTER_HOURS_GREETING;
     const selectedAudio = isBusinessHours ? preloadedGreeting : preloadedAfterHoursGreeting;
@@ -775,7 +803,7 @@
         notes: isBusinessHours
           ? 'Picked up immediately on 1st ring (Business Hours Mon-Sat 9AM-7PM MST) on (480) 331-9455'
           : 'Picked up immediately on 1st ring (After Hours) on (480) 331-9455',
-      }).catch(() => { });
+      }).catch(() => {});
 
       callSarahBackend('/api/sarah/gv-heartbeat', {
         runner: RUNNER_MODE,
@@ -789,7 +817,7 @@
         lastAnswerClickTs,
         event: 'call_answered_on_first_ring',
         eventDetail: `Answered incoming call ${callerPhone || '(unknown caller)'} [${isBusinessHours ? 'business_hours' : 'after_hours'}]`,
-      }).catch(() => { });
+      }).catch(() => {});
     }, 0);
   }
 
@@ -808,28 +836,28 @@
         seen.add(el);
         matched.push(el);
       }
-    } catch { }
+    } catch {}
 
     for (const el of elements) {
       if (seen.has(el) || !isElementVisible(el)) continue;
       let matchesSelector = false;
       try {
         matchesSelector = Boolean(el.matches?.(combinedSelector));
-      } catch { }
+      } catch {}
 
       const aria = String(el.getAttribute?.('aria-label') || '').trim();
       const title = String(
         el.getAttribute?.('title') ||
-        el.getAttribute?.('mattooltip') ||
-        el.getAttribute?.('data-tooltip') ||
-        ''
+          el.getAttribute?.('mattooltip') ||
+          el.getAttribute?.('data-tooltip') ||
+          ''
       ).trim();
       const testId = String(
         el.getAttribute?.('gv-test-id') ||
-        el.getAttribute?.('data-call-action') ||
-        el.getAttribute?.('data-e2e') ||
-        el.id ||
-        ''
+          el.getAttribute?.('data-call-action') ||
+          el.getAttribute?.('data-e2e') ||
+          el.id ||
+          ''
       ).trim();
       const classes = String(el.className || '').trim();
       const txt = String(el.textContent || '')
@@ -894,21 +922,12 @@
     'iframe',
   ].join(', ');
 
-  function scanGoogleVoiceDom(forceDeep = false) {
+  function scanGoogleVoiceDom(_forceDeep = false) {
     if (!autoAnswerEnabled) return;
     if (RUNNER_MODE === 'chrome-extension' && standbyForCloud) return;
     const now = Date.now();
 
-    if (!forceDeep && !callActive && !pendingAnswerAttempt) {
-      let hasCandidate = false;
-      try {
-        hasCandidate = Boolean(document.querySelector(FAST_INCOMING_HINT_SELECTOR));
-      } catch {
-        hasCandidate = true;
-      }
-      if (!hasCandidate) return;
-    }
-
+    // Always scan deep across shadow roots & iframes (<1ms on e2-small) so Angular custom elements are never missed
     const elements = queryAllDeep(document);
 
     // If a call is ALREADY confirmed active, monitor for call end
@@ -922,7 +941,7 @@
           try {
             recognition.stop();
             recRunning = false;
-          } catch { }
+          } catch {}
         }
         callSarahBackend('/api/sarah/gv-heartbeat', {
           runner: RUNNER_MODE,
@@ -934,7 +953,7 @@
           callActive: false,
           totalCallsAnswered,
           event: 'call_ended_ready_for_next',
-        }).catch(() => { });
+        }).catch(() => {});
         updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
       }
       return;
@@ -942,12 +961,18 @@
 
     const answerBtns = findVisibleAnswerButtons(elements);
 
-    // Confirm pending click succeeded as soon as Answer button disappears or Hangup/WebRTC connects
+    // Confirm pending click succeeded as soon as WebRTC connects, Hangup appears, or Answer button disappears
     if (pendingAnswerAttempt && IS_TOP_FRAME) {
       const webrtcConnected = document.documentElement?.getAttribute('data-iwg-webrtc-connected') === 'true';
       if (webrtcConnected || hasVisibleHangupButton(elements) || answerBtns.length === 0) {
         pendingAnswerAttempt = false;
-        onIncomingCallAnswered(pendingCallerPhone);
+        const callerToGreet = pendingCallerPhone;
+        // Brief 180ms RTP audio settle on live WebRTC connect so the caller hears every word from syllable 1
+        setTimeout(() => {
+          if (!callActive) {
+            onIncomingCallAnswered(callerToGreet);
+          }
+        }, 180);
         return;
       }
       if (now - pendingAnswerStartedTs > 12000) {
@@ -955,8 +980,8 @@
       }
     }
 
-    // Immediately click Answer on the 1st ring (<50ms — decoupled from Gemini session/audio buffers)
-    if (answerBtns.length > 0 && now - lastAnswerClickTs > 200 && now - lastCallEndedTs > 1200) {
+    // Immediately click Answer on the 1st ring (<50ms) and keep retrying every 200ms until Answer button clears / WebRTC connects
+    if (answerBtns.length > 0 && now - lastAnswerClickTs > 180 && now - lastCallEndedTs > 900) {
       lastAnswerClickTs = now;
       const detectedCaller = extractActiveCallerPhone();
       if (!pendingAnswerAttempt) {
@@ -974,22 +999,34 @@
             { __iwg_webrtc__: true, type: 'IWG_SUBFRAME_CALL_ANSWERED', callerPhone: detectedCaller },
             '*'
           );
-        } catch { }
+        } catch {}
         return;
       }
-      // Open the audio/Gemini session immediately upon clicking Answer (while continuing retry clicks if button lingers)
-      if (!callActive) {
-        onIncomingCallAnswered(pendingCallerPhone);
-      }
+      // Immediately re-check 60ms after click in case Answer button transitioned synchronously to active call
+      setTimeout(() => scanGoogleVoiceDom(true), 60);
     }
   }
 
-  function triggerSimulatedIncomingCallInDom(callerPhone = '(602) 456-9681') {
+  function triggerSimulatedIncomingCallInDom(callerPhone = '(602) 456-9681', opts = {}) {
     const existing = document.getElementById('iwg-simulated-gv-incoming-toast');
     if (existing) existing.remove();
+    const existingActive = document.getElementById('iwg-simulated-gv-active-call');
+    if (existingActive) existingActive.remove();
+
+    window.postMessage({ __iwg_webrtc__: true, type: 'IWG_SARAH_STOP_WAV' }, '*');
     callActive = false;
+    pendingAnswerAttempt = false;
+    isSpeaking = false;
+    turnInFlight = false;
     lastCallStartTs = 0;
+    lastCallEndedTs = 0;
     lastAnswerClickTs = 0;
+    lastHangupClickTs = 0;
+    if (typeof opts?.forceBusinessHours === 'boolean') {
+      nextForcedBusinessHours = opts.forceBusinessHours;
+    } else {
+      nextForcedBusinessHours = null;
+    }
 
     const toast = document.createElement('div');
     toast.id = 'iwg-simulated-gv-incoming-toast';
@@ -1024,21 +1061,59 @@
     btnRow.appendChild(decBtn);
     toast.appendChild(header);
     toast.appendChild(btnRow);
-    document.body.appendChild(toast);
 
-    let answered = false;
+    let answeredAt = 0;
+    let hungUpAt = 0;
     ansBtn.addEventListener('click', () => {
-      if (answered) return;
-      answered = true;
+      if (answeredAt) return;
+      answeredAt = Date.now();
       toast.remove();
+
+      // Mount active call panel with realistic End Call button so hangupActiveGoogleVoiceCall is verified end-to-end
+      const activePanel = document.createElement('div');
+      activePanel.id = 'iwg-simulated-gv-active-call';
+      activePanel.setAttribute('aria-label', `Call with ${callerPhone}`);
+      activePanel.style.cssText =
+        'position:fixed;top:16px;right:16px;z-index:2147483646;background:#0f172a;border:2px solid #38bdf8;border-radius:12px;padding:12px 16px;color:#fff;font-family:system-ui,sans-serif;';
+      const endBtn = document.createElement('button');
+      endBtn.id = 'iwg-sim-hangup-btn';
+      endBtn.setAttribute('aria-label', 'End call');
+      endBtn.setAttribute('gv-test-id', 'in-call-end-button');
+      endBtn.style.cssText =
+        'background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer;';
+      endBtn.textContent = 'End call';
+      endBtn.addEventListener('click', () => {
+        hungUpAt = Date.now();
+        activePanel.remove();
+      });
+      activePanel.appendChild(endBtn);
+      document.body.appendChild(activePanel);
     });
 
-    scanGoogleVoiceDom(true);
-    return { ok: true, answered, callerPhone };
+    const injectedAt = Date.now();
+    document.body.appendChild(toast);
+    // Let MutationObserver + scanGoogleVoiceDom detect & answer on Ring 1 naturally!
+    return {
+      ok: true,
+      callerPhone,
+      injectedAt,
+      getStatus: () => ({
+        answered: answeredAt > 0,
+        ringToAnswerMs: answeredAt > 0 ? answeredAt - injectedAt : null,
+        hungUp: hungUpAt > 0 || lastHangupClickTs >= injectedAt,
+        callActive,
+        isSpeaking,
+        activeCallIsBusinessHours,
+        lastSarahSpokenText,
+        callHistoryLength: callHistory.length,
+        callHistory: callHistory.slice(),
+        totalCallsAnswered,
+      }),
+    };
   }
 
   function collectButtonTelemetry() {
-    const elements = queryAllDeep(document);
+    const elements = document.querySelectorAll('button, [role="button"]');
     const buttons = [];
     for (const el of elements) {
       if (!isElementVisible(el)) continue;
@@ -1066,8 +1141,10 @@
   async function sendWatchdogHeartbeat() {
     try {
       const incomingEl = document.querySelector(
-        '[class*="incoming" i], [aria-label*="Incoming call" i], [role="alertdialog"]'
+        '[gv-test-id*="incoming" i], [aria-label*="Incoming call" i], [role="alertdialog"], gv-call-sidebar [class*="incoming" i]'
       );
+      const rawBanner = incomingEl ? String(incomingEl.innerText || '').trim().slice(0, 200) : '';
+      const cleanBanner = /^(call_missed|call_made|call_received)$/i.test(rawBanner) ? '' : rawBanner;
       const res = await callSarahBackend('/api/sarah/gv-heartbeat', {
         runner: RUNNER_MODE,
         instanceId: cloudDaemonCfg?.instanceId || undefined,
@@ -1078,10 +1155,10 @@
         visibilityState: document.visibilityState || 'visible',
         receivingCallsText:
           window.__IWG_WEBRTC_BRIDGE_INSTALLED__ ||
-            document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready'
+          document.documentElement?.getAttribute('data-iwg-webrtc-bridge') === 'ready'
             ? 'Zero-Echo Pure Digital WebRTC Isolation ACTIVE'
             : 'HTML5 Audio Fallback',
-        incomingBannerText: incomingEl ? String(incomingEl.innerText || '').slice(0, 200) : '',
+        incomingBannerText: cleanBanner,
         callActive,
         isSpeaking,
         hasPreloadedGreeting: Boolean(preloadedGreeting?.audio_base64),
@@ -1124,19 +1201,26 @@
           standbyForCloud = prevStandby;
         }, 2000);
       }
-    } catch { }
+    } catch {}
   }
 
   window.__IWG_GV_SCAN_NOW__ = scanGoogleVoiceDom;
   window.__IWG_GV_SIMULATE_CALL__ = triggerSimulatedIncomingCallInDom;
+  window.__IWG_GV_PROCESS_CALLER_TURN__ = processCallerTurn;
+  window.__IWG_GV_HANGUP_NOW__ = hangupActiveGoogleVoiceCall;
   window.__IWG_GV_GET_STATE__ = () => ({
     build: EXTENSION_BUILD,
     callActive,
     isSpeaking,
+    activeCallIsBusinessHours,
     lastAnswerClickTs,
+    lastHangupClickTs,
     lastCallStartTs,
     totalCallsAnswered,
+    lastSarahSpokenText,
+    callHistoryLength: callHistory.length,
     hasPreloadedGreeting: Boolean(preloadedGreeting?.audio_base64),
+    hasPreloadedAfterHoursGreeting: Boolean(preloadedAfterHoursGreeting?.audio_base64),
   });
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
@@ -1149,6 +1233,7 @@
     });
   }
 
+  // Attach MutationObserver immediately at document_start (coalesced <15ms micro-tick for Ring-1 pickup with zero CPU thrash)
   let mutationScanScheduled = false;
   const observer = new MutationObserver(() => {
     if (mutationScanScheduled) return;
@@ -1168,7 +1253,7 @@
           attributes: true,
           attributeFilter: ['aria-label', 'class', 'style', 'hidden', 'disabled', 'data-call-action'],
         });
-      } catch { }
+      } catch {}
     }
   };
   attachRootObserver();
@@ -1192,13 +1277,6 @@
   const heartbeatIntervalId = IS_TOP_FRAME ? setInterval(sendWatchdogHeartbeat, 4000) : null;
   if (IS_TOP_FRAME) {
     setTimeout(sendWatchdogHeartbeat, 400);
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.runtime.sendMessage) {
-      try {
-        chrome.runtime.sendMessage({ type: 'IWG_SYNC_COOKIES_NOW' }, () => {
-          void chrome.runtime.lastError;
-        });
-      } catch { }
-    }
   }
 
   window.__IWG_GV_RECEPTIONIST_CLEANUP__ = () => {
@@ -1206,18 +1284,18 @@
     clearInterval(heartbeatIntervalId);
     try {
       observer.disconnect();
-    } catch { }
+    } catch {}
     if (activeAudio) {
       try {
         activeAudio.pause();
         activeAudio.src = '';
-      } catch { }
+      } catch {}
       activeAudio = null;
     }
     if (recognition && recRunning) {
       try {
         recognition.stop();
-      } catch { }
+      } catch {}
       recRunning = false;
     }
   };

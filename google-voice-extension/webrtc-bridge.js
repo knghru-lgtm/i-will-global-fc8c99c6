@@ -14,7 +14,7 @@
         document.documentElement.setAttribute('data-iwg-webrtc-bridge', 'ready');
         return true;
       }
-    } catch { }
+    } catch {}
     return false;
   }
   if (!markBridgeReadyOnDom() && typeof document !== 'undefined') {
@@ -28,12 +28,15 @@
   let virtualMicDest = null;
   let sarahGainNode = null;
   let limiterNode = null;
+  let outgoingAnalyser = null;
   let activeSourceNode = null;
   let sarahSpeakingNow = false;
   let lastSarahEndedTs = 0;
+  let lastPlaybackPeakRms = 0;
+  let totalPlaybacksCompleted = 0;
   const hookedRemoteTrackIds = new Set();
   const decodedBufferCache = new Map();
-  const MAX_DECODED_CACHE = 4;
+  const MAX_DECODED_CACHE = 6;
 
   function cacheKeyForBase64(b64) {
     if (!b64 || b64.length < 64) return '';
@@ -52,7 +55,7 @@
         },
         '*'
       );
-    } catch { }
+    } catch {}
   }
 
   function ensureAudioGraph() {
@@ -77,6 +80,10 @@
         sarahGainNode.connect(limiterNode);
         limiterNode.connect(virtualMicDest);
 
+        outgoingAnalyser = bridgeAudioCtx.createAnalyser();
+        outgoingAnalyser.fftSize = 256;
+        limiterNode.connect(outgoingAnalyser);
+
         // Pure 0.0 DC constant source (zero frequency, zero tone, zero hum) so WebRTC RTP frames stay active during silence
         try {
           if (typeof bridgeAudioCtx.createConstantSource === 'function') {
@@ -85,10 +92,10 @@
             zeroSource.connect(virtualMicDest);
             zeroSource.start();
           }
-        } catch { }
+        } catch {}
       }
       if (bridgeAudioCtx.state === 'suspended') {
-        bridgeAudioCtx.resume().catch(() => { });
+        bridgeAudioCtx.resume().catch(() => {});
       }
       return bridgeAudioCtx;
     } catch {
@@ -109,7 +116,7 @@
     for (let i = 0; i < len; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
-    const audioBuffer = await ctx.decodeAudioData(bytes.buffer);
+    const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
     if (key && audioBuffer) {
       if (decodedBufferCache.size >= MAX_DECODED_CACHE) {
         const oldestKey = decodedBufferCache.keys().next().value;
@@ -198,7 +205,7 @@
           try {
             source.disconnect();
             analyser.disconnect();
-          } catch { }
+          } catch {}
           return;
         }
         const now = Date.now();
@@ -272,7 +279,7 @@
           finishRecording();
         }
       }, 65);
-    } catch { }
+    } catch {}
   }
 
   // 3. Wrap RTCPeerConnection and RTCRtpSender so outgoing audio ALWAYS uses our pure digital bus
@@ -291,7 +298,7 @@
           } else if (cs === 'closed' || cs === 'failed' || cs === 'disconnected' || ice === 'closed' || ice === 'failed') {
             notifyCallConnectionState(false, `pc_${cs || ice}`);
           }
-        } catch { }
+        } catch {}
       };
       pc.addEventListener('connectionstatechange', onStateChange);
       pc.addEventListener('iceconnectionstatechange', onStateChange);
@@ -302,7 +309,7 @@
             const stream = (ev.streams && ev.streams[0]) || new MediaStream([ev.track]);
             monitorRemoteAudioStream(stream);
           }
-        } catch { }
+        } catch {}
       });
 
       const origAddTrack = pc.addTrack.bind(pc);
@@ -314,7 +321,7 @@
               return origAddTrack(vTrack, ...streams);
             }
           }
-        } catch { }
+        } catch {}
         return origAddTrack(track, ...streams);
       };
 
@@ -335,7 +342,7 @@
             return origReplaceTrack.call(this, vTrack);
           }
         }
-      } catch { }
+      } catch {}
       return origReplaceTrack.call(this, withTrack);
     };
   }
@@ -357,12 +364,12 @@
               this.volume = 0.0;
               this.muted = true;
             }
-          } catch { }
+          } catch {}
           return desc.set.call(this, val);
         },
       });
     }
-  } catch { }
+  } catch {}
 
   async function handlePlayWavRequest(base64, requestId) {
     const finish = (ok) => {
@@ -386,12 +393,15 @@
       if (!ctx || !sarahGainNode) {
         return finish(false);
       }
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
 
       if (activeSourceNode) {
         try {
           activeSourceNode.stop();
           activeSourceNode.disconnect();
-        } catch { }
+        } catch {}
         activeSourceNode = null;
       }
 
@@ -413,11 +423,29 @@
 
       sarahSpeakingNow = true;
       activeSourceNode = source;
+      let peakRms = 0;
+      const meterBuf = outgoingAnalyser ? new Float32Array(outgoingAnalyser.fftSize) : null;
+      const meterInterval =
+        outgoingAnalyser && meterBuf
+          ? setInterval(() => {
+              try {
+                outgoingAnalyser.getFloatTimeDomainData(meterBuf);
+                let sq = 0;
+                for (let i = 0; i < meterBuf.length; i++) sq += meterBuf[i] * meterBuf[i];
+                const rms = Math.sqrt(sq / meterBuf.length);
+                if (rms > peakRms) peakRms = rms;
+                if (rms > lastPlaybackPeakRms) lastPlaybackPeakRms = rms;
+              } catch {}
+            }, 35)
+          : null;
 
       let doneCalled = false;
       const onEnded = (ok) => {
         if (doneCalled) return;
         doneCalled = true;
+        if (meterInterval) clearInterval(meterInterval);
+        if (peakRms > lastPlaybackPeakRms) lastPlaybackPeakRms = peakRms;
+        if (ok) totalPlaybacksCompleted += 1;
         if (activeSourceNode === source) {
           activeSourceNode = null;
           sarahSpeakingNow = false;
@@ -440,6 +468,21 @@
     }
   }
 
+  window.__IWG_WEBRTC_GET_DIAGNOSTICS__ = () => {
+    const track = virtualMicDest?.stream?.getAudioTracks?.()?.[0] || null;
+    return {
+      installed: true,
+      audioCtxState: bridgeAudioCtx?.state || 'uninitialized',
+      sampleRate: bridgeAudioCtx?.sampleRate || 0,
+      decodedCacheSize: decodedBufferCache.size,
+      sarahSpeakingNow,
+      lastPlaybackPeakRms: Number(lastPlaybackPeakRms.toFixed(4)),
+      totalPlaybacksCompleted,
+      virtualTrackReadyState: track?.readyState || 'none',
+      virtualTrackEnabled: Boolean(track?.enabled),
+    };
+  };
+
   // 4. Listen for postMessage commands from content.js (crosses ISOLATED <-> MAIN worlds cleanly)
   window.addEventListener('message', (ev) => {
     const data = ev?.data;
@@ -448,7 +491,7 @@
       handlePlayWavRequest(data.base64, data.requestId);
     } else if (data.type === 'IWG_SARAH_PREWARM_WAV') {
       if (data.base64) {
-        decodeAndCacheBase64Audio(data.base64).catch(() => { });
+        decodeAndCacheBase64Audio(data.base64).catch(() => {});
       }
     } else if (data.type === 'IWG_RESUME_AUDIO') {
       ensureAudioGraph();
@@ -459,7 +502,7 @@
         try {
           activeSourceNode.stop();
           activeSourceNode.disconnect();
-        } catch { }
+        } catch {}
         activeSourceNode = null;
       }
     }
