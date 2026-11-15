@@ -338,11 +338,15 @@ async function resolveAccountChooserIfNeeded(page) {
               el.getAttribute('data-email') ||
               (el.textContent || '').trim().slice(0, 80);
             const fullText = (el.closest('li')?.innerText || el.innerText || '').replace(/\s+/g, ' ').trim();
+            const isActionRow =
+              !el.hasAttribute('data-identifier') &&
+              !el.hasAttribute('data-email') &&
+              /use\s+another\s+account|remove\s+an\s+account|add\s+another\s+account/i.test(fullText);
             const signedOut = /signed\s*out|session\s*expired/i.test(fullText);
-            return { id, signedOut, fullText: fullText.slice(0, 120) };
+            return { id, signedOut, isActionRow, fullText: fullText.slice(0, 120) };
           });
-          // Click first account tile that is NOT marked "Signed out"
-          const activeIdx = summary.findIndex((s) => !s.signedOut);
+          // Click first real account tile that is NOT marked "Signed out"
+          const activeIdx = summary.findIndex((s) => !s.isActionRow && !s.signedOut);
           if (activeIdx >= 0 && items[activeIdx]) {
             items[activeIdx].click();
             return { clicked: true, summary };
@@ -407,10 +411,10 @@ async function runBrowserSession(cookies, syncedUserAgent = null) {
       Array.isArray(existingProfileCookies?.cookies) &&
       existingProfileCookies.cookies.some((c) => c.domain?.includes('voice.google.com'));
 
-    // Strip HeadlessChrome marker; if using native Linux VM profile, keep Linux UA instead of synced Windows UA
+    // Strip HeadlessChrome marker; keep syncedUserAgent consistently whenever session came from cookie vault
     const defaultUa = (await browser.userAgent()).replace(/HeadlessChrome\//gi, 'Chrome/');
     const effectiveUa =
-      !profileHasNativeGvAuth && syncedUserAgent && !/HeadlessChrome/i.test(syncedUserAgent)
+      !hasNativeVmAuthMarker && syncedUserAgent && !/HeadlessChrome/i.test(syncedUserAgent)
         ? syncedUserAgent
         : defaultUa;
     await page.setUserAgent(effectiveUa);

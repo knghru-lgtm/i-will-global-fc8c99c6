@@ -228,9 +228,12 @@ while true; do
     sleep 2
   fi
   if curl -fsS http://127.0.0.1:9222/json/list 2>/dev/null | node -e "const tabs=JSON.parse(require('fs').readFileSync(0,'utf8')); const ok=Array.isArray(tabs)&&tabs.some(t=>String(t.url||'').startsWith('https://voice.google.com/')&&!String(t.url||'').includes('/about')&&!String(t.url||'').includes('/signup')&&!String(t.title||'').toLowerCase().includes('sign in')); process.exit(ok?0:1);" 2>/dev/null; then
-    echo "✅ Detected authenticated Google Voice Calls page! Waiting 4s for all cookies to settle..."
     sleep 4
-    LOGIN_COMPLETED=1
-    break
+    if curl -fsS http://127.0.0.1:9222/json/list 2>/dev/null | node -e "const tabs=JSON.parse(require('fs').readFileSync(0,'utf8')); const ok=Array.isArray(tabs)&&tabs.some(t=>String(t.url||'').startsWith('https://voice.google.com/')&&!String(t.url||'').includes('/about')&&!String(t.url||'').includes('/signup')&&!String(t.url||'').includes('workspace.google.com')&&!String(t.url||'').includes('accounts.google.com')&&!String(t.title||'').toLowerCase().includes('sign in')); process.exit(ok?0:1);" 2>/dev/null; then
+      echo "✅ Verified persistent authenticated Google Voice Calls page! Saving cookie vault..."
+      sleep 2
+      LOGIN_COMPLETED=1
+      break
+    fi
   fi
 done
