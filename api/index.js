@@ -7063,7 +7063,8 @@ function verifyBridgeToken(provided) {
     return false;
   }
 }
-var lastSavedCookieAuthFingerprint = "";
+var seenCookieAuthFingerprints = /* @__PURE__ */ new Set();
+var seenFingerprintsHydrated = false;
 async function saveCloudGvCookies(cookies, source = "extension", userAgent = "") {
   if (!Array.isArray(cookies) || cookies.length === 0) {
     throw new Error("No cookies provided");
@@ -7079,16 +7080,18 @@ async function saveCloudGvCookies(cookies, source = "extension", userAgent = "")
     throw new Error("Cookie set does not contain authenticated Google session cookies (SID / __Secure-1PSID)");
   }
   await ensureSettingsTable2();
-  const isFromCloudDaemon = String(source || "").startsWith("cloud-daemon");
-  const cloudLiveAndAuthed = Boolean(
-    state.cloudDaemon?.sessionAuthenticated && Date.now() - (state.cloudDaemon.lastHeartbeatAt || 0) < 45e3
-  );
-  if (!isFromCloudDaemon && cloudLiveAndAuthed && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== "test") {
-    return {
-      ok: true,
-      count: state.cookieVaultCount || googleCookies.length,
-      updatedAt: state.cookieVaultUpdatedAt
-    };
+  if (!seenFingerprintsHydrated && process.env.NODE_ENV !== "test") {
+    seenFingerprintsHydrated = true;
+    try {
+      const existingRow = await one(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+      const persisted = existingRow?.value?.seenFingerprints;
+      if (Array.isArray(persisted)) {
+        for (const fp of persisted) {
+          if (typeof fp === "string" && fp) seenCookieAuthFingerprints.add(fp);
+        }
+      }
+    } catch {
+    }
   }
   const authFingerprint = createHash("sha256").update(
     googleCookies.filter(
@@ -7105,15 +7108,19 @@ async function saveCloudGvCookies(cookies, source = "extension", userAgent = "")
         "LSID"
       ].includes(String(c.name))
     ).map((c) => `${c.domain || ""}:${c.name}=${c.value}`).sort().join("|")
-  ).digest("hex");
-  if (!isFromCloudDaemon && authFingerprint === lastSavedCookieAuthFingerprint && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== "test") {
+  ).digest("hex").slice(0, 24);
+  if (seenCookieAuthFingerprints.has(authFingerprint) && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== "test") {
     return {
       ok: true,
       count: state.cookieVaultCount || googleCookies.length,
       updatedAt: state.cookieVaultUpdatedAt
     };
   }
-  lastSavedCookieAuthFingerprint = authFingerprint;
+  seenCookieAuthFingerprints.add(authFingerprint);
+  if (seenCookieAuthFingerprints.size > 120) {
+    const oldest = seenCookieAuthFingerprints.values().next().value;
+    if (oldest) seenCookieAuthFingerprints.delete(oldest);
+  }
   const [key] = getVaultKeys();
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
@@ -7130,6 +7137,7 @@ async function saveCloudGvCookies(cookies, source = "extension", userAgent = "")
     count: googleCookies.length,
     source,
     userAgent: userAgent ? String(userAgent).slice(0, 300) : void 0,
+    seenFingerprints: Array.from(seenCookieAuthFingerprints),
     updatedAt
   };
   await q(

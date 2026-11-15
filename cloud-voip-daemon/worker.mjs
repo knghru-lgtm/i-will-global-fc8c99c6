@@ -125,8 +125,8 @@ async function fetchCloudCookieVault() {
 
 async function saveRefreshedCookies(cookies, userAgent = '') {
   try {
-    if (!Array.isArray(cookies) || cookies.length === 0) return;
-    await fetchDaemonApi('/api/sarah/gv-session-sync', {
+    if (!Array.isArray(cookies) || cookies.length === 0) return null;
+    const res = await fetchDaemonApi('/api/sarah/gv-session-sync', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -138,7 +138,12 @@ async function saveRefreshedCookies(cookies, userAgent = '') {
         source: `cloud-daemon-${INSTANCE_ID}`,
       }),
     });
+    if (res && res.ok) {
+      const data = await res.json().catch(() => null);
+      return data?.updatedAt || null;
+    }
   } catch { }
+  return null;
 }
 
 async function reportDaemonHeartbeat(extra = {}) {
@@ -514,7 +519,9 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
     // Check if persistent VM Chrome profile ALREADY has all 7 core Google auth cookies + voice.google.com
     const nativeVmAuthMarker = path.join(CHROME_PROFILE_DIR, '.native-vm-auth');
     const hasNativeVmAuthMarker = existsSync(nativeVmAuthMarker);
-    const existingProfileCookies = await client.send('Network.getAllCookies').catch(() => ({ cookies: [] }));
+    const existingProfileCookies = await client
+      .send('Storage.getCookies')
+      .catch(() => client.send('Network.getAllCookies').catch(() => ({ cookies: [] })));
     const existingNames = new Set(
       Array.isArray(existingProfileCookies?.cookies)
         ? existingProfileCookies.cookies.map((c) => String(c?.name || ''))
@@ -524,14 +531,16 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
     const profileHasGvCookies =
       Array.isArray(existingProfileCookies?.cookies) &&
       existingProfileCookies.cookies.some((c) => c.domain?.includes('voice.google.com'));
+    const hasNewerVaultSync = Boolean(vaultUpdatedAt && vaultUpdatedAt !== previousVaultStamp);
     const profileHasLiveVmSession =
       !forceClearCookies &&
+      !hasNewerVaultSync &&
       (hasNativeVmAuthMarker || existsSync(vmSessionLiveMarker)) &&
       profileHasAllCoreAuth &&
       profileHasGvCookies;
 
-    const hasNewerVaultSync = Boolean(vaultUpdatedAt && vaultUpdatedAt !== previousVaultStamp);
     const shouldInjectVaultCookies =
+      !hasNativeVmAuthMarker &&
       !profileHasLiveVmSession &&
       cookies.length > 0 &&
       (forceClearCookies || !profileHasAllCoreAuth || !profileHasGvCookies || hasNewerVaultSync);
@@ -673,9 +682,12 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
       }).catch(() => { });
 
       try {
-        const all = await client.send('Network.getAllCookies');
+        const all = await client.send('Storage.getCookies').catch(() => client.send('Network.getAllCookies'));
         if (Array.isArray(all?.cookies) && all.cookies.length > 0) {
-          await saveRefreshedCookies(all.cookies, effectiveUa);
+          const savedStamp = await saveRefreshedCookies(all.cookies, effectiveUa);
+          if (savedStamp) {
+            writeFileSync(lastVaultStampFile, String(savedStamp), 'utf8');
+          }
         }
       } catch { }
       await reportDaemonHeartbeat({
@@ -702,6 +714,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
       if (isSignedOut) {
         try {
           rmSync(nativeVmAuthMarker, { force: true });
+          rmSync(vmSessionLiveMarker, { force: true });
         } catch { }
         console.warn(
           `[Sarah Cloud Daemon ${INSTANCE_ID}] Session unauthenticated at ${currentUrl} — reload Chrome extension (v3.3.0) or run ./scripts/vm-gv-direct-login.sh once on VM.`
@@ -739,9 +752,12 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
       if (Date.now() - lastRefreshSave > 4 * 60 * 1000) {
         lastRefreshSave = Date.now();
         try {
-          const all = await client.send('Network.getAllCookies');
+          const all = await client.send('Storage.getCookies').catch(() => client.send('Network.getAllCookies'));
           if (Array.isArray(all?.cookies) && all.cookies.length > 0) {
-            await saveRefreshedCookies(all.cookies, effectiveUa);
+            const savedStamp = await saveRefreshedCookies(all.cookies, effectiveUa);
+            if (savedStamp) {
+              writeFileSync(lastVaultStampFile, String(savedStamp), 'utf8');
+            }
           }
         } catch { }
       }

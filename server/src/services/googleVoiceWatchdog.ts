@@ -159,7 +159,8 @@ export function verifyBridgeToken(provided?: string | null): boolean {
   }
 }
 
-let lastSavedCookieAuthFingerprint = '';
+const seenCookieAuthFingerprints = new Set<string>();
+let seenFingerprintsHydrated = false;
 
 export async function saveCloudGvCookies(
   cookies: any[],
@@ -182,21 +183,23 @@ export async function saveCloudGvCookies(
 
   await ensureSettingsTable();
 
-  const isFromCloudDaemon = String(source || '').startsWith('cloud-daemon');
-  const cloudLiveAndAuthed = Boolean(
-    state.cloudDaemon?.sessionAuthenticated &&
-      Date.now() - (state.cloudDaemon.lastHeartbeatAt || 0) < 45_000
-  );
-
-  // Never allow a background laptop extension timer to overwrite a live self-rotating Cloud VM session's PSIDTS chain!
-  if (!isFromCloudDaemon && cloudLiveAndAuthed && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== 'test') {
-    return {
-      ok: true,
-      count: state.cookieVaultCount || googleCookies.length,
-      updatedAt: state.cookieVaultUpdatedAt,
-    };
+  if (!seenFingerprintsHydrated && process.env.NODE_ENV !== 'test') {
+    seenFingerprintsHydrated = true;
+    try {
+      const existingRow = await one<{ value: any }>(`SELECT value FROM settings WHERE key = 'sarah_gv_cloud_cookies'`);
+      const persisted = existingRow?.value?.seenFingerprints;
+      if (Array.isArray(persisted)) {
+        for (const fp of persisted) {
+          if (typeof fp === 'string' && fp) seenCookieAuthFingerprints.add(fp);
+        }
+      }
+    } catch { }
   }
 
+  // Compute monotonic rotation fingerprint over Google's rotating PSIDTS & core session cookies.
+  // Because every Google RotateCookies token is unique, rejecting any already-seen fingerprint
+  // prevents an idle browser's 15s timer from ever regressing a newer PSIDTS back to an older one,
+  // while immediately accepting genuinely new rotations from EITHER the Cloud VM or Laptop Chrome!
   const authFingerprint = createHash('sha256')
     .update(
       googleCookies
@@ -218,21 +221,21 @@ export async function saveCloudGvCookies(
         .sort()
         .join('|')
     )
-    .digest('hex');
+    .digest('hex')
+    .slice(0, 24);
 
-  if (
-    !isFromCloudDaemon &&
-    authFingerprint === lastSavedCookieAuthFingerprint &&
-    state.cookieVaultUpdatedAt &&
-    process.env.NODE_ENV !== 'test'
-  ) {
+  if (seenCookieAuthFingerprints.has(authFingerprint) && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== 'test') {
     return {
       ok: true,
       count: state.cookieVaultCount || googleCookies.length,
       updatedAt: state.cookieVaultUpdatedAt,
     };
   }
-  lastSavedCookieAuthFingerprint = authFingerprint;
+  seenCookieAuthFingerprints.add(authFingerprint);
+  if (seenCookieAuthFingerprints.size > 120) {
+    const oldest = seenCookieAuthFingerprints.values().next().value;
+    if (oldest) seenCookieAuthFingerprints.delete(oldest);
+  }
 
   const [key] = getVaultKeys();
   const iv = randomBytes(12);
@@ -251,6 +254,7 @@ export async function saveCloudGvCookies(
     count: googleCookies.length,
     source,
     userAgent: userAgent ? String(userAgent).slice(0, 300) : undefined,
+    seenFingerprints: Array.from(seenCookieAuthFingerprints),
     updatedAt,
   };
 
