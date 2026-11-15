@@ -22,9 +22,9 @@ module.exports = {
         APP_URL: 'https://voice.iwillglobal.com',
         GOOGLE_VOICE_NUMBER: '+14803319455',
         OFFICE_TIMEZONE: 'America/Phoenix',
-        OFFICE_HOURS_START: '08:00',
-        OFFICE_HOURS_END: '17:00',
-        OFFICE_DAYS: '1,2,3,4,5',
+        OFFICE_HOURS_START: '09:00',
+        OFFICE_HOURS_END: '19:00',
+        OFFICE_DAYS: '1,2,3,4,5,6',
       },
     },
     {

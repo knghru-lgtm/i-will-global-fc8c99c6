@@ -174,7 +174,7 @@ export function createApp() {
         const fast = getPreCachedSarahAudio(preset);
         if (fast?.audio_base64) {
           const wavBuf = Buffer.from(fast.audio_base64, 'base64');
-          res.setHeader('Content-Type', 'audio/wav');
+          res.setHeader('Content-Type', fast.audio_mime || 'audio/wav');
           res.setHeader('Content-Length', String(wavBuf.length));
           res.setHeader('Cache-Control', 'public, max-age=86400');
           return res.status(200).send(wavBuf);
@@ -187,7 +187,7 @@ export function createApp() {
       const tts = await synthesizeSarahNeuralAudio(text);
       if (tts?.audio_base64) {
         const wavBuf = Buffer.from(tts.audio_base64, 'base64');
-        res.setHeader('Content-Type', 'audio/wav');
+        res.setHeader('Content-Type', tts.audio_mime || 'audio/wav');
         res.setHeader('Content-Length', String(wavBuf.length));
         res.setHeader('Cache-Control', 'public, max-age=86400');
         return res.status(200).send(wavBuf);

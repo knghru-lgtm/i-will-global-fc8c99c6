@@ -371,10 +371,33 @@ describe('Sarah Voice AI (Dual-Mode (480) 331-9455 Virtual Receptionist & Outbou
     ).then((r) => r.text());
     assert.match(
       monTwiml,
-      /(<Play>.*preset=after_hours.*<\/Play>|<Say[^>]*>Thank you for calling I Will Global\. Our office is currently closed\. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time\. Please call us back during normal business hours\. Have a wonderful day\.<\/Say>)/
+      /(<Play>.*preset=after_hours.*<\/Play>|<Say[^>]*>Thank you for calling I Will Global\. Our office is currently closed\. Our regular business hours are Monday through Saturday from 9 AM to 7 PM Arizona time\. Please call us back during normal business hours\. Have a wonderful day\.<\/Say>)/
     );
     assert.match(monTwiml, /<Hangup\/>/);
     assert.doesNotMatch(monTwiml, /<Gather/);
+
+    // 3. Saturday 11:00 AM MST -> Business Hours (Monday–Saturday 9:00 AM–7:00 PM MST)
+    const satOpenRes = await fetch(
+      `${baseUrl}/api/sarah/inbound?simulated_now_iso=${encodeURIComponent('2026-11-14T11:00:00-07:00')}&include_audio=0`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: '+16025550113' }) }
+    );
+    const satOpenJson: any = await satOpenRes.json();
+    assert.equal(satOpenRes.status, 200);
+    assert.equal(satOpenJson.routing_mode, 'business_hours');
+    assert.equal(satOpenJson.is_after_hours, false);
+    assert.equal(satOpenJson.should_hangup, false);
+
+    // 4. Sunday 11:00 AM MST -> After Hours + Clean Hangup
+    const sunClosedRes = await fetch(
+      `${baseUrl}/api/sarah/inbound?simulated_now_iso=${encodeURIComponent('2026-11-15T11:00:00-07:00')}&include_audio=0`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: '+16025550114' }) }
+    );
+    const sunClosedJson: any = await sunClosedRes.json();
+    assert.equal(sunClosedRes.status, 200);
+    assert.equal(sunClosedJson.routing_mode, 'after_hours');
+    assert.equal(sunClosedJson.is_after_hours, true);
+    assert.equal(sunClosedJson.should_hangup, true);
+    assert.match(sunClosedJson.reply, /Monday through Saturday from 9 AM to 7 PM Arizona time/i);
   });
 
   test('Serverless HTTP endpoints /api/sarah/turn and /api/sarah/tool support iwillglobal.com voice & warm transfers', async () => {

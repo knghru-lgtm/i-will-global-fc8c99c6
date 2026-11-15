@@ -115,9 +115,9 @@ sarahPublic.get('/public-directory', async (_req, res) => {
 });
 
 const PHOENIX_TZ = 'America/Phoenix';
-const BUSINESS_HOURS_LABEL = 'Monday through Friday, 8:00 AM to 5:00 PM MST (America/Phoenix)';
+const BUSINESS_HOURS_LABEL = 'Monday through Saturday, 9:00 AM to 7:00 PM MST (America/Phoenix)';
 const AFTER_HOURS_CLOSED_GREETING =
-  'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.';
+  'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Saturday from 9 AM to 7 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.';
 const NATURAL_FEMALE_TWIML_VOICE = 'Polly.Joanna-Neural';
 
 function evaluatePhoenixBusinessHours(opts?: {

@@ -78,8 +78,8 @@ export const config = {
     apiKey: process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY || '',
     model:
       process.env.GEMINI_MODEL &&
-      process.env.GEMINI_MODEL !== 'gemini-2.5-flash' &&
-      process.env.GEMINI_MODEL !== 'gemini-3.5-flash'
+        process.env.GEMINI_MODEL !== 'gemini-2.5-flash' &&
+        process.env.GEMINI_MODEL !== 'gemini-3.5-flash'
         ? process.env.GEMINI_MODEL
         : 'gemini-3.8-flash',
     liveModel: process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live',
@@ -105,9 +105,9 @@ export const config = {
     website: 'https://iwillglobal.com',
     address: '3033 N Central Ave, Phoenix, AZ 85012',
     timezone: process.env.OFFICE_TIMEZONE || 'America/Phoenix',
-    officeHoursStart: process.env.OFFICE_HOURS_START || '08:00',
-    officeHoursEnd: process.env.OFFICE_HOURS_END || '17:00',
-    officeDays: process.env.OFFICE_DAYS || '1,2,3,4,5',
+    officeHoursStart: process.env.OFFICE_HOURS_START || '09:00',
+    officeHoursEnd: process.env.OFFICE_HOURS_END || '19:00',
+    officeDays: process.env.OFFICE_DAYS || '1,2,3,4,5,6',
   },
 };
 

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { config, repoRoot } from '../config.ts';
 import { one, q } from '../db/index.ts';
 
-export const CURRENT_GV_EXTENSION_BUILD = '2026-11-14-v14';
+export const CURRENT_GV_EXTENSION_BUILD = '2026-11-15-v15';
 export const DEFAULT_GV_BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 const DISK_COOKIE_VAULT_PATH = path.resolve(repoRoot, 'server/data/gv-cookie-vault.enc.json');
 

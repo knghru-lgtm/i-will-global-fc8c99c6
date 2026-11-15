@@ -975,7 +975,7 @@ export const SettingsPage: React.FC = () => {
                 • <strong>Zero Third-Party Carrier Fees:</strong> Runs 24/7 directly on Google Cloud (`us-west1`) connected to Google Voice `(480) 331-9455` and Google GenAI (`Vindemiatrix`).
               </div>
               <div style={{ fontSize: '0.78rem', color: '#cbd5e1', lineHeight: '1.5' }}>
-                • <strong>Strict Arizona Hours (`America/Phoenix`):</strong> Full interactive receptionist Mon–Fri 8 AM–5 PM MST, and instant 1st-ring closed greeting after hours.
+                • <strong>Strict Arizona Hours (`America/Phoenix`):</strong> Full interactive receptionist Mon–Sat 9 AM–7 PM MST, and instant 1st-ring closed greeting after hours.
               </div>
             </div>
           </div>
@@ -1209,7 +1209,7 @@ export const SettingsPage: React.FC = () => {
                 style={{ width: '100%', padding: '0.68rem 0.85rem', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.88rem' }}
               />
               <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                Target phone number (+16024569681) for live warm transfers (Mon–Fri 8am–8pm).
+                Target phone number (+16024569681) for live warm transfers (Mon–Sat 9am–7pm MST).
               </div>
             </div>
           </div>

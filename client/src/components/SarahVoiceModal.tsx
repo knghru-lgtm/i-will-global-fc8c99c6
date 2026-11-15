@@ -1010,7 +1010,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
       (window as any).SarahAndroidBridge?.acceptRingingCallNow?.();
     } catch {}
 
-    // 2. Evaluate America/Phoenix (Mon-Fri, 8:00 AM - 5:00 PM MST) for Frame 0 greeting
+    // 2. Evaluate America/Phoenix (Mon-Sat, 9:00 AM - 7:00 PM MST) for Frame 0 greeting
     const isPhoenixBusinessHours = (() => {
       try {
         if (typeof (window as any).SarahAndroidBridge?.isArizonaBusinessHours === 'function') {
@@ -1026,9 +1026,9 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         const weekday = parts.find((p) => p.type === 'weekday')?.value || 'Monday';
         const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
         const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
-        const isWeekday = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].includes(weekday);
+        const isBusinessDay = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].includes(weekday);
         const mins = hour * 60 + minute;
-        return isWeekday && mins >= 8 * 60 && mins < 17 * 60;
+        return isBusinessDay && mins >= 9 * 60 && mins < 19 * 60;
       } catch {
         return true;
       }
@@ -1044,7 +1044,7 @@ export const SarahVoiceModal: React.FC<SarahVoiceModalProps> = ({
         ? `Hello ${greetFirst}, this is Sarah calling from IWG Insurance and Financial Services. How are you today?`
         : isPhoenixBusinessHours
           ? `Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?`
-          : `Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.`;
+          : `Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Saturday from 9 AM to 7 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.`;
 
     appendNewTranscript('sarah', immediateGreetingText);
     await sendHttpTurn('', { ...ctx, is_initial: true, skip_transcript_append: true });

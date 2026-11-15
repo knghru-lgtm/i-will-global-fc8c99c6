@@ -7,7 +7,7 @@
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
-  const EXTENSION_BUILD = '2026-11-14-v14';
+  const EXTENSION_BUILD = '2026-11-15-v15';
   const SELECTORS = [
     'button[aria-label*="Answer" i]',
     'button[aria-label*="Accept" i]',
@@ -23,7 +23,7 @@
   const OPENING_GREETING =
     'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
   const AFTER_HOURS_GREETING =
-    'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.';
+    'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Saturday from 9 AM to 7 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.';
 
   let autoAnswerEnabled = true;
   let standbyForCloud = false;
@@ -106,13 +106,13 @@
       const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
       const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
 
-      const isWeekday = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].includes(weekday);
-      if (!isWeekday) return false;
+      const isBusinessDay = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].includes(weekday);
+      if (!isBusinessDay) return false;
       if (isArizonaHoliday(year, month, day)) return false;
 
       const mins = hour * 60 + minute;
-      // Strict Business Hours: Monday–Friday, 8:00 AM (480) – 5:00 PM (1020) America/Phoenix (MST, no DST)
-      return mins >= 8 * 60 && mins < 17 * 60;
+      // Strict Business Hours: Monday–Saturday, 9:00 AM (540) – 7:00 PM (1140) America/Phoenix (MST, no DST)
+      return mins >= 9 * 60 && mins < 19 * 60;
     } catch {
       return false;
     }
@@ -742,7 +742,7 @@
     callHistory.push({ speaker: 'sarah', text: selectedGreetingText });
     updateStatusBanner(
       isBusinessHours
-        ? '🟢 Call Answered on 1st Ring (Business Hours 8AM–5PM MST) • (480) 331-9455'
+        ? '🟢 Call Answered on 1st Ring (Business Hours Mon–Sat 9AM–7PM MST) • (480) 331-9455'
         : '🌙 Call Answered on 1st Ring (After-Hours Closed Greeting) • (480) 331-9455',
       '#10b981'
     );
@@ -773,7 +773,7 @@
         internal_only: true,
         skip_inline_tts: true,
         notes: isBusinessHours
-          ? 'Picked up immediately on 1st ring (Business Hours 8AM-5PM MST) on (480) 331-9455'
+          ? 'Picked up immediately on 1st ring (Business Hours Mon-Sat 9AM-7PM MST) on (480) 331-9455'
           : 'Picked up immediately on 1st ring (After Hours) on (480) 331-9455',
       }).catch(() => { });
 

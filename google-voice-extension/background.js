@@ -1,4 +1,4 @@
-const EXTENSION_BUILD = '2026-11-14-v14';
+const EXTENSION_BUILD = '2026-11-15-v15';
 // Cloud-first pointing strictly to Google Cloud VM (https://voice.iwillglobal.com) + IPv4 local fallback
 const API_BASES = ['https://voice.iwillglobal.com', 'http://127.0.0.1:4000'];
 const BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';

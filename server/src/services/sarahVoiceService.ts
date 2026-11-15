@@ -27,7 +27,7 @@ import { googleVoiceWebUrl } from './phone.ts';
 export const SARAH_MAIN_LINE_DISPLAY = '(480) 331-9455';
 export const SARAH_MAIN_LINE_E164 = AGENCY_MAIN_LINE_E164; // +14803319455 (100% Free Google Voice Main Line)
 export const KING_DIRECT_LINE_E164 = TRANSFER_DESK_E164;   // +16024569681 (602-456-9681)
-export const RECEPTIONIST_WORK_HOURS_LABEL = 'Monday through Friday, 8:00 AM to 8:00 PM (Arizona time)';
+export const RECEPTIONIST_WORK_HOURS_LABEL = 'Monday through Saturday, 9:00 AM to 7:00 PM (Arizona time)';
 
 const activeGvTransferMap = new Map<
   string,
@@ -109,21 +109,23 @@ function formatColonHour(hour: number, minute = 0): string {
 }
 
 export function getOfficeHoursSpec() {
-  const startRaw = process.env.OFFICE_HOURS_START || config.agency.officeHoursStart || '08:00';
-  const endRaw = process.env.OFFICE_HOURS_END || config.agency.officeHoursEnd || '17:00';
-  const daysRaw = process.env.OFFICE_DAYS || config.agency.officeDays || '1,2,3,4,5';
+  const startRaw = process.env.OFFICE_HOURS_START || config.agency.officeHoursStart || '09:00';
+  const endRaw = process.env.OFFICE_HOURS_END || config.agency.officeHoursEnd || '19:00';
+  const daysRaw = process.env.OFFICE_DAYS || config.agency.officeDays || '1,2,3,4,5,6';
   const timezone = process.env.OFFICE_TIMEZONE || config.agency.timezone || 'America/Phoenix';
 
-  const start = parseHourMinute(startRaw, 8);
-  const end = parseHourMinute(endRaw, 17);
+  const start = parseHourMinute(startRaw, 9);
+  const end = parseHourMinute(endRaw, 19);
   const days = parseOfficeDays(daysRaw);
   const daysLabel =
-    days.length === 5 && days[0] === 1 && days[4] === 5
-      ? 'Monday through Friday'
-      : days.map((d) => DAY_NAMES_SHORT[d]).join(', ');
+    days.length === 6 && days[0] === 1 && days[5] === 6
+      ? 'Monday through Saturday'
+      : days.length === 5 && days[0] === 1 && days[4] === 5
+        ? 'Monday through Friday'
+        : days.map((d) => DAY_NAMES_SHORT[d]).join(', ');
 
   const workHoursLabel = `${daysLabel}, ${formatColonHour(start.hour, start.minute)} to ${formatColonHour(end.hour, end.minute)} (Arizona time)`;
-  const spokenWindowLabel = `${daysLabel}, from ${formatSpokenHour(start.hour, start.minute)} to ${formatSpokenHour(end.hour, end.minute)} Arizona time`;
+  const spokenWindowLabel = `${daysLabel} from ${formatSpokenHour(start.hour, start.minute)} to ${formatSpokenHour(end.hour, end.minute)} Arizona time`;
 
   return {
     timezone,
@@ -142,7 +144,7 @@ export const BUSINESS_HOURS_OPENING_GREETING =
   'Thank you for calling IWG Insurance and Financial Services, where we serve as your 100% free fiduciary advisory representing over 104 premier carriers with zero broker fees. This is Sarah speaking. How may I direct your call today?';
 
 export const AFTER_HOURS_DETERMINISTIC_GREETING =
-  'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Friday, from 8 AM to 5 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.';
+  'Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Saturday from 9 AM to 7 PM Arizona time. Please call us back during normal business hours. Have a wonderful day.';
 
 export function buildBusinessHoursGreeting(): string {
   return BUSINESS_HOURS_OPENING_GREETING;
@@ -216,7 +218,7 @@ export function isArizonaHoliday(year: number, month: number, day: number): bool
 
 /**
  * Evaluates current time strictly in America/Phoenix (MST, UTC-7, no DST) against
- * Monday–Friday, 8:00 AM – 5:00 PM MST (excluding weekends and holidays).
+ * Monday–Saturday, 9:00 AM – 7:00 PM MST (excluding Sundays and holidays).
  */
 export function checkReceptionistWorkHours(
   ctx?: Partial<SarahSessionContext>,
@@ -358,10 +360,10 @@ You represent a 100% free fiduciary advisory comparing over 104 premier carriers
 Every interaction must reflect our four core pillars: World-Class Excellence, Uncompromising Integrity, Radical Service Orientation, and Genuine Care & Empathy.
 
 OFFICIAL WORK HOURS & WARM TRANSFER AVAILABILITY (STRICT ENFORCEMENT):
-- OUR OFFICIAL WORK HOURS: **Monday through Friday, 8:00 AM to 8:00 PM (Arizona time, America/Phoenix)**.
-- CURRENT ARIZONA TIME & WORK HOURS STATUS: ${workHours.localTimeDisplay} — ${workHours.isOpen ? 'OPEN (Within M–F 8:00 AM – 8:00 PM work hours — Warm transfers ARE permitted)' : 'OUTSIDE WORK HOURS (Outside M–F 8:00 AM – 8:00 PM — ZERO warm transfers permitted! Book an appointment instead!)'}.
-- ZERO WARM TRANSFERS OUTSIDE WORK HOURS: If a call takes place outside Monday through Friday, 8:00 AM to 8:00 PM Arizona time, there are NO warm transfers under any circumstances! Politely inform the caller that our work hours are Monday through Friday from 8:00 AM to 8:00 PM, and guide them through booking a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment during our work hours.
-- CALL 602-456-9681 & CONNECT BEFORE TELLING THE CUSTOMER WE ARE CONNECTED: During work hours (M–F 8:00 AM – 8:00 PM), when initiating a warm transfer to King Amen Ra (${KING_DIRECT_LINE_E164}), you MUST place the customer on hold first saying ONLY: "Wonderful! Please hold for just a moment while I call King Amen Ra on his line and connect to him first." NEVER tell the customer that King Amen Ra is on the line or that you are connected BEFORE ${KING_DIRECT_LINE_E164} actually answers and connects!
+- OUR OFFICIAL WORK HOURS: **Monday through Saturday, 9:00 AM to 7:00 PM (Arizona time, America/Phoenix)**.
+- CURRENT ARIZONA TIME & WORK HOURS STATUS: ${workHours.localTimeDisplay} — ${workHours.isOpen ? 'OPEN (Within M–Sat 9:00 AM – 7:00 PM work hours — Warm transfers ARE permitted)' : 'OUTSIDE WORK HOURS (Outside M–Sat 9:00 AM – 7:00 PM — ZERO warm transfers permitted! Book an appointment instead!)'}.
+- ZERO WARM TRANSFERS OUTSIDE WORK HOURS: If a call takes place outside Monday through Saturday, 9:00 AM to 7:00 PM Arizona time, there are NO warm transfers under any circumstances! Politely inform the caller that our work hours are Monday through Saturday from 9:00 AM to 7:00 PM, and guide them through booking a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment during our work hours.
+- CALL 602-456-9681 & CONNECT BEFORE TELLING THE CUSTOMER WE ARE CONNECTED: During work hours (M–Sat 9:00 AM – 7:00 PM), when initiating a warm transfer to King Amen Ra (${KING_DIRECT_LINE_E164}), you MUST place the customer on hold first saying ONLY: "Wonderful! Please hold for just a moment while I call King Amen Ra on his line and connect to him first." NEVER tell the customer that King Amen Ra is on the line or that you are connected BEFORE ${KING_DIRECT_LINE_E164} actually answers and connects!
 
 CURRENT CALL MODE ON LINE ${SARAH_MAIN_LINE_DISPLAY}: ${mode.toUpperCase()}${activeProduct ? `\nDETECTED CUSTOMER PRODUCT INTEREST: ${activeProduct} (Stay strictly focused on ${activeProduct}—NEVER treat this caller as a Medicare lead unless they specifically ask about Medicare!)` : ''}
 CAPTURED PROSPECT DETAILS SO FAR:
@@ -371,12 +373,12 @@ CAPTURED PROSPECT DETAILS SO FAR:
 ${mode === 'outbound'
       ? `ACTIVE OUTBOUND PROSPECT: ${isGenericName ? 'Valued Client' : prospectName} (Address them as: "${firstName}", State: ${state}${hasValidPhone ? `, Phone: ${ctx?.prospect_phone}` : ''}${hasValidAddress ? `, Address: ${ctx?.address}` : ''})
 KING AMEN RA WARM TRANSFER STATUS: ${!workHours.isOpen
-        ? 'OUTSIDE_WORK_HOURS (Outside M–F 8:00 AM to 8:00 PM — NO warm transfers! Book a Telephone, In-Person, or Video appointment during M–F 8am–8pm!)'
+        ? 'OUTSIDE_WORK_HOURS (Outside M–Sat 9:00 AM to 7:00 PM — NO warm transfers! Book a Telephone, In-Person, or Video appointment during M–Sat 9am–7pm!)'
         : onWarmTransfer
           ? 'ON_WARM_TRANSFER (King Amen Ra is currently on a live consultation—use Path B Executive Alternative-Choice Appointment Close to book a Telephone, In-Person, or Video appointment and send an initial confirmation text!)'
-          : 'AVAILABLE (Within M–F 8:00 AM to 8:00 PM — King Amen Ra is available: call +16024569681 and connect first before telling customer, OR book an appointment!)'
+          : 'AVAILABLE (Within M–Sat 9:00 AM to 7:00 PM — King Amen Ra is available: call +16024569681 and connect first before telling customer, OR book an appointment!)'
       }`
-      : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Receptionist Mode — Answer immediately right away 24/7. Work hours for live warm transfers are Monday–Friday 8:00 AM to 8:00 PM Arizona time. Outside M–F 8am–8pm, never warm transfer—always book an appointment by collecting Full Name, Phone Number, Street Address, Format, and Date/Time)`
+      : `ACTIVE INBOUND LINE: ${SARAH_MAIN_LINE_DISPLAY} (Receptionist Mode — Answer immediately right away 24/7. Work hours for live warm transfers are Monday–Saturday 9:00 AM to 7:00 PM Arizona time. Outside M–Sat 9am–7pm, never warm transfer—always book an appointment by collecting Full Name, Phone Number, Street Address, Format, and Date/Time)`
     }
 
 ================================================================================
@@ -1084,7 +1086,7 @@ export async function executeSarahTool(
         ? matched.e164
         : KING_DIRECT_LINE_E164;
 
-    // 1. STRICT WORK HOURS ENFORCEMENT (Monday–Friday, 8:00 AM to 8:00 PM Arizona time)
+    // 1. STRICT WORK HOURS ENFORCEMENT (Monday–Saturday, 9:00 AM to 7:00 PM Arizona time)
     const workHours = checkReceptionistWorkHours(ctx);
     const forceLiveConnect = Boolean(args.force_live_connect || ctx?.force_live_connect);
     if (!workHours.isOpen && !forceLiveConnect) {
@@ -1095,7 +1097,7 @@ export async function executeSarahTool(
         work_hours_status: workHours,
         recipient_name: recipientName,
         recipient_phone: recipientPhone,
-        message: `Our work hours are Monday through Friday from 8:00 AM to 8:00 PM Arizona time, and there are no warm transfers outside those times. I would love to schedule a dedicated consultation for you with ${recipientName} during our work hours! Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and may I please get your full name, phone number, and street address so I can send your confirmation text?`,
+        message: `Our work hours are Monday through Saturday from 9:00 AM to 7:00 PM Arizona time, and there are no warm transfers outside those times. I would love to schedule a dedicated consultation for you with ${recipientName} during our work hours! Do you prefer a 30-minute Telephone consultation, a 60-minute In-Person visit, or a 30-minute Video consultation—and may I please get your full name, phone number, and street address so I can send your confirmation text?`,
       };
     }
 
@@ -1588,7 +1590,7 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
       setTimeout(() => {
         try {
           clientWs.close();
-        } catch {}
+        } catch { }
       }, 250);
     }
     return;
@@ -1600,7 +1602,7 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
       .then((sarahCfg) => {
         sessionContext.on_warm_transfer = Boolean(sarahCfg.is_on_warm_transfer);
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
@@ -2102,7 +2104,7 @@ for (const [k, b64] of Object.entries({
   if (k && b64) {
     SARAH_TTS_CACHE.set(k.trim(), {
       audio_base64: b64,
-      audio_mime: 'audio/wav',
+      audio_mime: b64.startsWith('UklGR') ? 'audio/wav' : 'audio/mpeg',
       voice: SARAH_VOICE_NAME,
     });
   }
@@ -2123,7 +2125,11 @@ export function getPreCachedSarahAudio(presetOrText: string): {
       SARAH_TTS_CACHE.get(dynamicText) ||
       Object.values(sarahAfterHoursAudioJson as Record<string, string>)[0];
     if (typeof hit === 'string') {
-      return { audio_base64: hit, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
+      return {
+        audio_base64: hit,
+        audio_mime: hit.startsWith('UklGR') ? 'audio/wav' : 'audio/mpeg',
+        voice: SARAH_VOICE_NAME,
+      };
     }
     if (hit) return hit;
   }
@@ -2202,7 +2208,7 @@ async function synthesizeGoogleFreeNeuralAudio(cleanText: string): Promise<{
       SARAH_TTS_CACHE.set(cleanText, entry);
       return entry;
     }
-  } catch {}
+  } catch { }
   return { audio_base64: null, audio_mime: 'audio/wav', voice: SARAH_VOICE_NAME };
 }
 
@@ -2773,7 +2779,7 @@ async function runClonedSarahScenario(
     const wh = checkReceptionistWorkHours(sessionContext);
     return {
       scenario: 'Work Hours & Availability',
-      reply: `Our work hours are Monday through Friday from 8:00 AM to 8:00 PM Arizona time. While I answer inbound calls 24 hours a day, 7 days a week to assist you and schedule appointments, live warm transfers to our Principal Broker King Amen Ra are available strictly during our work hours of Monday through Friday from 8:00 AM to 8:00 PM.${!wh.isOpen ? ' Since we are currently outside those hours, I would love to get you scheduled on King Amen Ra’s calendar—do you prefer a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment, and may I have your full name, phone number, and street address?' : ' How may I assist you today?'}`,
+      reply: `Our regular business hours are Monday through Saturday from 9:00 AM to 7:00 PM Arizona time. Live warm transfers to our Principal Broker King Amen Ra are available strictly during our business hours of Monday through Saturday from 9:00 AM to 7:00 PM.${!wh.isOpen ? ' Since we are currently outside those hours, I would love to get you scheduled on King Amen Ra’s calendar—do you prefer a 30-minute Telephone, 60-minute In-Person, or 30-minute Video appointment, and may I have your full name, phone number, and street address?' : ' How may I assist you today?'}`,
     };
   }
 
@@ -3444,7 +3450,7 @@ export async function handleSarahHttpTurn(params: {
         state: sessionContext.state,
         how_heard: sessionContext.how_heard,
         product_interest: sessionContext.product_interest,
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     const preCached =
@@ -3454,12 +3460,12 @@ export async function handleSarahHttpTurn(params: {
     const tts =
       preCached?.audio_base64 && !params.skip_inline_tts
         ? {
-            audio_base64: preCached.audio_base64,
-            audio_mime: preCached.audio_mime,
-            first_chunk_text: openingReply,
-            rest_text: '',
-            voice: SARAH_VOICE_NAME,
-          }
+          audio_base64: preCached.audio_base64,
+          audio_mime: preCached.audio_mime,
+          first_chunk_text: openingReply,
+          rest_text: '',
+          voice: SARAH_VOICE_NAME,
+        }
         : await resolveTts(openingReply);
 
     return {
@@ -4065,8 +4071,8 @@ export function getSarahDirectLiveSessionConfig(params: Partial<SarahSessionCont
   const wsUrl =
     config.gemini.apiKey && !isGeminiBillingDepleted()
       ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(
-          config.gemini.apiKey
-        )}`
+        config.gemini.apiKey
+      )}`
       : '';
 
   return {

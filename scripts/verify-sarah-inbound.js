@@ -2,7 +2,7 @@
 /**
  * 100% Google Cloud + Google Voice Diagnostic Script for Sarah Inbound Receptionist on +14803319455
  * Verifies:
- *  1. Centralized America/Phoenix office hours (Mon–Fri, 8:00 AM – 5:00 PM MST, No DST)
+ *  1. Centralized America/Phoenix office hours (Mon–Sat, 9:00 AM – 7:00 PM MST, No DST)
  *  2. Google Cloud production URL (https://voice.iwillglobal.com/api/sarah/inbound)
  *  3. Google Cloud 24/7 VoIP Bridge & Cookie Vault status (/api/sarah/gv-status)
  *  4. Sub-300ms 1st-ring pickup & female voice ("Vindemiatrix") for:
@@ -51,7 +51,7 @@ async function runVerificationSuite(targetUrl) {
   console.log(`• Google Cloud Base URL     : ${PROD_BASE_URL}`);
   console.log(`• Active Inbound Endpoint   : ${EXPECTED_JSON_WEBHOOK}`);
   console.log(`• Configured Timezone       : ${process.env.OFFICE_TIMEZONE || 'America/Phoenix'} (MST, No DST)`);
-  console.log(`• Configured Office Hours   : ${process.env.OFFICE_HOURS_START || '08:00'} -> ${process.env.OFFICE_HOURS_END || '17:00'} (Days: ${process.env.OFFICE_DAYS || '1,2,3,4,5'})`);
+  console.log(`• Configured Office Hours   : ${process.env.OFFICE_HOURS_START || '09:00'} -> ${process.env.OFFICE_HOURS_END || '19:00'} (Days: ${process.env.OFFICE_DAYS || '1,2,3,4,5,6'})`);
   console.log(`• Test Target Endpoint      : ${targetUrl}`);
 
   await fetch(`${targetUrl}/api/health`).catch(() => { });
@@ -97,7 +97,7 @@ async function runVerificationSuite(targetUrl) {
   if (afterData.routing_mode !== 'after_hours' || afterData.is_after_hours !== true || afterData.should_hangup !== true) {
     throw new Error(`Expected after_hours + should_hangup=true at Mon 10 PM MST, got ${JSON.stringify(afterData)}`);
   }
-  if (!/currently closed/i.test(afterData.reply) || !/Monday through Friday/i.test(afterData.reply)) {
+  if (!/currently closed/i.test(afterData.reply) || !/Monday through Saturday/i.test(afterData.reply)) {
     throw new Error(`After-hours greeting missing closed/hours text: "${afterData.reply}"`);
   }
 

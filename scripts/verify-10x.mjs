@@ -239,7 +239,28 @@ async function main() {
       assert.equal(custTurn.ok, true);
       assert.ok(String(custTurn.reply || '').length > 15, `Round ${round}: Sarah must reply meaningfully to customer`);
 
-      // 7. Verify After-Hours (Sat 8:00 PM America/Phoenix MST) Closed-Office Greeting + Clean Hangup
+      // 6b. Verify Saturday 11:00 AM MST is ALSO Business Hours (Mon–Sat 9:00 AM – 7:00 PM MST)
+      const satOpenRes = await fetch(`${baseUrl}/api/sarah/turn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          is_initial: true,
+          skip_tts: true,
+          context: {
+            mode: 'inbound',
+            source_channel: 'call_in_lead',
+            prospect_phone: scenario.phone,
+            simulated_now_iso: '2026-11-14T11:00:00-07:00',
+          },
+        }),
+      });
+      assert.equal(satOpenRes.status, 200);
+      const satOpen = await satOpenRes.json();
+      assert.equal(satOpen.routing_mode, 'business_hours');
+      assert.equal(satOpen.is_after_hours, false);
+      assert.equal(satOpen.should_hangup, false);
+
+      // 7. Verify After-Hours (Sat 8:00 PM / Sun America/Phoenix MST) Closed-Office Greeting + Clean Hangup
       const afterHoursRes = await fetch(`${baseUrl}/api/sarah/turn`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -261,8 +282,8 @@ async function main() {
       assert.equal(afterHours.is_after_hours, true);
       assert.equal(afterHours.should_hangup, true, `Round ${round}: After-hours greeting must set should_hangup=true`);
       assert.ok(
-        String(afterHours.reply || '').includes('8 AM to 5 PM Arizona time'),
-        `Round ${round}: After-hours greeting must state 8 AM to 5 PM Arizona time`
+        String(afterHours.reply || '').includes('Monday through Saturday from 9 AM to 7 PM Arizona time'),
+        `Round ${round}: After-hours greeting must state Monday through Saturday from 9 AM to 7 PM Arizona time`
       );
 
       const elapsedMs = Date.now() - t0;

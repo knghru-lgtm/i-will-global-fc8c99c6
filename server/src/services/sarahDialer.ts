@@ -93,8 +93,8 @@ STRICT OPERATING RULES & UNIFIED HIGH-CONVERSION SCRIPT:
    - Point 3 (The 104+ Carrier Solution & Assumptive Close): "That is why we run a complimentary 5-minute check across 104+ carriers—comparing Medigap Plan G, Plan N, and Medicare Advantage plans—to ensure your exact doctors and medications are covered at the lowest possible cost. To make this completely effortless for you, {first_name}, our Principal Broker King Amen Ra can verify your doctors and prescriptions in just a few minutes at zero cost. Would you like me to reach out and get him on the line for you right now?"
 4. CALLING HOURS & CONTINUOUS DIALING:
    - Answer every inbound call immediately, 24 hours a day, 7 days a week.
-   - Official Receptionist & Warm Transfer Work Hours: Monday through Friday, 8:00 AM to 8:00 PM (Arizona time). No warm transfers outside those times.
-   - Outbound: call every prospect assigned to Sarah Outbound Caller Monday through Friday 8:00 AM to 8:00 PM (Arizona time), up to 1,000 calls per day, continuously dialing the assigned queue without stopping.
+   - Official Receptionist & Warm Transfer Work Hours: Monday through Saturday, 9:00 AM to 7:00 PM (Arizona time). No warm transfers outside those times.
+   - Outbound: call every prospect assigned to Sarah Outbound Caller Monday through Saturday 9:00 AM to 7:00 PM (Arizona time), up to 1,000 calls per day, continuously dialing the assigned queue without stopping.
 5. WHEN KING AMEN RA IS ON A WARM TRANSFER CALL ({warm_transfer_status}) & MANDATORY STEP-BY-STEP APPOINTMENT SETTING:
    - If King Amen Ra is currently on a warm transfer call (on_warm_transfer is true or broker_status is ON_WARM_TRANSFER) or when an inbound/outbound caller wants to set an appointment, do NOT pause or stop calling, and do NOT live-transfer the call while King Amen Ra is on a warm transfer call.
    - Follow the Appointment Setting Steps in order:
@@ -760,7 +760,7 @@ export async function runSarahAutoDialerTick(opts: { reason?: string; force?: bo
         });
       } catch (err: any) {
         // Release the claim so the prospect is retried later.
-        await q(`UPDATE leads SET last_contacted_at = $2 WHERE id = $1`, [lead.id, lead.last_contacted_at || null]).catch(() => {});
+        await q(`UPDATE leads SET last_contacted_at = $2 WHERE id = $1`, [lead.id, lead.last_contacted_at || null]).catch(() => { });
         lastError = err?.message || 'Sarah Voice Engine dispatch failed';
         console.error(`Sarah auto-dialer failed for lead ${lead.id}:`, lastError);
         // Invalid phone numbers are skipped; account/API/hours errors stop this tick to avoid burning through the queue.
@@ -1578,12 +1578,12 @@ export async function handleSarahWebhook(payload: any) {
       /\b(life insurance|iul|indexed universal|term life|whole life|final expense|living benefits|7702|death benefit)\b/i.test(lowerText)
         ? 'Life Insurance & Living Benefits / IUL'
         : /\b(group|business|employer|ichra|level-funded)\b/i.test(lowerText)
-        ? 'Group Health Insurance'
-        : /\b(long-term care|long term care|ltc|assisted living|nursing)\b/i.test(lowerText)
-        ? 'Asset-Based Long Term Care'
-        : /\b(individual|family|aca|marketplace|private ppo|under 65)\b/i.test(lowerText)
-        ? 'Individual & Family Health Insurance'
-        : 'Medicare';
+          ? 'Group Health Insurance'
+          : /\b(long-term care|long term care|ltc|assisted living|nursing)\b/i.test(lowerText)
+            ? 'Asset-Based Long Term Care'
+            : /\b(individual|family|aca|marketplace|private ppo|under 65)\b/i.test(lowerText)
+              ? 'Individual & Family Health Insurance'
+              : 'Medicare';
     const customerName = variables.full_name || variables.first_name || metadata.prospect_name || 'Valued Client';
     const customerPhone = toE164(payload.to || payload.from || payload.phone_number || activity?.phone || '') || '(480) 331-9455';
     const customerAddress = variables.appointment_address || variables.address || metadata.address || '';
@@ -1687,7 +1687,7 @@ export async function handleSarahWebhook(payload: any) {
       provider: 'google_voice',
       disposition: 'Day-Before SMS Reminder Scheduled (Internal)',
       meta: { sms: true, internal_auto_reminder: true, reminder_stage: '2_day_before', scheduled_for: dayBeforeAt.toISOString() },
-    }).catch(() => {});
+    }).catch(() => { });
 
     await insert('activities', {
       type: 'call',
@@ -1704,7 +1704,7 @@ export async function handleSarahWebhook(payload: any) {
       provider: 'google_voice',
       disposition: 'Same-Day SMS Reminder Scheduled (Internal)',
       meta: { sms: true, internal_auto_reminder: true, reminder_stage: '3_same_day', scheduled_for: sameDayAt.toISOString() },
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   // Trigger CRM automations if linked to a lead or client
