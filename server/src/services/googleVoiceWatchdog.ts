@@ -1,5 +1,5 @@
 import { exec } from 'node:child_process';
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -159,6 +159,8 @@ export function verifyBridgeToken(provided?: string | null): boolean {
   }
 }
 
+let lastSavedCookieAuthFingerprint = '';
+
 export async function saveCloudGvCookies(
   cookies: any[],
   source = 'extension',
@@ -179,6 +181,59 @@ export async function saveCloudGvCookies(
   }
 
   await ensureSettingsTable();
+
+  const isFromCloudDaemon = String(source || '').startsWith('cloud-daemon');
+  const cloudLiveAndAuthed = Boolean(
+    state.cloudDaemon?.sessionAuthenticated &&
+      Date.now() - (state.cloudDaemon.lastHeartbeatAt || 0) < 45_000
+  );
+
+  // Never allow a background laptop extension timer to overwrite a live self-rotating Cloud VM session's PSIDTS chain!
+  if (!isFromCloudDaemon && cloudLiveAndAuthed && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== 'test') {
+    return {
+      ok: true,
+      count: state.cookieVaultCount || googleCookies.length,
+      updatedAt: state.cookieVaultUpdatedAt,
+    };
+  }
+
+  const authFingerprint = createHash('sha256')
+    .update(
+      googleCookies
+        .filter((c) =>
+          [
+            'SID',
+            'HSID',
+            'SSID',
+            'APISID',
+            'SAPISID',
+            '__Secure-1PSID',
+            '__Secure-1PSIDTS',
+            '__Secure-3PSID',
+            '__Secure-3PSIDTS',
+            'LSID',
+          ].includes(String(c.name))
+        )
+        .map((c) => `${c.domain || ''}:${c.name}=${c.value}`)
+        .sort()
+        .join('|')
+    )
+    .digest('hex');
+
+  if (
+    !isFromCloudDaemon &&
+    authFingerprint === lastSavedCookieAuthFingerprint &&
+    state.cookieVaultUpdatedAt &&
+    process.env.NODE_ENV !== 'test'
+  ) {
+    return {
+      ok: true,
+      count: state.cookieVaultCount || googleCookies.length,
+      updatedAt: state.cookieVaultUpdatedAt,
+    };
+  }
+  lastSavedCookieAuthFingerprint = authFingerprint;
+
   const [key] = getVaultKeys();
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);

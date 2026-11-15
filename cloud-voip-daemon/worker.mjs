@@ -472,12 +472,16 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
   const { forceClearCookies = false, vaultUpdatedAt = null } = opts;
   const execPath = resolveChromeBinary();
   const lastVaultStampFile = path.join(CHROME_PROFILE_DIR, '.last-vault-stamp');
+  const vmSessionLiveMarker = path.join(CHROME_PROFILE_DIR, '.vm-session-live');
   const previousVaultStamp = existsSync(lastVaultStampFile)
     ? readFileSync(lastVaultStampFile, 'utf8').trim()
     : '';
 
   // Self-heal poisoned "Signed out" SQLite cookies before Chrome opens the profile
   if (forceClearCookies && cookies.length > 0) {
+    try {
+      rmSync(vmSessionLiveMarker, { force: true });
+    } catch { }
     for (const f of ['Cookies', 'Cookies-journal']) {
       try {
         rmSync(path.join(CHROME_PROFILE_DIR, 'Default', f), { force: true });
@@ -520,11 +524,15 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
     const profileHasGvCookies =
       Array.isArray(existingProfileCookies?.cookies) &&
       existingProfileCookies.cookies.some((c) => c.domain?.includes('voice.google.com'));
-    const profileHasNativeGvAuth = hasNativeVmAuthMarker && profileHasAllCoreAuth && profileHasGvCookies;
+    const profileHasLiveVmSession =
+      !forceClearCookies &&
+      (hasNativeVmAuthMarker || existsSync(vmSessionLiveMarker)) &&
+      profileHasAllCoreAuth &&
+      profileHasGvCookies;
 
     const hasNewerVaultSync = Boolean(vaultUpdatedAt && vaultUpdatedAt !== previousVaultStamp);
     const shouldInjectVaultCookies =
-      !profileHasNativeGvAuth &&
+      !profileHasLiveVmSession &&
       cookies.length > 0 &&
       (forceClearCookies || !profileHasAllCoreAuth || !profileHasGvCookies || hasNewerVaultSync);
 
@@ -618,7 +626,10 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
 
     if (page.url().includes('accounts.google.com')) {
       const resolved = await resolveAccountChooserIfNeeded(page);
-      if (!resolved && profileHasNativeGvAuth && cdpCookies.length > 0) {
+      if (!resolved && profileHasLiveVmSession && cdpCookies.length > 0) {
+        try {
+          rmSync(vmSessionLiveMarker, { force: true });
+        } catch { }
         // Persistent profile expired — fall back to fresh vault cookies once
         for (const ck of cdpCookies) {
           try {
@@ -649,6 +660,9 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
 
       const readyTitle = await page.title().catch(() => 'Google Voice');
       console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] AUTHENTICATED & LIVE on ${page.url()} (${readyTitle})`);
+      try {
+        writeFileSync(vmSessionLiveMarker, new Date().toISOString(), 'utf8');
+      } catch { }
 
       // Verify Google Voice Web ringing ("Prefer Wi-Fi and mobile data" + Web ON + Call Screening OFF)
       await verifyGoogleVoiceWebSettings(browser, effectiveUa);

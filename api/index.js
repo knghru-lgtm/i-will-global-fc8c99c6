@@ -4906,7 +4906,7 @@ __export(cloudBackup_exports, {
   runFullCloudBackup: () => runFullCloudBackup,
   startAutomatedCloudBackupScheduler: () => startAutomatedCloudBackupScheduler
 });
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync as existsSync4, mkdirSync as mkdirSync3, readdirSync, readFileSync as readFileSync4, unlinkSync as unlinkSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import path4 from "node:path";
@@ -4962,7 +4962,7 @@ async function createFullCrmBackupSnapshot(options) {
   const stamp = createdAt.replace(/[:.]/g, "-");
   const backupId = `iwg-cloud-backup-${stamp}`;
   const payloadJson = JSON.stringify(tables);
-  const sha256 = createHash("sha256").update(payloadJson).digest("hex");
+  const sha256 = createHash2("sha256").update(payloadJson).digest("hex");
   return {
     schema_version: "2026.11-google-cloud-v1",
     backup_id: backupId,
@@ -6978,7 +6978,7 @@ init_db();
 init_config();
 init_db();
 import { exec } from "node:child_process";
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import path3 from "node:path";
@@ -7063,6 +7063,7 @@ function verifyBridgeToken(provided) {
     return false;
   }
 }
+var lastSavedCookieAuthFingerprint = "";
 async function saveCloudGvCookies(cookies, source = "extension", userAgent = "") {
   if (!Array.isArray(cookies) || cookies.length === 0) {
     throw new Error("No cookies provided");
@@ -7078,6 +7079,41 @@ async function saveCloudGvCookies(cookies, source = "extension", userAgent = "")
     throw new Error("Cookie set does not contain authenticated Google session cookies (SID / __Secure-1PSID)");
   }
   await ensureSettingsTable2();
+  const isFromCloudDaemon = String(source || "").startsWith("cloud-daemon");
+  const cloudLiveAndAuthed = Boolean(
+    state.cloudDaemon?.sessionAuthenticated && Date.now() - (state.cloudDaemon.lastHeartbeatAt || 0) < 45e3
+  );
+  if (!isFromCloudDaemon && cloudLiveAndAuthed && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== "test") {
+    return {
+      ok: true,
+      count: state.cookieVaultCount || googleCookies.length,
+      updatedAt: state.cookieVaultUpdatedAt
+    };
+  }
+  const authFingerprint = createHash("sha256").update(
+    googleCookies.filter(
+      (c) => [
+        "SID",
+        "HSID",
+        "SSID",
+        "APISID",
+        "SAPISID",
+        "__Secure-1PSID",
+        "__Secure-1PSIDTS",
+        "__Secure-3PSID",
+        "__Secure-3PSIDTS",
+        "LSID"
+      ].includes(String(c.name))
+    ).map((c) => `${c.domain || ""}:${c.name}=${c.value}`).sort().join("|")
+  ).digest("hex");
+  if (!isFromCloudDaemon && authFingerprint === lastSavedCookieAuthFingerprint && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== "test") {
+    return {
+      ok: true,
+      count: state.cookieVaultCount || googleCookies.length,
+      updatedAt: state.cookieVaultUpdatedAt
+    };
+  }
+  lastSavedCookieAuthFingerprint = authFingerprint;
   const [key] = getVaultKeys();
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
