@@ -288,6 +288,31 @@ export function createApp() {
       res.status(500).json({ ok: false, error: err?.message || 'Status check failed' });
     }
   });
+  app.get('/api/sarah/ops-status', async (_req, res) => {
+    try {
+      const reportPath = path.resolve(repoRoot, 'server/data/ops-supervisor-latest.json');
+      if (existsSync(reportPath)) {
+        const parsed = JSON.parse(readFileSync(reportPath, 'utf8'));
+        return res.json(parsed);
+      }
+      const gv = await getGvWatchdogStatus();
+      return res.json({
+        timestamp: new Date().toISOString(),
+        system_status: gv.online && gv.sessionAuthenticated ? 'HEALTHY' : 'CRITICAL',
+        diagnosis: {
+          layer: 'BROWSER',
+          root_cause: gv.online
+            ? 'Live watchdog telemetry healthy; awaiting next 60s supervisor snapshot.'
+            : 'Google Voice session requires recovery.',
+          evidence: `online=${gv.online}, sessionAuthenticated=${gv.sessionAuthenticated}, activeMode=${gv.activeMode}`,
+        },
+        dispatch: [],
+        admin_escalation: { notify_human: false, alert_message: null },
+      });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Ops status check failed' });
+    }
+  });
   app.post('/api/sarah/gv-command', async (req, res) => {
     try {
       if (req.body?.launchChrome) {
