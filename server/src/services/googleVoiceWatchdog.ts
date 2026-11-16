@@ -183,18 +183,17 @@ export async function saveCloudGvCookies(
 
   await ensureSettingsTable();
 
-  const isFromCloudDaemon = String(source || '').startsWith('cloud-daemon');
-  const cloudLiveAndAuthed = Boolean(
-    state.cloudDaemon?.sessionAuthenticated &&
-      Date.now() - (state.cloudDaemon.lastHeartbeatAt || 0) < 45_000
-  );
+  const src = String(source || '');
+  const isCloudNativeSource =
+    src.startsWith('cloud-daemon') || src.startsWith('vm-direct-login') || process.env.NODE_ENV === 'test';
 
-  // LOCK 1: Never allow an external browser extension timer to overwrite a live authenticated Cloud VM session!
-  if (!isFromCloudDaemon && cloudLiveAndAuthed && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== 'test') {
+  // PERMANENT STANDALONE CLOUD RULE: Ignore all local desktop Chrome / Chrome Extension cookie syncs
+  // so local browsers and extensions are 100% unnecessary and can never overwrite the standalone Cloud VM session!
+  if (!isCloudNativeSource) {
     return {
       ok: true,
-      count: state.cookieVaultCount || googleCookies.length,
-      updatedAt: state.cookieVaultUpdatedAt,
+      count: state.cookieVaultCount || 0,
+      updatedAt: state.cookieVaultUpdatedAt || '',
     };
   }
 
@@ -241,68 +240,6 @@ export async function saveCloudGvCookies(
       count: state.cookieVaultCount || googleCookies.length,
       updatedAt: state.cookieVaultUpdatedAt,
     };
-  }
-
-  // LOCK 2: Pre-flight live verification against https://voice.google.com/u/0/calls BEFORE saving!
-  // Rejects any signed-out Chrome profile (302 to accounts/workspace) or wrong account (missing 4803319455).
-  if (!isFromCloudDaemon && process.env.NODE_ENV !== 'test') {
-    const gvCookiePairs = googleCookies
-      .filter((c) => {
-        const d = String(c.domain || '').toLowerCase().replace(/^\.+/, '');
-        return d === 'google.com' || d === 'voice.google.com';
-      })
-      .map((c) => `${c.name}=${c.value}`)
-      .join('; ');
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 8000);
-      const probe = await fetch('https://voice.google.com/u/0/calls', {
-        method: 'GET',
-        redirect: 'manual',
-        headers: {
-          Cookie: gvCookiePairs,
-          'User-Agent':
-            userAgent ||
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        },
-        signal: ctrl.signal,
-      });
-      clearTimeout(t);
-      if (probe.status !== 200) {
-        seenCookieAuthFingerprints.add(authFingerprint);
-        recordGvEvent(
-          'gv_cookie_sync_rejected',
-          `Blocked signed-out browser profile (${source}, HTTP ${probe.status}, ${googleCookies.length} cookies)`
-        );
-        return {
-          ok: true,
-          count: state.cookieVaultCount || 0,
-          updatedAt: state.cookieVaultUpdatedAt || '',
-        };
-      }
-      const html = await probe.text();
-      if (!html.includes('4803319455') && !html.toLowerCase().includes('king@iwillglobal.com')) {
-        seenCookieAuthFingerprints.add(authFingerprint);
-        recordGvEvent(
-          'gv_cookie_sync_rejected',
-          `Blocked non-(480) 331-9455 Google account profile (${source}, ${googleCookies.length} cookies)`
-        );
-        return {
-          ok: true,
-          count: state.cookieVaultCount || 0,
-          updatedAt: state.cookieVaultUpdatedAt || '',
-        };
-      }
-    } catch {
-      // Only allow through on transient network error if no vault exists yet
-      if (state.cookieVaultUpdatedAt) {
-        return {
-          ok: true,
-          count: state.cookieVaultCount || 0,
-          updatedAt: state.cookieVaultUpdatedAt,
-        };
-      }
-    }
   }
 
   seenCookieAuthFingerprints.add(authFingerprint);
@@ -490,6 +427,15 @@ export async function handleGvHeartbeat(payload: any) {
   const now = Date.now();
   const runner: 'cloud-daemon' | 'chrome-extension' =
     payload?.runner === 'cloud-daemon' ? 'cloud-daemon' : 'chrome-extension';
+
+  if (runner === 'chrome-extension' && process.env.NODE_ENV !== 'test') {
+    return {
+      ok: true,
+      standbyForCloud: true,
+      needsCookieSync: false,
+      targetBuild: CURRENT_GV_EXTENSION_BUILD,
+    };
+  }
 
   const prevRunner = runner === 'cloud-daemon' ? state.cloudDaemon : state.localExtension;
   const wasRunnerOffline = !prevRunner || now - prevRunner.lastHeartbeatAt > 20_000;

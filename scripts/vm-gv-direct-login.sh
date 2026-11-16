@@ -169,8 +169,9 @@ cleanup() {
   pkill -f "x11vnc.*:99" 2>/dev/null || true
   rm -rf "${PROFILE_DIR}"/Singleton* 2>/dev/null || true
 
-  echo "Starting 24/7 cloud-voip-daemon..."
+  echo "Starting 24/7 cloud-voip-daemon & sarah-watchdog..."
   (cd "${REPO_DIR}" && (pm2 restart cloud-voip-daemon --update-env || pm2 start ecosystem.config.cjs --only cloud-voip-daemon --update-env))
+  (cd "${REPO_DIR}" && (pm2 restart sarah-watchdog --update-env || pm2 start ecosystem.config.cjs --only sarah-watchdog --update-env))
   pm2 save >/dev/null 2>&1 || true
 
   echo "Waiting up to 25s for all status flags to turn true..."

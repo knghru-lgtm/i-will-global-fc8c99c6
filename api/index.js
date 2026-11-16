@@ -7080,15 +7080,13 @@ async function saveCloudGvCookies(cookies, source = "extension", userAgent = "")
     throw new Error("Cookie set does not contain authenticated Google session cookies (SID / __Secure-1PSID)");
   }
   await ensureSettingsTable2();
-  const isFromCloudDaemon = String(source || "").startsWith("cloud-daemon");
-  const cloudLiveAndAuthed = Boolean(
-    state.cloudDaemon?.sessionAuthenticated && Date.now() - (state.cloudDaemon.lastHeartbeatAt || 0) < 45e3
-  );
-  if (!isFromCloudDaemon && cloudLiveAndAuthed && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== "test") {
+  const src = String(source || "");
+  const isCloudNativeSource = src.startsWith("cloud-daemon") || src.startsWith("vm-direct-login") || process.env.NODE_ENV === "test";
+  if (!isCloudNativeSource) {
     return {
       ok: true,
-      count: state.cookieVaultCount || googleCookies.length,
-      updatedAt: state.cookieVaultUpdatedAt
+      count: state.cookieVaultCount || 0,
+      updatedAt: state.cookieVaultUpdatedAt || ""
     };
   }
   if (!seenFingerprintsHydrated && process.env.NODE_ENV !== "test") {
@@ -7126,59 +7124,6 @@ async function saveCloudGvCookies(cookies, source = "extension", userAgent = "")
       count: state.cookieVaultCount || googleCookies.length,
       updatedAt: state.cookieVaultUpdatedAt
     };
-  }
-  if (!isFromCloudDaemon && process.env.NODE_ENV !== "test") {
-    const gvCookiePairs = googleCookies.filter((c) => {
-      const d = String(c.domain || "").toLowerCase().replace(/^\.+/, "");
-      return d === "google.com" || d === "voice.google.com";
-    }).map((c) => `${c.name}=${c.value}`).join("; ");
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 8e3);
-      const probe = await fetch("https://voice.google.com/u/0/calls", {
-        method: "GET",
-        redirect: "manual",
-        headers: {
-          Cookie: gvCookiePairs,
-          "User-Agent": userAgent || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        },
-        signal: ctrl.signal
-      });
-      clearTimeout(t);
-      if (probe.status !== 200) {
-        seenCookieAuthFingerprints.add(authFingerprint);
-        recordGvEvent(
-          "gv_cookie_sync_rejected",
-          `Blocked signed-out browser profile (${source}, HTTP ${probe.status}, ${googleCookies.length} cookies)`
-        );
-        return {
-          ok: true,
-          count: state.cookieVaultCount || 0,
-          updatedAt: state.cookieVaultUpdatedAt || ""
-        };
-      }
-      const html = await probe.text();
-      if (!html.includes("4803319455") && !html.toLowerCase().includes("king@iwillglobal.com")) {
-        seenCookieAuthFingerprints.add(authFingerprint);
-        recordGvEvent(
-          "gv_cookie_sync_rejected",
-          `Blocked non-(480) 331-9455 Google account profile (${source}, ${googleCookies.length} cookies)`
-        );
-        return {
-          ok: true,
-          count: state.cookieVaultCount || 0,
-          updatedAt: state.cookieVaultUpdatedAt || ""
-        };
-      }
-    } catch {
-      if (state.cookieVaultUpdatedAt) {
-        return {
-          ok: true,
-          count: state.cookieVaultCount || 0,
-          updatedAt: state.cookieVaultUpdatedAt
-        };
-      }
-    }
   }
   seenCookieAuthFingerprints.add(authFingerprint);
   if (seenCookieAuthFingerprints.size > 120) {
@@ -7335,6 +7280,14 @@ async function handleGvHeartbeat(payload) {
   await loadGvStateFromDb();
   const now = Date.now();
   const runner = payload?.runner === "cloud-daemon" ? "cloud-daemon" : "chrome-extension";
+  if (runner === "chrome-extension" && process.env.NODE_ENV !== "test") {
+    return {
+      ok: true,
+      standbyForCloud: true,
+      needsCookieSync: false,
+      targetBuild: CURRENT_GV_EXTENSION_BUILD
+    };
+  }
   const prevRunner = runner === "cloud-daemon" ? state.cloudDaemon : state.localExtension;
   const wasRunnerOffline = !prevRunner || now - prevRunner.lastHeartbeatAt > 2e4;
   const urlStr = payload?.url ? String(payload.url) : prevRunner?.url || "";
