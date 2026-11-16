@@ -7,12 +7,14 @@
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
-  const EXTENSION_BUILD = '2026-11-15-v15';
+  const EXTENSION_BUILD = '2026-11-16-v16';
   const SELECTORS = [
     'button[gv-test-id="in-call-pickup-call"]',
     'button.pickup-call-button',
     'gv-incoming-call button[gv-call-chip]:not(:has(.decline-icon))',
     'button[aria-label*="Answer" i]',
+    '[data-test-id*="answer" i]',
+    '[gv-test-id*="answer" i]',
     'button[aria-label*="Accept" i]',
     'button[data-call-action="answer"]',
     'div[role="button"][aria-label*="Answer" i]',
@@ -177,6 +179,9 @@
     }
   }
 
+  const observedShadowRoots = new WeakSet();
+  let rootMutationObserver = null;
+
   function queryAllDeep(root = document) {
     const out = [];
     const visited = new Set();
@@ -196,6 +201,7 @@
           el.hasAttribute?.('role') ||
           el.hasAttribute?.('aria-label') ||
           el.hasAttribute?.('gv-test-id') ||
+          el.hasAttribute?.('data-test-id') ||
           el.hasAttribute?.('data-e2e') ||
           el.hasAttribute?.('mattooltip') ||
           el.hasAttribute?.('data-tooltip') ||
@@ -204,6 +210,17 @@
           out.push(el);
         }
         if (el.shadowRoot) {
+          if (rootMutationObserver && !observedShadowRoots.has(el.shadowRoot)) {
+            observedShadowRoots.add(el.shadowRoot);
+            try {
+              rootMutationObserver.observe(el.shadowRoot, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['aria-label', 'class', 'style', 'hidden', 'disabled', 'data-call-action'],
+              });
+            } catch {}
+          }
           walk(el.shadowRoot);
         }
         if (tag === 'IFRAME') {
@@ -240,56 +257,47 @@
   function clickSingleTarget(targetBtn) {
     if (!targetBtn) return;
     try {
+      targetBtn.scrollIntoView?.({ block: 'center', inline: 'center' });
       targetBtn.focus?.();
-      ['pointerdown', 'pointerup'].forEach((evtName) => {
-        if (typeof PointerEvent === 'function') {
-          targetBtn.dispatchEvent(
-            new PointerEvent(evtName, {
-              bubbles: true,
-              cancelable: true,
-              view: window,
-            })
-          );
-        }
-      });
-      ['mousedown', 'mouseup'].forEach((evtName) => {
-        targetBtn.dispatchEvent(
-          new MouseEvent(evtName, {
-            bubbles: true,
-            cancelable: true,
-            view: window,
-          })
-        );
-      });
-      targetBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
       targetBtn.click();
-      targetBtn.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
-      );
-      targetBtn.dispatchEvent(
-        new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })
-      );
     } catch {}
   }
 
-  function clickElement(el) {
+  function clickElement(el, isAnswerPickup = false) {
     if (!el) return;
     const parentBtn = el.closest?.('button, [role="button"]');
     const primaryTarget = parentBtn || el;
-    if (typeof window !== 'undefined' && typeof window.__iwgTrustedClick === 'function') {
+    try {
+      primaryTarget.scrollIntoView?.({ block: 'center', inline: 'center' });
+      primaryTarget.focus?.();
+    } catch {}
+
+    let cx = 0;
+    let cy = 0;
+    try {
+      const rect = primaryTarget.getBoundingClientRect?.();
+      if (rect && rect.width > 0 && rect.height > 0) {
+        cx = Math.round(rect.left + rect.width / 2);
+        cy = Math.round(rect.top + rect.height / 2);
+      }
+    } catch {}
+
+    // Method 1: Direct DOM .click() on the Answer/target button element
+    clickSingleTarget(primaryTarget);
+
+    // Method 2 + Method 3 (for Answer pickup): Trusted Puppeteer mouse.click(x,y) + keyboard.press('Enter')
+    if (isAnswerPickup && typeof window !== 'undefined' && typeof window.__iwgMultiVectorPickup === 'function') {
       try {
-        const rect = primaryTarget.getBoundingClientRect?.();
-        if (rect && rect.width > 0 && rect.height > 0) {
-          const cx = Math.round(rect.left + rect.width / 2);
-          const cy = Math.round(rect.top + rect.height / 2);
-          window.__iwgTrustedClick(cx, cy).catch?.(() => {});
-        }
+        window.__iwgMultiVectorPickup(cx, cy).catch?.(() => {});
+      } catch {}
+      return;
+    }
+
+    if (typeof window !== 'undefined' && typeof window.__iwgTrustedClick === 'function' && cx > 0 && cy > 0) {
+      try {
+        window.__iwgTrustedClick(cx, cy).catch?.(() => {});
       } catch {}
     }
-    if (parentBtn && parentBtn !== el) {
-      clickSingleTarget(parentBtn);
-    }
-    clickSingleTarget(el);
   }
 
   function updateStatusBanner(text, color = '#10b981') {
@@ -302,7 +310,7 @@
         badge = document.createElement('div');
         badge.id = 'iwg-gv-receptionist-badge';
         badge.style.cssText =
-          'position:fixed;bottom:14px;left:14px;z-index:2147483647;background:rgba(15,23,42,0.95);border:2px solid #10b981;border-radius:12px;padding:8px 14px;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;font-size:12px;font-weight:700;box-shadow:0 8px 25px rgba(0,0,0,0.45);display:flex;align-items:center;gap:8px;';
+          'position:fixed;bottom:14px;left:14px;z-index:2147483647;pointer-events:none;background:rgba(15,23,42,0.95);border:2px solid #10b981;border-radius:12px;padding:8px 14px;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;font-size:12px;font-weight:700;box-shadow:0 8px 25px rgba(0,0,0,0.45);display:flex;align-items:center;gap:8px;';
         dot = document.createElement('span');
         dot.setAttribute('data-iwg-role', 'dot');
         label = document.createElement('span');
@@ -382,35 +390,29 @@
 
   async function preloadSarahNaturalGreeting() {
     try {
-      const [openTurn, closedTurn] = await Promise.all([
-        callSarahBackend('/api/sarah/turn', {
-          is_initial: true,
-          context: { mode: 'inbound', source_channel: 'call_in_lead', force_work_hours: true },
-        }),
-        callSarahBackend('/api/sarah/turn', {
-          is_initial: true,
-          context: { mode: 'inbound', source_channel: 'call_in_lead', force_work_hours: false },
-        }),
+      const [openTts, closedTts] = await Promise.all([
+        callSarahBackend('/api/sarah/tts', { text: OPENING_GREETING }),
+        callSarahBackend('/api/sarah/tts', { text: AFTER_HOURS_GREETING }),
       ]);
-      if (openTurn && openTurn.audio_base64) {
+      if (openTts && openTts.audio_base64) {
         preloadedGreeting = {
-          audio_base64: openTurn.audio_base64,
-          audio_mime: openTurn.audio_mime || 'audio/wav',
+          audio_base64: openTts.audio_base64,
+          audio_mime: openTts.audio_mime || 'audio/wav',
           rest_audio_base64: null,
         };
         window.postMessage(
-          { __iwg_webrtc__: true, type: 'IWG_SARAH_PREWARM_WAV', base64: openTurn.audio_base64 },
+          { __iwg_webrtc__: true, type: 'IWG_SARAH_PREWARM_WAV', base64: openTts.audio_base64 },
           '*'
         );
       }
-      if (closedTurn && closedTurn.audio_base64) {
+      if (closedTts && closedTts.audio_base64) {
         preloadedAfterHoursGreeting = {
-          audio_base64: closedTurn.audio_base64,
-          audio_mime: closedTurn.audio_mime || 'audio/wav',
+          audio_base64: closedTts.audio_base64,
+          audio_mime: closedTts.audio_mime || 'audio/wav',
           rest_audio_base64: null,
         };
         window.postMessage(
-          { __iwg_webrtc__: true, type: 'IWG_SARAH_PREWARM_WAV', base64: closedTurn.audio_base64 },
+          { __iwg_webrtc__: true, type: 'IWG_SARAH_PREWARM_WAV', base64: closedTts.audio_base64 },
           '*'
         );
       }
@@ -768,6 +770,7 @@
       prospect_phone: callerPhone || '',
       address: '',
       state: 'AZ',
+      force_work_hours: isBusinessHours,
     };
 
     callHistory.push({ speaker: 'sarah', text: selectedGreetingText });
@@ -824,25 +827,42 @@
     }, 0);
   }
 
+  let pickupFailureLoggedForAttempt = false;
+
+  function logCallStateToNode(payload) {
+    try {
+      if (typeof window !== 'undefined' && typeof window.__iwgLogCallState === 'function') {
+        window.__iwgLogCallState(payload).catch?.(() => {});
+      }
+    } catch {}
+  }
+
   // Match explicit Incoming Call Answer buttons using multi-selector strategy + deep shadow/iframe traversal
   function findVisibleAnswerButtons(elements) {
     const matched = [];
     const seen = new Set();
     const combinedSelector = SELECTORS.join(', ');
 
+    const addButtonOnce = (rawEl) => {
+      const btn = rawEl?.closest?.('button, [role="button"]') || rawEl;
+      if (!btn || seen.has(btn) || !isElementVisible(btn)) return;
+      if (btn.closest?.('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) return;
+      const aria = String(btn.getAttribute?.('aria-label') || '').trim();
+      if (/decline|reject|ignore|hang\s*up|end\s*call|dismiss/i.test(aria)) return;
+      seen.add(btn);
+      matched.push(btn);
+    };
+
     try {
       const directMatches = document.querySelectorAll(combinedSelector);
       for (const el of directMatches) {
-        if (!isElementVisible(el)) continue;
-        const aria = String(el.getAttribute?.('aria-label') || '').trim();
-        if (/decline|reject|ignore|hang\s*up|end\s*call|dismiss/i.test(aria)) continue;
-        seen.add(el);
-        matched.push(el);
+        addButtonOnce(el);
       }
     } catch {}
 
     for (const el of elements) {
       if (seen.has(el) || !isElementVisible(el)) continue;
+      if (el.closest?.('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) continue;
       let matchesSelector = false;
       try {
         matchesSelector = Boolean(el.matches?.(combinedSelector));
@@ -857,6 +877,7 @@
       ).trim();
       const testId = String(
         el.getAttribute?.('gv-test-id') ||
+          el.getAttribute?.('data-test-id') ||
           el.getAttribute?.('data-call-action') ||
           el.getAttribute?.('data-e2e') ||
           el.id ||
@@ -882,20 +903,19 @@
         /^(answer|answer\s*call|accept\s*call|call\s*answer|phone_in_talk\s*answer|callanswer|answercall|accept|pick\s*up)$/i.test(
           txt
         ) ||
-        /(answer|accept[-_]?call|incoming[-_]?answer)/i.test(testId);
+        /(answer|accept[-_]?call|incoming[-_]?answer|pickup[-_]?call)/i.test(testId);
 
-      // Also check if this button is inside an explicit Incoming Call alert/banner/toast
+      // Also check if this button is inside an explicit Incoming Call alert/banner/sidebar
       const incomingContainer = el.closest?.(
-        '[class*="incoming-call" i], [class*="incomingCall" i], [id*="incoming-call" i], [gv-test-id*="incoming" i], [aria-label*="Incoming call" i], [role="alertdialog"]'
+        '.gv-call-sidebar, gv-incoming-call, [class*="incoming-call" i], [class*="incomingCall" i], [id*="incoming-call" i], [gv-test-id*="incoming" i], [aria-label*="Incoming call" i], [role="alertdialog"]'
       );
       const isButtonInIncomingBanner =
         Boolean(incomingContainer) &&
         (el.tagName === 'BUTTON' || el.getAttribute?.('role') === 'button') &&
-        /(answer|accept|call|phone)/i.test(`${combined} ${txt}`);
+        /(answer|accept|pickup|pick\s*up)/i.test(`${combined} ${txt}`);
 
       if (isExplicitAnswerBtn || isButtonInIncomingBanner) {
-        seen.add(el);
-        matched.push(el);
+        addButtonOnce(el);
       }
     }
     return matched;
@@ -904,40 +924,94 @@
   function hasVisibleHangupButton(elements) {
     for (const el of elements) {
       if (!isElementVisible(el)) continue;
+      if (el.closest?.('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) continue;
       const aria = String(el.getAttribute?.('aria-label') || '').trim();
       const title = String(el.getAttribute?.('title') || el.getAttribute?.('mattooltip') || '').trim();
-      const testId = String(el.getAttribute?.('gv-test-id') || '').trim();
+      const testId = String(el.getAttribute?.('gv-test-id') || el.getAttribute?.('data-test-id') || '').trim();
+      const classes = String(el.className || '').trim();
       const txt = String(el.textContent || '').trim();
-      if (/\b(end\s*call|hang\s*up|leave\s*call|disconnect|call_end)\b/i.test(`${aria} ${title} ${testId} ${txt}`)) {
+      if (
+        /\b(end\s*call|hang\s*up|leave\s*call|disconnect|call_end|call-end-button)\b/i.test(
+          `${aria} ${title} ${testId} ${classes} ${txt}`
+        )
+      ) {
         return true;
       }
     }
     return false;
   }
 
-  const FAST_INCOMING_HINT_SELECTOR = [
-    ...SELECTORS,
-    '[class*="incoming" i]',
-    '[id*="incoming" i]',
-    '[gv-test-id*="incoming" i]',
-    '[aria-label*="Incoming call" i]',
-    '[role="alertdialog"]',
-    'iframe',
-  ].join(', ');
+  function hasActiveCallTimerInDom() {
+    try {
+      const containers = document.querySelectorAll(
+        'gv-call-sidebar gv-in-call, .gv-call-sidebar, #iwg-simulated-gv-active-call, [aria-label*="Call with" i], [data-test-id="active-call-timer"]'
+      );
+      for (const c of containers) {
+        if (!isElementVisible(c)) continue;
+        // Do not mistake dialpad digits or phone numbers for an active MM:SS call timer
+        const txt = String(c.innerText || '');
+        if (/\b\d{2}:\d{2}\b/.test(txt) && !/\b\d{1,2}:\d{2}\s*[AP]M\b/i.test(txt)) {
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  }
+
+  function hasActiveCallIndicators(elements) {
+    const webrtcConnected = document.documentElement?.getAttribute('data-iwg-webrtc-connected') === 'true';
+    return webrtcConnected || hasVisibleHangupButton(elements) || hasActiveCallTimerInDom();
+  }
+
+  function detectLiveIncomingCallContainer(elements) {
+    if (hasVisibleHangupButton(elements)) return '';
+    try {
+      const liveContainers = document.querySelectorAll(
+        'gv-incoming-call, .gv-call-sidebar, gv-call-sidebar gv-in-call, #iwg-simulated-gv-incoming-toast, [role="alertdialog"]'
+      );
+      for (const c of liveContainers) {
+        if (!isElementVisible(c)) continue;
+        if (c.closest?.('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) continue;
+        const txt = String(c.innerText || '').replace(/\s+/g, ' ').trim();
+        if (!txt || /call_missed|call_received|press c to call back/i.test(txt)) continue;
+        if (/\b(incoming\s+call|is\s+calling|calling\s+you)\b/i.test(txt)) {
+          return txt.slice(0, 180);
+        }
+      }
+    } catch {}
+    return '';
+  }
+
+  function dismissNonCallPromotionalBanners() {
+    try {
+      const promoBanners = document.querySelectorAll('gv-tel-registration-banner, gv-app-banner');
+      for (const b of promoBanners) {
+        if (!isElementVisible(b)) continue;
+        const btns = b.querySelectorAll('button, [role="button"]');
+        for (const btn of btns) {
+          const label = `${btn.getAttribute?.('aria-label') || ''} ${btn.textContent || ''}`.trim();
+          if (/\b(close|dismiss)\b/i.test(label)) {
+            btn.click();
+          }
+        }
+      }
+    } catch {}
+  }
 
   function scanGoogleVoiceDom(_forceDeep = false) {
     if (!autoAnswerEnabled) return;
     if (RUNNER_MODE === 'chrome-extension' && standbyForCloud) return;
     const now = Date.now();
 
-    // Always scan deep across shadow roots & iframes (<1ms on e2-small) so Angular custom elements are never missed
+    // Always scan deep across shadow roots & iframes (<1ms) so Angular custom elements are never missed
     const elements = queryAllDeep(document);
 
     // If a call is ALREADY confirmed active, monitor for call end
     if (callActive) {
-      if (IS_TOP_FRAME && now - lastCallStartTs > 4500 && !hasVisibleHangupButton(elements) && !isSpeaking) {
+      if (IS_TOP_FRAME && now - lastCallStartTs > 4500 && !hasActiveCallIndicators(elements) && !isSpeaking) {
         callActive = false;
         pendingAnswerAttempt = false;
+        pickupFailureLoggedForAttempt = false;
         lastCallEndedTs = now;
         window.postMessage({ __iwg_webrtc__: true, type: 'IWG_SARAH_STOP_WAV' }, '*');
         if (recognition && recRunning) {
@@ -946,6 +1020,13 @@
             recRunning = false;
           } catch {}
         }
+        logCallStateToNode({
+          status: 'CALL_ENDED',
+          caller: sessionContext?.prospect_phone || '',
+          totalCallsAnswered,
+          url: window.location.href,
+          details: 'Active call ended cleanly; ready for next incoming call.',
+        });
         callSarahBackend('/api/sarah/gv-heartbeat', {
           runner: RUNNER_MODE,
           instanceId: cloudDaemonCfg?.instanceId || undefined,
@@ -962,41 +1043,112 @@
       return;
     }
 
-    const answerBtns = findVisibleAnswerButtons(elements);
+    dismissNonCallPromotionalBanners();
 
-    // Confirm pending click succeeded as soon as WebRTC connects, Hangup appears, or Answer button disappears
+    // Auto-accept Google Voice's first-run "Receive calls on the web -> Allow" banner if it ever appears
+    try {
+      const allowBtns = document.querySelectorAll('button, [role="button"]');
+      for (const b of allowBtns) {
+        if (!isElementVisible(b)) continue;
+        const t = String(b.textContent || '').trim();
+        if (/^allow$/i.test(t)) {
+          const bannerCtx = String(b.parentElement?.parentElement?.innerText || '');
+          if (/receive calls on the web|turn on web calling/i.test(bannerCtx)) {
+            clickElement(b, false);
+          }
+        }
+      }
+    } catch {}
+
+    const answerBtns = findVisibleAnswerButtons(elements);
+    const liveIncomingText = detectLiveIncomingCallContainer(elements);
+
+    // STRICT 2,000ms ACTIVE-CALL VERIFICATION:
+    // NEVER treat answerBtns.length === 0 alone as answered! Require an active call timer (00:01),
+    // End Call / Hang Up button, or live WebRTC connection!
     if (pendingAnswerAttempt && IS_TOP_FRAME) {
-      const webrtcConnected = document.documentElement?.getAttribute('data-iwg-webrtc-connected') === 'true';
-      if (webrtcConnected || hasVisibleHangupButton(elements) || answerBtns.length === 0) {
+      if (hasActiveCallIndicators(elements)) {
+        const pickupElapsedMs = now - pendingAnswerStartedTs;
         pendingAnswerAttempt = false;
+        pickupFailureLoggedForAttempt = false;
         const callerToGreet = pendingCallerPhone;
-        // Brief 180ms RTP audio settle on live WebRTC connect so the caller hears every word from syllable 1
+        logCallStateToNode({
+          status: 'CALL_ACTIVE',
+          caller: callerToGreet,
+          activeCallVerified: true,
+          activeVerificationMs: pickupElapsedMs,
+          url: window.location.href,
+          details: `Verified active call transition in ${pickupElapsedMs}ms (timer / End call / WebRTC live).`,
+        });
+        // Brief 150ms RTP audio settle on live WebRTC connect so the caller hears every word from syllable 1
         setTimeout(() => {
           if (!callActive) {
             onIncomingCallAnswered(callerToGreet);
           }
-        }, 180);
+        }, 150);
         return;
       }
-      if (now - pendingAnswerStartedTs > 12000) {
+
+      // If 2,000ms elapsed without transitioning to an active call, log CALL_PICKUP_FAILED & capture /tmp/missed-call-debug.png!
+      if (now - pendingAnswerStartedTs >= 2000 && !pickupFailureLoggedForAttempt) {
+        pickupFailureLoggedForAttempt = true;
+        if (typeof window !== 'undefined' && typeof window.__iwgCaptureMissedCallDebug === 'function') {
+          try {
+            window
+              .__iwgCaptureMissedCallDebug({
+                caller: pendingCallerPhone,
+                url: window.location.href,
+                elapsedMs: now - pendingAnswerStartedTs,
+                answerButtonsVisible: answerBtns.length,
+                liveIncomingText,
+                details:
+                  'Failed to verify active call timer (00:01) or End Call button within 2,000ms of INCOMING_CALL_DETECTED.',
+              })
+              .catch?.(() => {});
+          } catch {}
+        } else {
+          logCallStateToNode({
+            status: 'CALL_PICKUP_FAILED',
+            caller: pendingCallerPhone,
+            elapsedMs: now - pendingAnswerStartedTs,
+            details: 'Failed to verify active call within 2,000ms.',
+          });
+        }
+      }
+
+      // Reset attempt state if ringing completely stopped after 12s without ever connecting
+      if (now - pendingAnswerStartedTs > 12000 && answerBtns.length === 0 && !liveIncomingText) {
         pendingAnswerAttempt = false;
+        pickupFailureLoggedForAttempt = false;
       }
     }
 
-    // Immediately click Answer on the 1st ring (<50ms) and keep retrying every 200ms until Answer button clears / WebRTC connects
-    if (answerBtns.length > 0 && now - lastAnswerClickTs > 180 && now - lastCallEndedTs > 900) {
-      lastAnswerClickTs = now;
+    // Trigger immediate 3-vector pickup on 1st ring (and retry every 450ms while Answer button remains visible)
+    if ((answerBtns.length > 0 || liveIncomingText) && now - lastAnswerClickTs > 420 && now - lastCallEndedTs > 900) {
       const detectedCaller = extractActiveCallerPhone();
       if (!pendingAnswerAttempt) {
         pendingAnswerAttempt = true;
+        pickupFailureLoggedForAttempt = false;
         pendingAnswerStartedTs = now;
         pendingCallerPhone = detectedCaller;
         window.postMessage({ __iwg_webrtc__: true, type: 'IWG_RESUME_AUDIO' }, '*');
+        logCallStateToNode({
+          status: 'INCOMING_CALL_DETECTED',
+          caller: detectedCaller,
+          url: window.location.href,
+          answerButtonCount: answerBtns.length,
+          liveIncomingText,
+          pickupMethods: ['dom_click', 'puppeteer_mouse_click', 'puppeteer_keyboard_enter'],
+          details: 'Incoming call detected in Google Voice DOM; firing 3-vector Ring-1 pickup.',
+        });
       }
-      for (const targetBtn of answerBtns) {
-        clickElement(targetBtn);
+      if (answerBtns.length > 0) {
+        lastAnswerClickTs = now;
+        for (const targetBtn of answerBtns) {
+          clickElement(targetBtn, true);
+        }
       }
-      if (!IS_TOP_FRAME) {
+      if (!IS_TOP_FRAME && answerBtns.length > 0) {
         try {
           window.top?.postMessage(
             { __iwg_webrtc__: true, type: 'IWG_SUBFRAME_CALL_ANSWERED', callerPhone: detectedCaller },
@@ -1005,8 +1157,7 @@
         } catch {}
         return;
       }
-      // Immediately re-check 60ms after click in case Answer button transitioned synchronously to active call
-      setTimeout(() => scanGoogleVoiceDom(true), 60);
+      setTimeout(() => scanGoogleVoiceDom(true), 80);
     }
   }
 
@@ -1019,6 +1170,7 @@
     window.postMessage({ __iwg_webrtc__: true, type: 'IWG_SARAH_STOP_WAV' }, '*');
     callActive = false;
     pendingAnswerAttempt = false;
+    pickupFailureLoggedForAttempt = false;
     isSpeaking = false;
     turnInFlight = false;
     lastCallStartTs = 0;
@@ -1048,7 +1200,8 @@
     const ansBtn = document.createElement('button');
     ansBtn.id = 'iwg-sim-answer-btn';
     ansBtn.setAttribute('aria-label', 'Answer call');
-    ansBtn.setAttribute('gv-test-id', 'incoming-answer-button');
+    ansBtn.setAttribute('gv-test-id', 'in-call-pickup-call');
+    ansBtn.setAttribute('data-test-id', 'incoming-answer-button');
     ansBtn.style.cssText =
       'background:#16a34a;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer;';
     ansBtn.textContent = 'Answer';
@@ -1067,17 +1220,28 @@
 
     let answeredAt = 0;
     let hungUpAt = 0;
+    let timerInterval = null;
     ansBtn.addEventListener('click', () => {
       if (answeredAt) return;
       answeredAt = Date.now();
       toast.remove();
 
-      // Mount active call panel with realistic End Call button so hangupActiveGoogleVoiceCall is verified end-to-end
+      // Mount active call panel with realistic 00:01 timer + End Call button so 2,000ms active verification & hangup run end-to-end
       const activePanel = document.createElement('div');
       activePanel.id = 'iwg-simulated-gv-active-call';
       activePanel.setAttribute('aria-label', `Call with ${callerPhone}`);
       activePanel.style.cssText =
-        'position:fixed;top:16px;right:16px;z-index:2147483646;background:#0f172a;border:2px solid #38bdf8;border-radius:12px;padding:12px 16px;color:#fff;font-family:system-ui,sans-serif;';
+        'position:fixed;top:16px;right:16px;z-index:2147483646;background:#0f172a;border:2px solid #38bdf8;border-radius:12px;padding:12px 16px;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;gap:10px;';
+      const timerEl = document.createElement('span');
+      timerEl.setAttribute('data-test-id', 'active-call-timer');
+      timerEl.style.cssText = 'font-family:monospace;font-size:13px;font-weight:700;color:#38bdf8;';
+      timerEl.textContent = '00:01';
+      let sec = 1;
+      timerInterval = setInterval(() => {
+        sec += 1;
+        timerEl.textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+      }, 1000);
+
       const endBtn = document.createElement('button');
       endBtn.id = 'iwg-sim-hangup-btn';
       endBtn.setAttribute('aria-label', 'End call');
@@ -1087,15 +1251,17 @@
       endBtn.textContent = 'End call';
       endBtn.addEventListener('click', () => {
         hungUpAt = Date.now();
+        if (timerInterval) clearInterval(timerInterval);
         activePanel.remove();
       });
+      activePanel.appendChild(timerEl);
       activePanel.appendChild(endBtn);
       document.body.appendChild(activePanel);
     });
 
     const injectedAt = Date.now();
     document.body.appendChild(toast);
-    // Let MutationObserver + scanGoogleVoiceDom detect & answer on Ring 1 naturally!
+    // Let MutationObserver + non-throttled loop detect & answer on Ring 1 naturally!
     return {
       ok: true,
       callerPhone,
@@ -1214,6 +1380,7 @@
   window.__IWG_GV_GET_STATE__ = () => ({
     build: EXTENSION_BUILD,
     callActive,
+    pendingAnswerAttempt,
     isSpeaking,
     activeCallIsBusinessHours,
     lastAnswerClickTs,
@@ -1224,6 +1391,8 @@
     callHistoryLength: callHistory.length,
     hasPreloadedGreeting: Boolean(preloadedGreeting?.audio_base64),
     hasPreloadedAfterHoursGreeting: Boolean(preloadedAfterHoursGreeting?.audio_base64),
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
   });
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
@@ -1236,7 +1405,7 @@
     });
   }
 
-  // Attach MutationObserver immediately at document_start (coalesced <15ms micro-tick for Ring-1 pickup with zero CPU thrash)
+  // Attach MutationObserver immediately at document_start + Shadow DOM roots (coalesced <12ms micro-tick)
   let mutationScanScheduled = false;
   const observer = new MutationObserver(() => {
     if (mutationScanScheduled) return;
@@ -1246,6 +1415,7 @@
       scanGoogleVoiceDom(false);
     }, 12);
   });
+  rootMutationObserver = observer;
   const attachRootObserver = () => {
     const targetNode = document.documentElement || document.body || document;
     if (targetNode) {
@@ -1276,7 +1446,18 @@
     updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
   }
 
-  const intervalId = setInterval(() => scanGoogleVoiceDom(false), 200);
+  // Non-throttled 500ms Web Worker loop (immune to Chromium tab/renderer timer throttling) + 250ms main-thread backup loop
+  let unthrottledWorker = null;
+  try {
+    const workerBlob = new Blob(['setInterval(function(){ postMessage(1); }, 500);'], {
+      type: 'application/javascript',
+    });
+    const workerUrl = URL.createObjectURL(workerBlob);
+    unthrottledWorker = new Worker(workerUrl);
+    unthrottledWorker.onmessage = () => scanGoogleVoiceDom(false);
+  } catch {}
+
+  const intervalId = setInterval(() => scanGoogleVoiceDom(false), 250);
   const heartbeatIntervalId = IS_TOP_FRAME ? setInterval(sendWatchdogHeartbeat, 4000) : null;
   if (IS_TOP_FRAME) {
     setTimeout(sendWatchdogHeartbeat, 400);
@@ -1285,6 +1466,12 @@
   window.__IWG_GV_RECEPTIONIST_CLEANUP__ = () => {
     clearInterval(intervalId);
     clearInterval(heartbeatIntervalId);
+    if (unthrottledWorker) {
+      try {
+        unthrottledWorker.terminate();
+      } catch {}
+      unthrottledWorker = null;
+    }
     try {
       observer.disconnect();
     } catch {}

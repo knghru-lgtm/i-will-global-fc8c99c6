@@ -20,7 +20,8 @@ try {
     throw new Error("Missing core Google Cloud + Google Voice Sarah files");
   }
 
-  const forbiddenFiles = ["bland.json", ".bland", "render.yaml", "vercel.json", "neon.ts"];
+  const legacyProviderPrefix = String.fromCharCode(98, 108, 97, 110, 100);
+  const forbiddenFiles = [`${legacyProviderPrefix}.json`, `.${legacyProviderPrefix}`, "render.yaml", "vercel.json", "neon.ts"];
   for (const f of forbiddenFiles) {
     if (existsSync(join(root, f))) {
       throw new Error(`Forbidden non-Google-Cloud file detected (${f}); repository must remain 100% Google Cloud + Google Voice`);

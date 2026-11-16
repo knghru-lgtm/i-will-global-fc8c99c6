@@ -2010,7 +2010,7 @@ export async function handleSarahVoiceSession(clientWs: WsWebSocket, initialCtx?
  * Ultra-Realistic Human Neural Voice Synthesizer (Cloned Sarah Voice Engine).
  * Uses Gemini TTS (`Vindemiatrix` calm, relaxed, warm human female voice) to produce standard 24kHz RIFF WAV audio.
  */
-const SARAH_VOICE_NAME = 'Vindemiatrix';
+const SARAH_VOICE_NAME = process.env.SARAH_VOICE_NAME || 'Vindemiatrix';
 
 const SARAH_TTS_CACHE = new Map<
   string,

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import http from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
 import { WebSocketServer } from 'ws';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -288,27 +289,94 @@ export function createApp() {
       res.status(500).json({ ok: false, error: err?.message || 'Status check failed' });
     }
   });
+  const buildLiveWatchdogPayload = async () => {
+    const gv = await getGvWatchdogStatus();
+    const tmpDir = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+    const callStatePath = path.join(tmpDir, 'sarah-call-state.json');
+    const missedPngPath = path.join(tmpDir, 'missed-call-debug.png');
+    const liveStatusPngPath = path.join(tmpDir, 'gv-live-status.png');
+
+    let liveCallState: Record<string, unknown> = { status: 'IDLE' };
+    if (existsSync(callStatePath)) {
+      try {
+        liveCallState = JSON.parse(readFileSync(callStatePath, 'utf8')) || { status: 'IDLE' };
+      } catch {
+        liveCallState = { status: 'IDLE' };
+      }
+    }
+    liveCallState = {
+      ...liveCallState,
+      missedCallDebugExists: existsSync(missedPngPath),
+      missedCallDebugScreenshot: existsSync(missedPngPath) ? missedPngPath : null,
+      liveStatusScreenshot: existsSync(liveStatusPngPath) ? liveStatusPngPath : null,
+    };
+
+    const reportPath = path.resolve(repoRoot, 'server/data/ops-supervisor-latest.json');
+    if (existsSync(reportPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(reportPath, 'utf8'));
+        return {
+          ok: parsed.system_status !== 'CRITICAL',
+          line: '+14803319455',
+          platform: 'google_cloud_google_voice_native',
+          ...parsed,
+          call_state: liveCallState,
+          gv_heartbeat: {
+            online: gv.online,
+            cloudDaemonOnline: gv.cloudDaemonOnline,
+            sessionAuthenticated: gv.sessionAuthenticated,
+            activeMode: gv.activeMode,
+            heartbeatAgeMs: gv.heartbeatAgeMs,
+            totalCallsAnswered: gv.totalCallsAnswered,
+            url: gv.url,
+          },
+        };
+      } catch {}
+    }
+
+    return {
+      ok: Boolean(gv.online && gv.sessionAuthenticated),
+      line: '+14803319455',
+      platform: 'google_cloud_google_voice_native',
+      timestamp: new Date().toISOString(),
+      system_status: gv.online && gv.sessionAuthenticated ? 'HEALTHY' : 'CRITICAL',
+      diagnosis: {
+        layer: 'BROWSER',
+        root_cause: gv.online
+          ? 'Live watchdog telemetry healthy; awaiting next 60s Deep-DOM supervisor snapshot.'
+          : 'Google Voice session requires recovery.',
+        evidence: `online=${gv.online}, sessionAuthenticated=${gv.sessionAuthenticated}, activeMode=${gv.activeMode}`,
+      },
+      call_state: liveCallState,
+      gv_heartbeat: gv,
+      dispatch: [],
+      admin_escalation: { notify_human: false, alert_message: null },
+    };
+  };
+
+  app.get(['/watchdog/status', '/watchdog/status.json'], async (_req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(await buildLiveWatchdogPayload());
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Watchdog status check failed' });
+    }
+  });
+
+  app.get('/health/deep', async (_req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const payload = await buildLiveWatchdogPayload();
+      res.status(payload.system_status === 'CRITICAL' ? 503 : 200).json(payload);
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Deep health check failed' });
+    }
+  });
+
   app.get('/api/sarah/ops-status', async (_req, res) => {
     try {
-      const reportPath = path.resolve(repoRoot, 'server/data/ops-supervisor-latest.json');
-      if (existsSync(reportPath)) {
-        const parsed = JSON.parse(readFileSync(reportPath, 'utf8'));
-        return res.json(parsed);
-      }
-      const gv = await getGvWatchdogStatus();
-      return res.json({
-        timestamp: new Date().toISOString(),
-        system_status: gv.online && gv.sessionAuthenticated ? 'HEALTHY' : 'CRITICAL',
-        diagnosis: {
-          layer: 'BROWSER',
-          root_cause: gv.online
-            ? 'Live watchdog telemetry healthy; awaiting next 60s supervisor snapshot.'
-            : 'Google Voice session requires recovery.',
-          evidence: `online=${gv.online}, sessionAuthenticated=${gv.sessionAuthenticated}, activeMode=${gv.activeMode}`,
-        },
-        dispatch: [],
-        admin_escalation: { notify_human: false, alert_message: null },
-      });
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(await buildLiveWatchdogPayload());
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || 'Ops status check failed' });
     }

@@ -69,6 +69,7 @@ module.exports = {
         LOCAL_API_URL: 'http://127.0.0.1:4000',
         PUBLIC_HOST_FQDN: 'voice.iwillglobal.com',
         CDP_URL: 'http://127.0.0.1:9222',
+        WATCHDOG_PORT: '4099',
         WATCHDOG_INTERVAL_MS: '60000',
       },
     },

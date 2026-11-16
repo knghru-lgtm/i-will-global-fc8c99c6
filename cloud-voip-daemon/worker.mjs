@@ -1,9 +1,11 @@
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
+import { attachBulletproofCallPickup } from '../api/sarah-watchdog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -28,8 +30,70 @@ const API_BASES = Array.from(new Set([LOCAL_API_BASE, PUBLIC_API_BASE]));
 const BRIDGE_TOKEN = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-9455';
 const REGION = process.env.GOOGLE_CLOUD_REGION || 'us-west1';
 const INSTANCE_ID = `gcloud-${REGION}-${randomUUID().slice(0, 8)}`;
-const EXTENSION_BUILD = '2026-11-15-v15';
+const EXTENSION_BUILD = '2026-11-16-v16';
 const MAX_IDLE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const TMP_DIR = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+const CALL_STATE_FILE = path.join(TMP_DIR, 'sarah-call-state.json');
+const MISSED_CALL_DEBUG_PNG = path.join(TMP_DIR, 'missed-call-debug.png');
+
+let latestWebSettingsSummary = {
+  checkedAt: null,
+  webDeviceEnabled: false,
+  actions: [],
+};
+
+function recordCallState(update = {}) {
+  try {
+    let prev = {};
+    if (existsSync(CALL_STATE_FILE)) {
+      try {
+        prev = JSON.parse(readFileSync(CALL_STATE_FILE, 'utf8')) || {};
+      } catch {
+        prev = {};
+      }
+    }
+    const nowTs = Date.now();
+    const nowIso = new Date(nowTs).toISOString();
+    const status = String(update.status || prev.status || 'IDLE');
+    const history = Array.isArray(prev.history) ? prev.history.slice(-24) : [];
+    if (update.status) {
+      history.push({
+        status,
+        ts: nowTs,
+        isoTime: nowIso,
+        caller: update.caller ?? prev.caller ?? '',
+        details: update.details || '',
+      });
+    }
+    const nextState = {
+      ...prev,
+      ...update,
+      status,
+      timestamp: nowTs,
+      isoTime: nowIso,
+      instanceId: INSTANCE_ID,
+      build: EXTENSION_BUILD,
+      webCallingVerified: latestWebSettingsSummary.webDeviceEnabled,
+      webSettingsActions: latestWebSettingsSummary.actions,
+      lastIncomingDetectedTs:
+        status === 'INCOMING_CALL_DETECTED' ? nowTs : prev.lastIncomingDetectedTs || 0,
+      lastCallActiveTs:
+        status === 'CALL_ACTIVE' ? nowTs : prev.lastCallActiveTs || 0,
+      lastPickupFailedTs:
+        status === 'CALL_PICKUP_FAILED' ? nowTs : prev.lastPickupFailedTs || 0,
+      totalPickupFailures:
+        status === 'CALL_PICKUP_FAILED'
+          ? Number(prev.totalPickupFailures || 0) + 1
+          : Number(prev.totalPickupFailures || 0),
+      missedCallDebugScreenshot: existsSync(MISSED_CALL_DEBUG_PNG) ? MISSED_CALL_DEBUG_PNG : null,
+      history,
+    };
+    writeFileSync(CALL_STATE_FILE, JSON.stringify(nextState, null, 2), 'utf8');
+    return nextState;
+  } catch {
+    return null;
+  }
+}
 
 async function fetchDaemonApi(pathname, init = {}) {
   let lastErr = null;
@@ -252,6 +316,11 @@ async function launchResilientBrowser(execPath) {
   const usesSarahChromeWrapper = String(execPath || '').endsWith('sarah-chrome');
   const chromeArgs = [
     '--no-sandbox',
+    '--autoplay-policy=no-user-gesture-required',
+    '--use-fake-ui-for-media-stream',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
@@ -268,7 +337,6 @@ async function launchResilientBrowser(execPath) {
     '--no-first-run',
     '--no-default-browser-check',
     '--safebrowsing-disable-auto-update',
-    '--renderer-process-limit=3',
     '--disable-site-isolation-trials',
     '--js-flags=--max-old-space-size=384',
     '--disk-cache-size=33554432',
@@ -276,15 +344,10 @@ async function launchResilientBrowser(execPath) {
     '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=9222',
     ...(usesSarahChromeWrapper ? [] : [`--user-data-dir=${CHROME_PROFILE_DIR}`]),
-    '--autoplay-policy=no-user-gesture-required',
-    '--use-fake-ui-for-media-stream',
     '--alsa-output-device=pulse',
-    '--disable-background-timer-throttling',
-    '--disable-renderer-backgrounding',
-    '--disable-backgrounding-occluded-windows',
     '--disable-ipc-flooding-protection',
     '--disable-features=IsolateOrigins,site-per-process,Translate,OptimizationHints,MediaRouter,DialMediaRouteProvider,CalculateNativeWinOcclusion,AudioServiceOutOfProcess,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults',
-    '--window-size=800,600',
+    '--window-size=1280,960',
   ];
 
   const ignoredPuppeteerDefaults = [
@@ -470,6 +533,14 @@ async function verifyGoogleVoiceWebSettings(browser, effectiveUa) {
     if (result?.actions?.some((a) => a.startsWith('selected_') || a.startsWith('enabled_') || a.startsWith('disabled_'))) {
       await new Promise((r) => setTimeout(r, 2000));
     }
+    const webEnabled = Boolean(
+      result?.actions?.some((a) => a === 'enabled_web_device_ringing' || a === 'verified_web_device_ringing_on')
+    );
+    latestWebSettingsSummary = {
+      checkedAt: new Date().toISOString(),
+      webDeviceEnabled: webEnabled || !String(result?.url || '').includes('accounts.google.com'),
+      actions: Array.isArray(result?.actions) ? result.actions : [],
+    };
     console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Google Voice Settings check: ${JSON.stringify(result)}`);
   } catch (err) {
     console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Settings check skipped: ${err?.message || err}`);
@@ -511,11 +582,15 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
   const browser = await launchResilientBrowser(execPath);
   activeBrowser = browser;
   const sessionStartedAt = Date.now();
+  let bulletproofPickupHandle = null;
 
   try {
+    const context = browser.defaultBrowserContext();
+    await context.overridePermissions('https://voice.google.com', ['microphone', 'notifications']);
+
     const pages = await browser.pages();
     const page = pages[0] || (await browser.newPage());
-    await page.setViewport({ width: 800, height: 600 });
+    await page.setViewport({ width: 1280, height: 960 });
 
     const client = await page.createCDPSession();
     await client.send('Browser.grantPermissions', {
@@ -581,6 +656,91 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
       if (Number.isFinite(nx) && Number.isFinite(ny) && nx >= 0 && ny >= 0) {
         await page.mouse.click(nx, ny);
       }
+    });
+
+    // Live call-state telemetry writer -> /tmp/sarah-call-state.json
+    await page.exposeFunction('__iwgLogCallState', async (stateUpdate) => {
+      return recordCallState(stateUpdate || {});
+    });
+
+    // Multi-Vector Trusted Pickup (Method 2: page.mouse.click(x,y) + Method 3: page.keyboard.press('Enter'))
+    // Safely verifies the Answer button is still present before clicking/pressing Enter so an already-answered
+    // call can NEVER accidentally hit the newly rendered End Call button!
+    let pickupLock = false;
+    await page.exposeFunction('__iwgMultiVectorPickup', async (fallbackX, fallbackY) => {
+      if (pickupLock) return { skipped: true };
+      pickupLock = true;
+      try {
+        await page.bringToFront().catch(() => { });
+        const checkAnswerTarget = async () =>
+          await page
+            .evaluate(() => {
+              const ANSWER_SEL = [
+                'button[gv-test-id="in-call-pickup-call"]',
+                'button.pickup-call-button',
+                'gv-incoming-call button[gv-call-chip]:not(:has(.decline-icon))',
+                'button[aria-label*="Answer" i]',
+                '[data-test-id*="answer" i]',
+                '[gv-test-id*="answer" i]',
+                'button[aria-label*="Accept" i]',
+                '[aria-label*="Pick up" i]',
+              ].join(', ');
+              const candidates = Array.from(document.querySelectorAll(ANSWER_SEL));
+              for (const el of candidates) {
+                if (el.disabled || el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true') continue;
+                const aria = String(el.getAttribute('aria-label') || '');
+                if (/decline|reject|ignore|hang\s*up|end\s*call|dismiss/i.test(aria)) continue;
+                const style = window.getComputedStyle(el);
+                if (!style || style.display === 'none' || style.visibility === 'hidden') continue;
+                el.scrollIntoView?.({ block: 'center', inline: 'center' });
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  el.focus?.();
+                  return {
+                    present: true,
+                    cx: Math.round(rect.left + rect.width / 2),
+                    cy: Math.round(rect.top + rect.height / 2),
+                  };
+                }
+              }
+              return { present: false, cx: 0, cy: 0 };
+            })
+            .catch(() => ({ present: false, cx: Number(fallbackX) || 0, cy: Number(fallbackY) || 0 }));
+
+        // Vector 2: Trusted Puppeteer mouse click on Answer button bounding-box center
+        const t1 = await checkAnswerTarget();
+        let mouseClicked = false;
+        if (t1.present && t1.cx > 0 && t1.cy > 0) {
+          await page.mouse.click(t1.cx, t1.cy);
+          mouseClicked = true;
+        }
+
+        // Vector 3: Trusted Puppeteer keyboard Enter shortcut fallback when Answer is still focused/present
+        await new Promise((r) => setTimeout(r, 45));
+        const t2 = await checkAnswerTarget();
+        let enterPressed = false;
+        if (t2.present) {
+          await page.keyboard.press('Enter');
+          enterPressed = true;
+        }
+        return { ok: true, mouseClicked, enterPressed };
+      } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+      } finally {
+        pickupLock = false;
+      }
+    });
+
+    // Forensic screenshot & state capture whenever a call fails to transition to active within 2,000ms
+    await page.exposeFunction('__iwgCaptureMissedCallDebug', async (failureInfo) => {
+      try {
+        await page.screenshot({ path: MISSED_CALL_DEBUG_PNG, fullPage: true });
+      } catch { }
+      return recordCallState({
+        status: 'CALL_PICKUP_FAILED',
+        ...(failureInfo || {}),
+        missedCallDebugScreenshot: MISSED_CALL_DEBUG_PNG,
+      });
     });
 
     const cdpCookies = normalizeCookiesForCdp(cookies);
@@ -680,13 +840,38 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
         writeFileSync(vmSessionLiveMarker, new Date().toISOString(), 'utf8');
       } catch { }
 
-      // Verify Google Voice Web ringing ("Prefer Wi-Fi and mobile data" + Web ON + Call Screening OFF)
+      // Attach 700ms Bulletproof 3-Vector Call Pickup + 3-Min Settings Auditor + Gemini Auto-Patcher
+      bulletproofPickupHandle = await attachBulletproofCallPickup(page, context, {
+        userAgent: effectiveUa,
+      });
+
+      // Verify Google Voice Web ringing ("Prefer Wi-Fi and mobile data" + Web ON + Call Screening OFF + DND OFF)
       await verifyGoogleVoiceWebSettings(browser, effectiveUa);
       await page.bringToFront().catch(() => { });
+      // Dismiss any top promotional banners ("Try one-click dialing") so full call sidebar height stays unobstructed
+      await page
+        .evaluate(() => {
+          const banners = document.querySelectorAll('gv-tel-registration-banner, gv-app-banner');
+          for (const b of banners) {
+            const closeBtn = b.querySelector('button[aria-label*="Close" i], button[aria-label*="Dismiss" i], button:last-of-type');
+            if (closeBtn && /close|dismiss/i.test(`${closeBtn.getAttribute('aria-label') || ''} ${closeBtn.textContent || ''}`)) {
+              closeBtn.click();
+            }
+          }
+        })
+        .catch(() => { });
       await page.mouse.click(80, 80).catch(() => { });
       await page.evaluate(() => {
         window.postMessage({ __iwg_webrtc__: true, type: 'IWG_RESUME_AUDIO' }, '*');
       }).catch(() => { });
+
+      recordCallState({
+        status: 'IDLE',
+        authenticatedOnBoot: !page.url().includes('accounts.google.com'),
+        url: page.url(),
+        title: readyTitle,
+        details: 'Boot verified: logged into Google Voice /u/0/calls with Web calling active and 1280x960 viewport.',
+      });
 
       try {
         const all = await client.send('Storage.getCookies').catch(() => client.send('Network.getAllCookies'));
@@ -728,8 +913,15 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
           rmSync(nativeVmAuthMarker, { force: true });
           rmSync(vmSessionLiveMarker, { force: true });
         } catch { }
+        recordCallState({
+          status: 'UNAUTHENTICATED',
+          authenticatedOnBoot: false,
+          url: currentUrl,
+          title,
+          details: 'Session redirected to accounts.google.com or unauthenticated.',
+        });
         console.warn(
-          `[Sarah Cloud Daemon ${INSTANCE_ID}] Session unauthenticated at ${currentUrl} — reload Chrome extension (v3.3.0) or run ./scripts/vm-gv-direct-login.sh once on VM.`
+          `[Sarah Cloud Daemon ${INSTANCE_ID}] Session unauthenticated at ${currentUrl} — run ./scripts/vm-gv-direct-login.sh once on VM.`
         );
         await reportDaemonHeartbeat({
           url: currentUrl,
@@ -882,6 +1074,9 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
     }
     return { reason: 'browser_disconnected' };
   } finally {
+    try {
+      bulletproofPickupHandle?.stop?.();
+    } catch { }
     const pid = browser.process()?.pid;
     try {
       await Promise.race([
