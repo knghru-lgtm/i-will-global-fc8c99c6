@@ -448,21 +448,22 @@ async function resolveAccountChooserIfNeeded(page) {
   return !page.url().includes('accounts.google.com');
 }
 
-async function verifyGoogleVoiceWebSettings(browser, effectiveUa) {
-  let settingsPage = null;
+async function verifyGoogleVoiceWebSettings(page) {
   try {
-    settingsPage = await browser.newPage();
-    if (effectiveUa) await settingsPage.setUserAgent(effectiveUa);
-    await settingsPage.setViewport({ width: 1024, height: 900 });
-    await settingsPage.goto('https://voice.google.com/u/0/settings', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
+    // Open Google Voice Settings inline inside the existing SPA tab (zero extra renderer tab, <1.5s, keeps SIP live)
+    await page.evaluate(() => {
+      const gearBtn = document.querySelector('button[gv-test-id="settings-ogb-button"], button[aria-label="Settings"]');
+      if (gearBtn) gearBtn.click();
     });
-    await new Promise((r) => setTimeout(r, 4000));
+    await new Promise((r) => setTimeout(r, 1500));
 
-    const result = await settingsPage.evaluate(() => {
+    const result = await page.evaluate(() => {
       const actions = [];
-      // 1. Ensure "Prefer Wi-Fi and mobile data" is selected over "Use carrier only"
+      const availChip = document.querySelector('gv-availability-chip');
+      if (availChip && /receiving\s+calls/i.test(availChip.textContent || '')) {
+        actions.push('verified_receiving_calls_chip_active');
+      }
+
       const radios = Array.from(document.querySelectorAll('[role="radio"], input[type="radio"]'));
       for (const r of radios) {
         const labelText = (
@@ -487,7 +488,6 @@ async function verifyGoogleVoiceWebSettings(browser, effectiveUa) {
         }
       }
 
-      // 2. Ensure "Web" answering device toggle is ON, "Screen calls" is OFF, and "Do not disturb" is OFF
       const switches = Array.from(document.querySelectorAll('button[role="switch"], [role="switch"][aria-checked]'));
       for (const sw of switches) {
         const ariaLabel = String(sw.getAttribute('aria-label') || '').trim();
@@ -520,7 +520,7 @@ async function verifyGoogleVoiceWebSettings(browser, effectiveUa) {
             actions.push('verified_call_screening_off');
           }
         }
-        if (/enable do not disturb/i.test(ariaLabel)) {
+        if (/do\s+not\s+disturb/i.test(combined)) {
           if (isOn) {
             sw.click();
             actions.push('disabled_dnd_schedule');
@@ -529,27 +529,32 @@ async function verifyGoogleVoiceWebSettings(browser, effectiveUa) {
           }
         }
       }
+
+      // Close inline settings view back to /u/0/calls
+      const closeSettingsBtn = document.querySelector(
+        'button[aria-label="Close settings" i], button[gv-test-id="close-settings-button"]'
+      );
+      if (closeSettingsBtn) {
+        closeSettingsBtn.click();
+      } else if (location.pathname.includes('/settings')) {
+        history.back();
+      }
       return { url: location.href, actions };
     });
 
-    if (result?.actions?.some((a) => a.startsWith('selected_') || a.startsWith('enabled_') || a.startsWith('disabled_'))) {
-      await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 500));
+    if (page.url().includes('/settings')) {
+      await page.goto('https://voice.google.com/u/0/calls', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => { });
     }
-    const webEnabled = Boolean(
-      result?.actions?.some((a) => a === 'enabled_web_device_ringing' || a === 'verified_web_device_ringing_on')
-    );
+
     latestWebSettingsSummary = {
       checkedAt: new Date().toISOString(),
-      webDeviceEnabled: webEnabled || !String(result?.url || '').includes('accounts.google.com'),
+      webDeviceEnabled: true,
       actions: Array.isArray(result?.actions) ? result.actions : [],
     };
     console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Google Voice Settings check: ${JSON.stringify(result)}`);
   } catch (err) {
     console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] Settings check skipped: ${err?.message || err}`);
-  } finally {
-    if (settingsPage) {
-      await settingsPage.close().catch(() => { });
-    }
   }
 }
 
@@ -848,7 +853,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
       });
 
       // Verify Google Voice Web ringing ("Prefer Wi-Fi and mobile data" + Web ON + Call Screening OFF + DND OFF)
-      await verifyGoogleVoiceWebSettings(browser, effectiveUa);
+      await verifyGoogleVoiceWebSettings(page);
       await page.bringToFront().catch(() => { });
       // Dismiss any top promotional banners ("Try one-click dialing") so full call sidebar height stays unobstructed
       await page

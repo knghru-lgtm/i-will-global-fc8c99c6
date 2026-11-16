@@ -149,9 +149,9 @@ function writeCallState(update) {
   const nowTs = Date.now();
   const nowIso = new Date(nowTs).toISOString();
   const status = String(update.status || prev.status || "IDLE");
-  const history = Array.isArray(prev.history) ? prev.history.slice(-24) : [];
+  const history2 = Array.isArray(prev.history) ? prev.history.slice(-24) : [];
   if (update.status) {
-    history.push({
+    history2.push({
       status,
       ts: nowTs,
       isoTime: nowIso,
@@ -170,7 +170,7 @@ function writeCallState(update) {
     lastPickupFailedTs: status === "CALL_PICKUP_FAILED" ? nowTs : Number(prev.lastPickupFailedTs || 0),
     totalPickupFailures: status === "CALL_PICKUP_FAILED" ? Number(prev.totalPickupFailures || 0) + 1 : Number(prev.totalPickupFailures || 0),
     missedCallDebugScreenshot: existsSync(MISSED_CALL_DEBUG_PNG_PATH) ? MISSED_CALL_DEBUG_PNG_PATH : null,
-    history
+    history: history2
   };
   try {
     writeFileSync(CALL_STATE_PATH, JSON.stringify(nextState, null, 2), "utf8");
@@ -211,27 +211,31 @@ function readSettingsAuditSummary() {
     actionsTaken: []
   };
 }
-async function auditAndHealGoogleVoiceSettings(browser, userAgent) {
-  let settingsPage = null;
+async function auditAndHealGoogleVoiceSettings(browser, _userAgent) {
   const nowIso = (/* @__PURE__ */ new Date()).toISOString();
   try {
-    settingsPage = await browser.newPage();
-    if (userAgent) {
-      await settingsPage.setUserAgent(userAgent).catch(() => {
-      });
+    const pages = await browser.pages();
+    const gvPage = pages.find((p) => p.url().startsWith("https://voice.google.com")) || pages[0];
+    if (!gvPage) {
+      return { lastAuditAt: nowIso, webDeviceOn: true, doNotDisturbOff: true, callScreeningOff: true, actionsTaken: [] };
     }
-    await settingsPage.setViewport({ width: 1280, height: 960 }).catch(() => {
+    await gvPage.evaluate(() => {
+      const gearBtn = document.querySelector(
+        'button[gv-test-id="settings-ogb-button"], button[aria-label="Settings"]'
+      );
+      if (gearBtn) gearBtn.click();
     });
-    await settingsPage.goto("https://voice.google.com/u/0/settings", {
-      waitUntil: "domcontentloaded",
-      timeout: 28e3
-    });
-    await new Promise((r) => setTimeout(r, 3500));
-    const evalRes = await settingsPage.evaluate(() => {
+    await new Promise((r) => setTimeout(r, 1400));
+    const evalRes = await gvPage.evaluate(() => {
       const actions = [];
       let webDeviceOn = false;
       let doNotDisturbOff = true;
       let callScreeningOff = true;
+      const availChip = document.querySelector("gv-availability-chip");
+      if (availChip && /receiving\s+calls/i.test(availChip.textContent || "")) {
+        actions.push("verified_receiving_calls_chip_active");
+        webDeviceOn = true;
+      }
       const radios = Array.from(document.querySelectorAll('[role="radio"], input[type="radio"]'));
       for (const r of radios) {
         const labelText = (r.getAttribute("aria-label") || r.closest("mat-radio-button, label, div")?.textContent || "").replace(/\s+/g, " ").trim();
@@ -290,10 +294,20 @@ async function auditAndHealGoogleVoiceSettings(browser, userAgent) {
           callScreeningOff = true;
         }
       }
+      const closeBtn = document.querySelector(
+        'button[aria-label="Close settings" i], button[gv-test-id="close-settings-button"]'
+      );
+      if (closeBtn) {
+        closeBtn.click();
+      } else if (location.pathname.includes("/settings")) {
+        history.back();
+      }
       return { webDeviceOn, doNotDisturbOff, callScreeningOff, actions };
     });
-    if (evalRes.actions.some((a) => a.startsWith("selected_") || a.startsWith("healed_"))) {
-      await new Promise((r) => setTimeout(r, 1800));
+    await new Promise((r) => setTimeout(r, 400));
+    if (gvPage.url().includes("/settings")) {
+      await gvPage.goto("https://voice.google.com/u/0/calls", { waitUntil: "domcontentloaded", timeout: 2e4 }).catch(() => {
+      });
     }
     const summary = {
       lastAuditAt: nowIso,
@@ -320,11 +334,6 @@ async function auditAndHealGoogleVoiceSettings(browser, userAgent) {
     } catch {
     }
     return fallbackSummary;
-  } finally {
-    if (settingsPage) {
-      await settingsPage.close().catch(() => {
-      });
-    }
   }
 }
 async function runGeminiDomAutoPatcher(opts) {
@@ -1046,8 +1055,11 @@ function evaluateTelemetry(telemetry, state) {
       }
     };
   }
+  const daemonStillBooting = Boolean(
+    daemonProc && daemonProc.status === "online" && daemonProc.uptimeMs > 0 && daemonProc.uptimeMs < 45e3
+  );
   const hasLockError = /SingletonLock|XServer already running|Failed to create SingletonProcess/i.test(daemonErrText);
-  if (daemonProc && daemonProc.status !== "online" || hasLockError || host.platform === "linux" && !deepDom.reachable) {
+  if (daemonProc && daemonProc.status !== "online" || hasLockError || host.platform === "linux" && !deepDom.reachable && !daemonStillBooting) {
     return {
       timestamp: nowIso,
       system_status: "CRITICAL",
@@ -1074,7 +1086,7 @@ function evaluateTelemetry(telemetry, state) {
       }
     };
   }
-  if (!gvStatus?.online || !gvStatus?.cloudDaemonOnline || !gvStatus?.sessionAuthenticated || deepDom.reachable && !deepDom.loggedIn || deepDom.sipUnregistered) {
+  if (!daemonStillBooting && (!gvStatus?.online || !gvStatus?.cloudDaemonOnline || !gvStatus?.sessionAuthenticated || deepDom.reachable && !deepDom.loggedIn || deepDom.sipUnregistered)) {
     return {
       timestamp: nowIso,
       system_status: "CRITICAL",

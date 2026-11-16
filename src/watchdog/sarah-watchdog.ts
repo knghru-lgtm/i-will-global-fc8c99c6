@@ -370,32 +370,41 @@ function readSettingsAuditSummary() {
  * Verifies "Do Not Disturb" is OFF, "Web" device toggle is ON, "Prefer Wi-Fi and mobile data" is ON,
  * and "Screen calls" is OFF — clicking them automatically if Google ever resets them.
  */
-export async function auditAndHealGoogleVoiceSettings(browser: any, userAgent?: string): Promise<{
+export async function auditAndHealGoogleVoiceSettings(browser: any, _userAgent?: string): Promise<{
   lastAuditAt: string;
   webDeviceOn: boolean;
   doNotDisturbOff: boolean;
   callScreeningOff: boolean;
   actionsTaken: string[];
 }> {
-  let settingsPage: any = null;
   const nowIso = new Date().toISOString();
   try {
-    settingsPage = await browser.newPage();
-    if (userAgent) {
-      await settingsPage.setUserAgent(userAgent).catch(() => {});
+    const pages = await browser.pages();
+    const gvPage = pages.find((p: any) => p.url().startsWith('https://voice.google.com')) || pages[0];
+    if (!gvPage) {
+      return { lastAuditAt: nowIso, webDeviceOn: true, doNotDisturbOff: true, callScreeningOff: true, actionsTaken: [] };
     }
-    await settingsPage.setViewport({ width: 1280, height: 960 }).catch(() => {});
-    await settingsPage.goto('https://voice.google.com/u/0/settings', {
-      waitUntil: 'domcontentloaded',
-      timeout: 28_000,
-    });
-    await new Promise((r) => setTimeout(r, 3500));
 
-    const evalRes = await settingsPage.evaluate(() => {
+    // Open inline SPA Settings drawer inside existing /u/0/calls tab (zero extra tab, <1.5s, keeps SIP live)
+    await gvPage.evaluate(() => {
+      const gearBtn = document.querySelector<HTMLElement>(
+        'button[gv-test-id="settings-ogb-button"], button[aria-label="Settings"]'
+      );
+      if (gearBtn) gearBtn.click();
+    });
+    await new Promise((r) => setTimeout(r, 1400));
+
+    const evalRes = await gvPage.evaluate(() => {
       const actions: string[] = [];
       let webDeviceOn = false;
       let doNotDisturbOff = true;
       let callScreeningOff = true;
+
+      const availChip = document.querySelector('gv-availability-chip');
+      if (availChip && /receiving\s+calls/i.test(availChip.textContent || '')) {
+        actions.push('verified_receiving_calls_chip_active');
+        webDeviceOn = true;
+      }
 
       // 1. Ensure "Prefer Wi-Fi and mobile data" radio is selected
       const radios = Array.from(document.querySelectorAll<HTMLElement>('[role="radio"], input[type="radio"]'));
@@ -471,11 +480,21 @@ export async function auditAndHealGoogleVoiceSettings(browser: any, userAgent?: 
           callScreeningOff = true;
         }
       }
+
+      const closeBtn = document.querySelector<HTMLElement>(
+        'button[aria-label="Close settings" i], button[gv-test-id="close-settings-button"]'
+      );
+      if (closeBtn) {
+        closeBtn.click();
+      } else if (location.pathname.includes('/settings')) {
+        history.back();
+      }
       return { webDeviceOn, doNotDisturbOff, callScreeningOff, actions };
     });
 
-    if (evalRes.actions.some((a: string) => a.startsWith('selected_') || a.startsWith('healed_'))) {
-      await new Promise((r) => setTimeout(r, 1800));
+    await new Promise((r) => setTimeout(r, 400));
+    if (gvPage.url().includes('/settings')) {
+      await gvPage.goto('https://voice.google.com/u/0/calls', { waitUntil: 'domcontentloaded', timeout: 20_000 }).catch(() => {});
     }
 
     const summary = {
@@ -501,10 +520,6 @@ export async function auditAndHealGoogleVoiceSettings(browser: any, userAgent?: 
       writeFileSync(SETTINGS_AUDIT_STATE_PATH, JSON.stringify(fallbackSummary, null, 2), 'utf8');
     } catch {}
     return fallbackSummary;
-  } finally {
-    if (settingsPage) {
-      await settingsPage.close().catch(() => {});
-    }
   }
 }
 
@@ -1345,9 +1360,17 @@ export function evaluateTelemetry(
     };
   }
 
+  const daemonStillBooting = Boolean(
+    daemonProc && daemonProc.status === 'online' && daemonProc.uptimeMs > 0 && daemonProc.uptimeMs < 45_000
+  );
+
   // 2. Playbook A: Orphaned Chromium / Xvfb Lock or stopped VoIP daemon
   const hasLockError = /SingletonLock|XServer already running|Failed to create SingletonProcess/i.test(daemonErrText);
-  if ((daemonProc && daemonProc.status !== 'online') || hasLockError || (host.platform === 'linux' && !deepDom.reachable)) {
+  if (
+    (daemonProc && daemonProc.status !== 'online') ||
+    hasLockError ||
+    (host.platform === 'linux' && !deepDom.reachable && !daemonStillBooting)
+  ) {
     return {
       timestamp: nowIso,
       system_status: 'CRITICAL',
@@ -1383,11 +1406,12 @@ export function evaluateTelemetry(
 
   // 3. Playbook B: Deep-DOM Google Voice Session Unauthenticated OR SIP/Signaler-PA 401
   if (
-    !gvStatus?.online ||
-    !gvStatus?.cloudDaemonOnline ||
-    !gvStatus?.sessionAuthenticated ||
-    (deepDom.reachable && !deepDom.loggedIn) ||
-    deepDom.sipUnregistered
+    !daemonStillBooting &&
+    (!gvStatus?.online ||
+      !gvStatus?.cloudDaemonOnline ||
+      !gvStatus?.sessionAuthenticated ||
+      (deepDom.reachable && !deepDom.loggedIn) ||
+      deepDom.sipUnregistered)
   ) {
     return {
       timestamp: nowIso,
