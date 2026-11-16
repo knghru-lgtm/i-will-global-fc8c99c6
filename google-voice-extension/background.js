@@ -1,6 +1,6 @@
 const EXTENSION_BUILD = '2026-11-15-v15';
-// Cloud-first pointing strictly to Google Cloud VM (https://voice.iwillglobal.com) + IPv4 local fallback
-const API_BASES = ['https://voice.iwillglobal.com', 'http://127.0.0.1:4000'];
+// Cloud-first pointing strictly to Google Cloud VM (voice.iwillglobal.com + static GCE IP 35.202.66.108 + IPv4 local fallback)
+const API_BASES = ['https://voice.iwillglobal.com', 'http://35.202.66.108', 'http://127.0.0.1:4000'];
 const BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 let hasAutoOpenedGvTab = false;
 let lastCookieSyncTs = 0;
@@ -70,10 +70,9 @@ function syncGoogleVoiceCookiesToCloud(force = false) {
             });
             clearTimeout(timer);
             if (res.ok) {
-              if (base.startsWith('https://')) {
-                lastCookieSyncTs = Date.now();
-              }
+              lastCookieSyncTs = Date.now();
               console.log(`[IWG Cloud Cookie Sync] Synced ${googleCookies.length} Google Voice cookies -> ${base}`);
+              break;
             }
           } catch { }
         }

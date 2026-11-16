@@ -9,6 +9,9 @@
 
   const EXTENSION_BUILD = '2026-11-15-v15';
   const SELECTORS = [
+    'button[gv-test-id="in-call-pickup-call"]',
+    'button.pickup-call-button',
+    'gv-incoming-call button[gv-call-chip]:not(:has(.decline-icon))',
     'button[aria-label*="Answer" i]',
     'button[aria-label*="Accept" i]',
     'button[data-call-action="answer"]',

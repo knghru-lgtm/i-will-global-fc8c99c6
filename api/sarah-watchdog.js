@@ -22,7 +22,49 @@ var LATEST_REPORT_PATH = path.join(DATA_DIR, "ops-supervisor-latest.json");
 var LOCAL_API_BASE = process.env.LOCAL_API_URL || "http://127.0.0.1:4000";
 var PUBLIC_FQDN = process.env.PUBLIC_HOST_FQDN || "voice.iwillglobal.com";
 var CDP_URL = process.env.CDP_URL || "http://127.0.0.1:9222";
+var BRIDGE_TOKEN = process.env.GV_BRIDGE_TOKEN || "iwg-sarah-cloud-bridge-v10-9455";
 var WATCHDOG_INTERVAL_MS = Number(process.env.WATCHDOG_INTERVAL_MS || 6e4);
+async function inspectLiveCdpSipRegistration() {
+  try {
+    const requireDaemon = createRequire(path.join(REPO_ROOT, "cloud-voip-daemon", "package.json"));
+    const puppeteer = requireDaemon("puppeteer-core");
+    const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
+    const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl });
+    try {
+      const pages = await browser.pages();
+      const gvPage = pages.find((p) => p.url().startsWith("https://voice.google.com")) || pages[0];
+      if (!gvPage) {
+        return { reachable: true, hasVoipErrorBanner: false, lastSignalerStatus: 0, sipUnregistered: false };
+      }
+      const res = await gvPage.evaluate(() => {
+        const bodyTxt = String(document.body?.innerText || "");
+        const hasVoipErrorBanner = /unable to make or receive calls over the internet/i.test(bodyTxt);
+        const entries = performance.getEntriesByType("resource") || [];
+        let lastSignalerStatus = 0;
+        let recentVoice401 = false;
+        const cutoff = Math.max(0, performance.now() - 9e4);
+        for (const r of entries) {
+          if (r.startTime < cutoff) continue;
+          const u = String(r.name || "");
+          const st = Number(r.responseStatus || 0);
+          if (u.includes("signaler-pa.clients6.google.com") && st) {
+            lastSignalerStatus = st;
+          }
+          if (u.includes("/_/jserror") && /sipregisterinfo|voiceclient.*401/i.test(u)) {
+            recentVoice401 = true;
+          }
+        }
+        const sipUnregistered = hasVoipErrorBanner || lastSignalerStatus === 401 || lastSignalerStatus === 403 || recentVoice401 && lastSignalerStatus !== 200;
+        return { reachable: true, hasVoipErrorBanner, lastSignalerStatus, sipUnregistered };
+      });
+      return res;
+    } finally {
+      await browser.disconnect();
+    }
+  } catch {
+    return { reachable: false, hasVoipErrorBanner: false, lastSignalerStatus: 0, sipUnregistered: false };
+  }
+}
 function readTailLines(filePath, maxLines = 30) {
   try {
     if (!existsSync(filePath)) return [];
@@ -88,7 +130,7 @@ function saveState(st) {
 }
 async function collectSystemTelemetry() {
   const home = os.homedir();
-  const [pm2Raw, dfRootRaw, dfShmRaw, pulseSinksRaw, pulseMuteRaw, caddyHttpsRaw, localHealth, gvStatus] = await Promise.all([
+  const [pm2Raw, dfRootRaw, dfShmRaw, pulseSinksRaw, pulseMuteRaw, caddyHttpsRaw, localHealth, gvStatus, cdpSip] = await Promise.all([
     runLinuxShell("pm2 jlist"),
     runLinuxShell("df -P / | tail -1"),
     runLinuxShell("df -P /dev/shm 2>/dev/null | tail -1"),
@@ -98,7 +140,8 @@ async function collectSystemTelemetry() {
       `curl -fsS -k -o /dev/null -w "%{http_code}" --max-time 5 --resolve ${PUBLIC_FQDN}:443:127.0.0.1 https://${PUBLIC_FQDN}/health 2>/dev/null || echo 0`
     ),
     fetch(`${LOCAL_API_BASE}/health`).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) })).catch((e) => ({ status: 0, body: null, error: e?.message || "unreachable" })),
-    fetch(`${LOCAL_API_BASE}/api/sarah/gv-status`).then((r) => r.json()).catch(() => null)
+    fetch(`${LOCAL_API_BASE}/api/sarah/gv-status`).then((r) => r.json()).catch(() => null),
+    inspectLiveCdpSipRegistration()
   ]);
   let pm2 = [];
   try {
@@ -148,6 +191,7 @@ async function collectSystemTelemetry() {
     pm2,
     localHealth,
     gvStatus,
+    cdpSip,
     errorLogs: {
       daemon: readTailLines(path.join(home, ".pm2", "logs", "cloud-voip-daemon-error.log"), 30),
       server: readTailLines(path.join(home, ".pm2", "logs", "sarah-server-error.log"), 30)
@@ -211,28 +255,29 @@ function evaluateTelemetry(telemetry, state) {
       }
     };
   }
-  if (!gvStatus?.online || !gvStatus?.cloudDaemonOnline || !gvStatus?.sessionAuthenticated) {
+  const cdpSip = telemetry.cdpSip;
+  if (!gvStatus?.online || !gvStatus?.cloudDaemonOnline || !gvStatus?.sessionAuthenticated || cdpSip?.sipUnregistered) {
     return {
       timestamp: nowIso,
       system_status: "CRITICAL",
       diagnosis: {
         layer: "BROWSER",
-        root_cause: "Playbook B triggered: Google Voice (+14803319455) tab is unauthenticated or heartbeat is stale.",
-        evidence: `online=${gvStatus?.online}, sessionAuthenticated=${gvStatus?.sessionAuthenticated}, url=${gvStatus?.url || "unknown"}`
+        root_cause: cdpSip?.sipUnregistered ? "Playbook B triggered: Google Voice SIP/Signaler-PA returned 401 or displayed internet-calling error banner." : "Playbook B triggered: Google Voice (+14803319455) tab is unauthenticated or heartbeat is stale.",
+        evidence: `online=${gvStatus?.online}, sessionAuthenticated=${gvStatus?.sessionAuthenticated}, voipBannerError=${cdpSip?.hasVoipErrorBanner}, signalerStatus=${cdpSip?.lastSignalerStatus}, url=${gvStatus?.url || "unknown"}`
       },
       dispatch: [
         {
           target_agent: "BROWSER_AGENT",
           priority: "P0_IMMEDIATE",
-          task_summary: "Reload Google Voice /u/0/calls via CDP :9222, dismiss blocking overlays, and verify Ring-1 Answer observer.",
+          task_summary: "Hot-inject fresh Google cookie vault via CDP, refresh grandcentral SSO on /u/0/calls, and verify signaler-pa 200 OK.",
           exact_commands_or_actions: ["PLAYBOOK_B_RELOAD_AND_VERIFY_DOM"],
-          verification_check: "gv-status reports online=true, sessionAuthenticated=true, url=https://voice.google.com/u/0/calls",
+          verification_check: "gv-status online=true AND signaler-pa.clients6.google.com returns HTTP 200 with zero VoIP error banner",
           timeout_seconds: 60
         }
       ],
       admin_escalation: {
         notify_human: state.consecutiveFailures >= 2,
-        alert_message: state.consecutiveFailures >= 2 ? "P0 AUTH ALERT: Google Voice (+14803319455) requires cookie sync or VNC sign-in (./scripts/vm-gv-direct-login.sh)." : null
+        alert_message: state.consecutiveFailures >= 2 ? "P0 AUTH ALERT: Google Voice (+14803319455) SIP/Signaler 401 requires fresh cookie sync or VNC sign-in (./scripts/vm-gv-direct-login.sh)." : null
       }
     };
   }
@@ -353,7 +398,7 @@ function evaluateTelemetry(telemetry, state) {
     diagnosis: {
       layer: "BROWSER",
       root_cause: "All 6 supervision layers (Linux/SHM/Locks, PM2 v22, PulseAudio 48kHz, Chromium Google Voice Ring-1 DOM, Caddy HTTPS, and CRM DB) are nominal.",
-      evidence: `online=true, sessionAuthenticated=true, activeMode=${gvStatus.activeMode}, heartbeatAgeMs=${gvStatus.heartbeatAgeMs}ms, daemonMem=${daemonProc?.memMB ?? 0}MB, serverMem=${serverProc?.memMB ?? 0}MB, hostMem=${host.memUsedPct}%, disk=${host.diskUsePct}%, shm=${host.shmUsePct}%, caddyHttps=${host.caddyHttpsCode || 200}, phoenix=${phoenix.weekday} ${phoenix.hhmm} MST`
+      evidence: `online=true, sessionAuthenticated=true, signalerHttp=${telemetry.cdpSip?.lastSignalerStatus || 200}, voipBannerError=${Boolean(telemetry.cdpSip?.hasVoipErrorBanner)}, activeMode=${gvStatus.activeMode}, heartbeatAgeMs=${gvStatus.heartbeatAgeMs}ms, daemonMem=${daemonProc?.memMB ?? 0}MB, serverMem=${serverProc?.memMB ?? 0}MB, hostMem=${host.memUsedPct}%, disk=${host.diskUsePct}%, shm=${host.shmUsePct}%, caddyHttps=${host.caddyHttpsCode || 200}, phoenix=${phoenix.weekday} ${phoenix.hhmm} MST`
     },
     dispatch: [],
     admin_escalation: { notify_human: false, alert_message: null }
@@ -399,11 +444,39 @@ async function executeDispatchInstruction(item) {
           const gvPage = pages.find((p) => p.url().startsWith("https://voice.google.com")) || pages[0];
           if (gvPage) {
             if (act === "PLAYBOOK_B_RELOAD_AND_VERIFY_DOM" || act === "PLAYBOOK_D_RELOAD_GV_TAB") {
-              await gvPage.goto("https://voice.google.com/u/0/calls", {
-                waitUntil: "domcontentloaded",
-                timeout: 35e3
+              try {
+                const vaultRes = await fetch(`${LOCAL_API_BASE}/api/sarah/gv-session-sync`, {
+                  headers: { "x-iwg-bridge-token": BRIDGE_TOKEN }
+                }).then((r) => r.ok ? r.json() : null);
+                if (Array.isArray(vaultRes?.cookies) && vaultRes.cookies.length > 0) {
+                  const cdp = await gvPage.createCDPSession();
+                  for (const c of vaultRes.cookies) {
+                    if (!c?.name || typeof c.value !== "string" || !c.domain) continue;
+                    const rawDom = String(c.domain);
+                    const host = rawDom.replace(/^\.+/, "");
+                    const isHostOnly = String(c.name).startsWith("__Host-") || c.hostOnly === true || !rawDom.startsWith(".");
+                    const ck = {
+                      name: String(c.name),
+                      value: String(c.value),
+                      path: String(c.name).startsWith("__Host-") ? "/" : String(c.path || "/"),
+                      secure: Boolean(c.secure) || String(c.name).startsWith("__Secure-") || String(c.name).startsWith("__Host-"),
+                      httpOnly: Boolean(c.httpOnly)
+                    };
+                    if (isHostOnly) ck.url = `https://${host}${ck.path}`;
+                    else ck.domain = rawDom;
+                    await cdp.send("Network.setCookie", ck).catch(() => {
+                    });
+                  }
+                }
+              } catch {
+              }
+              await gvPage.evaluate(() => performance.clearResourceTimings()).catch(() => {
               });
-              await new Promise((r) => setTimeout(r, 2500));
+              await gvPage.goto(
+                act === "PLAYBOOK_B_RELOAD_AND_VERIFY_DOM" ? "https://accounts.google.com/ServiceLogin?service=grandcentral&passive=true&continue=https%3A%2F%2Fvoice.google.com%2Fu%2F0%2Fcalls" : "https://voice.google.com/u/0/calls",
+                { waitUntil: "domcontentloaded", timeout: 35e3 }
+              );
+              await new Promise((r) => setTimeout(r, 4e3));
             }
             await gvPage.evaluate(() => {
               const closeBtns = Array.from(

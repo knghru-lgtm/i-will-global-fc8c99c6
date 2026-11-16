@@ -708,6 +708,11 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
     }
 
     let lastRefreshSave = Date.now();
+    let lastHotVaultCheck = Date.now();
+    let activeAppliedVaultStamp = existsSync(lastVaultStampFile)
+      ? readFileSync(lastVaultStampFile, 'utf8').trim()
+      : String(vaultUpdatedAt || '');
+
     while (!shuttingDown && browser.connected && !page.isClosed()) {
       const currentUrl = page.url();
       const title = await page.title().catch(() => '');
@@ -735,18 +740,123 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
         return { reason: 'signed_out' };
       }
 
-      // Ensure controller stays attached across SPA route updates & preserve live call telemetry
+      // Hot-sync any newly rotated vault cookies (__Secure-1PSIDTS / __Secure-3PSIDTS) in memory without restarting Chrome!
+      if (Date.now() - lastHotVaultCheck > 16000) {
+        lastHotVaultCheck = Date.now();
+        try {
+          const latestVault = await fetchCloudCookieVault();
+          if (
+            latestVault.updatedAt &&
+            latestVault.updatedAt !== activeAppliedVaultStamp &&
+            latestVault.cookies.length > 0
+          ) {
+            const hotCookies = normalizeCookiesForCdp(latestVault.cookies);
+            for (const ck of hotCookies) {
+              await client.send('Network.setCookie', ck).catch(() => { });
+            }
+            activeAppliedVaultStamp = String(latestVault.updatedAt);
+            writeFileSync(lastVaultStampFile, activeAppliedVaultStamp, 'utf8');
+            console.log(
+              `[Sarah Cloud Daemon ${INSTANCE_ID}] Hot-synced ${hotCookies.length} rotated Google cookies in memory (${activeAppliedVaultStamp}).`
+            );
+          }
+        } catch { }
+      }
+
+      // Ensure controller stays attached across SPA route updates & inspect REAL SIP/Signaler-PA registration!
       await page
         .evaluate(
           `${configBootstrap}\nif (!window.__IWG_GV_RECEPTIONIST_ACTIVE__ && location.hostname === 'voice.google.com') {\n${contentControllerCode}\n}`
         )
         .catch(() => { });
       const liveSnap = await page
-        .evaluate(() => ({
-          state: window.__IWG_GV_GET_STATE__?.() || null,
-          webrtc: window.__IWG_WEBRTC_GET_DIAGNOSTICS__?.() || null,
-        }))
-        .catch(() => ({ state: null, webrtc: null }));
+        .evaluate(() => {
+          const bodyTxt = String(document.body?.innerText || '');
+          const hasVoipErrorBanner = /unable to make or receive calls over the internet/i.test(bodyTxt);
+          const resources = performance.getEntriesByType('resource') || [];
+          let lastSignalerStatus = 0;
+          let recentVoice401 = false;
+          const cutoff = Math.max(0, performance.now() - 90000);
+          for (const r of resources) {
+            if (r.startTime < cutoff) continue;
+            const u = String(r.name || '');
+            if (u.includes('signaler-pa.clients6.google.com') && r.responseStatus) {
+              lastSignalerStatus = r.responseStatus;
+            }
+            if (u.includes('/_/jserror') && /sipregisterinfo|voiceclient.*401/i.test(u)) {
+              recentVoice401 = true;
+            }
+          }
+          const sipUnregistered =
+            hasVoipErrorBanner ||
+            lastSignalerStatus === 401 ||
+            lastSignalerStatus === 403 ||
+            (recentVoice401 && lastSignalerStatus !== 200);
+          return {
+            state: window.__IWG_GV_GET_STATE__?.() || null,
+            webrtc: window.__IWG_WEBRTC_GET_DIAGNOSTICS__?.() || null,
+            hasVoipErrorBanner,
+            lastSignalerStatus,
+            sipUnregistered,
+          };
+        })
+        .catch(() => ({ state: null, webrtc: null, hasVoipErrorBanner: false, lastSignalerStatus: 0, sipUnregistered: false }));
+
+      // CRITICAL SELF-HEAL: Never stay falsely "online" if Google Voice's SIP/Signaler channel returned 401!
+      if (liveSnap.sipUnregistered && !liveSnap.state?.callActive) {
+        console.warn(
+          `[Sarah Cloud Daemon ${INSTANCE_ID}] Detected Google Voice SIP/Signaler 401 or Internet-Call error banner (banner=${liveSnap.hasVoipErrorBanner}, signaler=${liveSnap.lastSignalerStatus}) — attempting instant SSO + cookie recovery...`
+        );
+        try {
+          const freshVault = await fetchCloudCookieVault();
+          if (freshVault.cookies.length > 0) {
+            for (const ck of normalizeCookiesForCdp(freshVault.cookies)) {
+              await client.send('Network.setCookie', ck).catch(() => { });
+            }
+          }
+          await page.evaluate(() => performance.clearResourceTimings()).catch(() => { });
+          await page
+            .goto(
+              'https://accounts.google.com/ServiceLogin?service=grandcentral&passive=true&continue=https%3A%2F%2Fvoice.google.com%2Fu%2F0%2Fcalls',
+              { waitUntil: 'domcontentloaded', timeout: 30000 }
+            )
+            .catch(() => { });
+          if (page.url().includes('accounts.google.com')) {
+            await resolveAccountChooserIfNeeded(page);
+          }
+          await new Promise((r) => setTimeout(r, 4500));
+        } catch { }
+
+        const recoveredCheck = await page
+          .evaluate(() => {
+            const b = String(document.body?.innerText || '');
+            const errBanner = /unable to make or receive calls over the internet/i.test(b);
+            const sigs = (performance.getEntriesByType('resource') || []).filter((r) =>
+              String(r.name || '').includes('signaler-pa.clients6.google.com')
+            );
+            const lastSig = sigs.length ? sigs[sigs.length - 1].responseStatus : 0;
+            return {
+              url: location.href,
+              ok: location.href.startsWith('https://voice.google.com/u/0') && !errBanner && lastSig !== 401,
+            };
+          })
+          .catch(() => ({ url: page.url(), ok: false }));
+
+        if (!recoveredCheck.ok) {
+          try {
+            rmSync(vmSessionLiveMarker, { force: true });
+          } catch { }
+          await reportDaemonHeartbeat({
+            url: recoveredCheck.url,
+            title: 'Google Voice SIP 401 — Refreshing Session',
+            sessionAuthenticated: false,
+            receivingCallsText: 'SIP Signaler 401 Detected — Awaiting Fresh Google Session',
+          });
+          return { reason: 'signed_out' };
+        }
+        console.log(`[Sarah Cloud Daemon ${INSTANCE_ID}] SIP/Signaler channel recovered cleanly to 200 OK!`);
+      }
+
       const liveState = liveSnap.state;
       if (liveSnap.webrtc?.audioCtxState === 'suspended') {
         await page.mouse.click(80, 80).catch(() => { });
