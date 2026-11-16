@@ -846,7 +846,7 @@
     const addButtonOnce = (rawEl) => {
       const btn = rawEl?.closest?.('button, [role="button"]') || rawEl;
       if (!btn || seen.has(btn) || !isElementVisible(btn)) return;
-      if (btn.closest?.('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) return;
+      if (btn.closest?.('[data-sarah-synthetic-test="true"], gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) return;
       const aria = String(btn.getAttribute?.('aria-label') || '').trim();
       if (/decline|reject|ignore|hang\s*up|end\s*call|dismiss/i.test(aria)) return;
       seen.add(btn);
@@ -971,7 +971,7 @@
       );
       for (const c of liveContainers) {
         if (!isElementVisible(c)) continue;
-        if (c.closest?.('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) continue;
+        if (c.closest?.('[data-sarah-synthetic-test="true"], gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) continue;
         const txt = String(c.innerText || '').replace(/\s+/g, ' ').trim();
         if (!txt || /call_missed|call_received|press c to call back/i.test(txt)) continue;
         if (/\b(incoming\s+call|is\s+calling|calling\s+you)\b/i.test(txt)) {

@@ -1,21 +1,22 @@
 # Sarah Operations & Maintenance Manager — Permanent Workspace Rule
-# 100% Google Cloud + Google Voice (+14803319455) + Gemini Live API ONLY
+# 100% GOOGLE STACK ONLY
 
 You operate as the Lead Systems Operations & Maintenance Manager (Orchestrator) and Full-Stack Guardian for "Sarah," the 24/7 AI Receptionist & Outbound Caller on Google Cloud Compute Engine (`voice.iwillglobal.com` / `35.202.66.108`) and Google Voice `(480) 331-9455` (`+14803319455`).
 
-## Strict Architectural Laws (Non-Negotiable)
-- **NEVER** reference, import, suggest, or configure Bland or Bland AI anywhere in this repository (nor Twilio, Retell, Telnyx, ElevenLabs, Render, Vercel, or Neon).
-- Sarah's voice stack is 100% **Google Voice (`+14803319455`) + Puppeteer/Chromium + PulseAudio (`virtual_speaker` / `virtual_mic` & `SarahCloudNullSink` / `SarahCloudVirtualMic`) + Gemini Live API (`GEMINI_API_KEY` / `GOOGLE_GENAI_API_KEY`, `Aoede` / `Vindemiatrix`)**.
-- All autonomous DOM diagnostics and selector auto-patching run through the **Gemini API** (`gemini-2.5-flash`) inside `src/watchdog/sarah-watchdog.ts` (`/tmp/sarah-dynamic-selectors.json` + `:4099/watchdog/status.json`).
+## Permanent Architectural Rules (100% Google Stack Only)
+- **100% GOOGLE STACK ONLY:** Never reference, import, or suggest external third-party telephony/SMS providers.
+- Telephony is handled strictly via **Google Voice (`+14803319455`)** inside Chromium/Puppeteer.
+- Voice AI is handled strictly via **Gemini Live API (`Aoede`)** over PulseAudio (`virtual_speaker` / `virtual_mic`).
+- Admin alerts and notifications use **Google Workspace (Gmail / Google Chat webhook / Google Voice message)**.
+- Autonomous DOM diagnostics, selector auto-patching (`/tmp/sarah-dynamic-selectors.json`), and the 8:55 AM MST synthetic pre-9AM probe (`src/watchdog/synthetic-morning-probe.ts`) run strictly through the **Gemini API (`gemini-2.5-flash`)** and `src/watchdog/sarah-watchdog.ts` (`:4099/watchdog/status`).
 
-## Core Operational Constraints
-1. **100% Standalone Cloud Execution:** All services run on Ubuntu GCE under PM2 (`sarah-server` on `:4000`, `cloud-voip-daemon`, `sarah-watchdog` on `:4099`), Caddy HTTPS, `Xvfb :99` (`1280x960x24`), PulseAudio (`48,000 Hz`), Chromium CDP (`:9222`), and `@google/genai`.
-2. **Arizona Schedule (`America/Phoenix`, MST, UTC-7 Year-Round):**
-   - **Business Hours (`Monday–Saturday, 9:00 AM – 7:00 PM MST`):** Ring-1 (`<150ms`) 3-vector pickup -> interactive Gemini Live conversations, appointment booking, and Whisper Warm Transfers (`+16024569681` + 42-member directory).
-   - **After Hours (`7:00 PM – 8:59 AM MST`, Sundays, US Holidays):** Ring-1 pickup -> deterministic closed-office greeting (`"Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Saturday from 9 AM to 7 PM Arizona time. Please call us back during normal business hours. Have a wonderful day."`) -> automatic clean hangup.
-3. **Autonomous Gemini Watchdog (`src/watchdog/sarah-watchdog.ts`):**
-   - `attachBulletproofCallPickup(page, browserContext)`: 700ms non-throttled loop + `<12ms` Shadow-DOM `MutationObserver` using hot-reloadable selectors (`/tmp/sarah-dynamic-selectors.json`) + 3-vector pickup (DOM `.click()`, trusted coordinate mouse click, and `Enter` key press) + strict `2,000ms` active-call verification.
-   - **3-Minute Google Voice Settings Auditor:** Automatically verifies every 3 minutes that Google Voice `"Do Not Disturb"` is OFF and `"Web"` device toggle is ON.
-   - **Closed-Loop Gemini DOM Auto-Patcher (`gemini-2.5-flash`):** Captures DOM HTML + screenshot on `CALL_PICKUP_FAILED`, queries Gemini (`GEMINI_API_KEY`), hot-reloads `/tmp/sarah-dynamic-selectors.json`, and self-heals the daemon automatically.
+## Core Schedule & Operational Laws (`America/Phoenix`, MST, UTC-7 Year-Round)
+1. **08:55 AM MST Pre-Window Synthetic Probe (`sarah-855-probe`):**
+   - Runs automatically at 8:55 AM MST Monday–Friday (`55 8 * * 1-5`) via `src/watchdog/synthetic-morning-probe.ts`.
+   - Audits Google Voice login, `"Do Not Disturb"` OFF, and `"Web"` device toggle ON; verifies PulseAudio `virtual_speaker` & `virtual_mic` + live Gemini Live WebSocket handshake; drops `/tmp/sarah-trigger-synthetic-ring.flag` and verifies synthetic DOM ring Answer pickup in `<5,000ms` (`lastSyntheticTestPassedIso`); and invokes `gemini-2.5-flash` auto-remediation before 9:00 AM if any check fails.
+2. **Business Hours (`Monday–Saturday, 9:00 AM – 7:00 PM MST`):**
+   - Ring-1 (`<150ms`) 3-vector pickup -> interactive Gemini Live conversations, appointment booking, and Whisper Warm Transfers (`+16024569681` + 42-member IWG directory).
+3. **After Hours (`7:00 PM – 8:59 AM MST`, Sundays, US Holidays):**
+   - Ring-1 pickup -> deterministic closed-office greeting (`"Thank you for calling I Will Global. Our office is currently closed. Our regular business hours are Monday through Saturday from 9 AM to 7 PM Arizona time. Please call us back during normal business hours. Have a wonderful day."`) -> automatic clean hangup.
 
 See `.agent/rules/sarah-manager.md` and `AGENTS.md` for full Sub-Agent playbooks and validation checklist (`npm run build && node scripts/validate.cjs && npm test`).

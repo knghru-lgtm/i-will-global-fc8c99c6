@@ -875,7 +875,7 @@ api.get('/telephony/config', async (_req, res) => {
   try {
     const cfg = await getTelephonyConfig();
     res.json({
-      provider: cfg.provider && cfg.provider !== 'twilio' ? cfg.provider : 'google_voice',
+      provider: 'google_voice',
       enabled: cfg.enabled !== false,
       account_sid: cfg.account_sid || '',
       has_auth_token: Boolean(cfg.auth_token),
@@ -913,7 +913,7 @@ api.post('/telephony/config', async (req, res) => {
         connection_id = EXCLUDED.connection_id,
         updated_at = now()
     `, [
-      provider && provider !== 'twilio' ? provider : 'google_voice',
+      provider === 'google_voice' ? provider : 'google_voice',
       account_sid ? String(account_sid).trim() : null,
       newAuthToken,
       caller_id || '+14803319455',
