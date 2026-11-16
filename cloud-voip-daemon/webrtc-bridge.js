@@ -14,7 +14,7 @@
         document.documentElement.setAttribute('data-iwg-webrtc-bridge', 'ready');
         return true;
       }
-    } catch {}
+    } catch { }
     return false;
   }
   if (!markBridgeReadyOnDom() && typeof document !== 'undefined') {
@@ -55,7 +55,7 @@
         },
         '*'
       );
-    } catch {}
+    } catch { }
   }
 
   function ensureAudioGraph() {
@@ -84,24 +84,37 @@
         outgoingAnalyser.fftSize = 256;
         limiterNode.connect(outgoingAnalyser);
 
-        // Pure 0.0 DC constant source (zero frequency, zero tone, zero hum) so WebRTC RTP frames stay active during silence
+        // Pure 0.0 DC constant source (zero frequency, zero tone, zero hum) so WebRTC RTP frames & AudioContext clock stay running 24/7
         try {
           if (typeof bridgeAudioCtx.createConstantSource === 'function') {
             const zeroSource = bridgeAudioCtx.createConstantSource();
             zeroSource.offset.value = 0.0;
             zeroSource.connect(virtualMicDest);
+            const silentClockKeepAlive = bridgeAudioCtx.createGain();
+            silentClockKeepAlive.gain.value = 0.0;
+            zeroSource.connect(silentClockKeepAlive);
+            silentClockKeepAlive.connect(bridgeAudioCtx.destination);
             zeroSource.start();
           }
-        } catch {}
+        } catch { }
       }
       if (bridgeAudioCtx.state === 'suspended') {
-        bridgeAudioCtx.resume().catch(() => {});
+        bridgeAudioCtx.resume().catch(() => { });
       }
       return bridgeAudioCtx;
     } catch {
       return null;
     }
   }
+
+  window.addEventListener(
+    'click',
+    () => {
+      const ctx = ensureAudioGraph();
+      if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => { });
+    },
+    { capture: true, passive: true }
+  );
 
   async function decodeAndCacheBase64Audio(base64) {
     const ctx = ensureAudioGraph();
@@ -205,7 +218,7 @@
           try {
             source.disconnect();
             analyser.disconnect();
-          } catch {}
+          } catch { }
           return;
         }
         const now = Date.now();
@@ -279,7 +292,7 @@
           finishRecording();
         }
       }, 65);
-    } catch {}
+    } catch { }
   }
 
   // 3. Wrap RTCPeerConnection and RTCRtpSender so outgoing audio ALWAYS uses our pure digital bus
@@ -298,7 +311,7 @@
           } else if (cs === 'closed' || cs === 'failed' || cs === 'disconnected' || ice === 'closed' || ice === 'failed') {
             notifyCallConnectionState(false, `pc_${cs || ice}`);
           }
-        } catch {}
+        } catch { }
       };
       pc.addEventListener('connectionstatechange', onStateChange);
       pc.addEventListener('iceconnectionstatechange', onStateChange);
@@ -309,7 +322,7 @@
             const stream = (ev.streams && ev.streams[0]) || new MediaStream([ev.track]);
             monitorRemoteAudioStream(stream);
           }
-        } catch {}
+        } catch { }
       });
 
       const origAddTrack = pc.addTrack.bind(pc);
@@ -321,7 +334,7 @@
               return origAddTrack(vTrack, ...streams);
             }
           }
-        } catch {}
+        } catch { }
         return origAddTrack(track, ...streams);
       };
 
@@ -342,7 +355,7 @@
             return origReplaceTrack.call(this, vTrack);
           }
         }
-      } catch {}
+      } catch { }
       return origReplaceTrack.call(this, withTrack);
     };
   }
@@ -364,12 +377,12 @@
               this.volume = 0.0;
               this.muted = true;
             }
-          } catch {}
+          } catch { }
           return desc.set.call(this, val);
         },
       });
     }
-  } catch {}
+  } catch { }
 
   async function handlePlayWavRequest(base64, requestId) {
     const finish = (ok) => {
@@ -394,14 +407,14 @@
         return finish(false);
       }
       if (ctx.state === 'suspended') {
-        await ctx.resume().catch(() => {});
+        await ctx.resume().catch(() => { });
       }
 
       if (activeSourceNode) {
         try {
           activeSourceNode.stop();
           activeSourceNode.disconnect();
-        } catch {}
+        } catch { }
         activeSourceNode = null;
       }
 
@@ -428,15 +441,15 @@
       const meterInterval =
         outgoingAnalyser && meterBuf
           ? setInterval(() => {
-              try {
-                outgoingAnalyser.getFloatTimeDomainData(meterBuf);
-                let sq = 0;
-                for (let i = 0; i < meterBuf.length; i++) sq += meterBuf[i] * meterBuf[i];
-                const rms = Math.sqrt(sq / meterBuf.length);
-                if (rms > peakRms) peakRms = rms;
-                if (rms > lastPlaybackPeakRms) lastPlaybackPeakRms = rms;
-              } catch {}
-            }, 35)
+            try {
+              outgoingAnalyser.getFloatTimeDomainData(meterBuf);
+              let sq = 0;
+              for (let i = 0; i < meterBuf.length; i++) sq += meterBuf[i] * meterBuf[i];
+              const rms = Math.sqrt(sq / meterBuf.length);
+              if (rms > peakRms) peakRms = rms;
+              if (rms > lastPlaybackPeakRms) lastPlaybackPeakRms = rms;
+            } catch { }
+          }, 35)
           : null;
 
       let doneCalled = false;
@@ -491,7 +504,7 @@
       handlePlayWavRequest(data.base64, data.requestId);
     } else if (data.type === 'IWG_SARAH_PREWARM_WAV') {
       if (data.base64) {
-        decodeAndCacheBase64Audio(data.base64).catch(() => {});
+        decodeAndCacheBase64Audio(data.base64).catch(() => { });
       }
     } else if (data.type === 'IWG_RESUME_AUDIO') {
       ensureAudioGraph();
@@ -502,7 +515,7 @@
         try {
           activeSourceNode.stop();
           activeSourceNode.disconnect();
-        } catch {}
+        } catch { }
         activeSourceNode = null;
       }
     }

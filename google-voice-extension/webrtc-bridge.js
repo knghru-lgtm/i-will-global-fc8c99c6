@@ -84,12 +84,16 @@
         outgoingAnalyser.fftSize = 256;
         limiterNode.connect(outgoingAnalyser);
 
-        // Pure 0.0 DC constant source (zero frequency, zero tone, zero hum) so WebRTC RTP frames stay active during silence
+        // Pure 0.0 DC constant source (zero frequency, zero tone, zero hum) so WebRTC RTP frames & AudioContext clock stay running 24/7
         try {
           if (typeof bridgeAudioCtx.createConstantSource === 'function') {
             const zeroSource = bridgeAudioCtx.createConstantSource();
             zeroSource.offset.value = 0.0;
             zeroSource.connect(virtualMicDest);
+            const silentClockKeepAlive = bridgeAudioCtx.createGain();
+            silentClockKeepAlive.gain.value = 0.0;
+            zeroSource.connect(silentClockKeepAlive);
+            silentClockKeepAlive.connect(bridgeAudioCtx.destination);
             zeroSource.start();
           }
         } catch {}
@@ -102,6 +106,15 @@
       return null;
     }
   }
+
+  window.addEventListener(
+    'click',
+    () => {
+      const ctx = ensureAudioGraph();
+      if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    },
+    { capture: true, passive: true }
+  );
 
   async function decodeAndCacheBase64Audio(base64) {
     const ctx = ensureAudioGraph();

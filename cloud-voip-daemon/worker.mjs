@@ -287,6 +287,13 @@ async function launchResilientBrowser(execPath) {
     '--window-size=800,600',
   ];
 
+  const ignoredPuppeteerDefaults = [
+    '--mute-audio',
+    '--enable-automation',
+    '--disable-background-networking',
+    '--disable-sync',
+    '--metrics-recording-only',
+  ];
   const hasX11Display = Boolean(process.env.DISPLAY) && existsSync('/tmp/.X11-unix');
   if (hasX11Display) {
     try {
@@ -295,7 +302,7 @@ async function launchResilientBrowser(execPath) {
         userDataDir: CHROME_PROFILE_DIR,
         headless: false,
         protocolTimeout: 60000,
-        ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
+        ignoreDefaultArgs: ignoredPuppeteerDefaults,
         args: chromeArgs,
       });
     } catch (xErr) {
@@ -308,7 +315,7 @@ async function launchResilientBrowser(execPath) {
     userDataDir: CHROME_PROFILE_DIR,
     headless: 'new',
     protocolTimeout: 60000,
-    ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
+    ignoreDefaultArgs: ignoredPuppeteerDefaults,
     args: chromeArgs,
   });
 }
@@ -734,7 +741,19 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
           `${configBootstrap}\nif (!window.__IWG_GV_RECEPTIONIST_ACTIVE__ && location.hostname === 'voice.google.com') {\n${contentControllerCode}\n}`
         )
         .catch(() => { });
-      const liveState = await page.evaluate(() => window.__IWG_GV_GET_STATE__?.() || null).catch(() => null);
+      const liveSnap = await page
+        .evaluate(() => ({
+          state: window.__IWG_GV_GET_STATE__?.() || null,
+          webrtc: window.__IWG_WEBRTC_GET_DIAGNOSTICS__?.() || null,
+        }))
+        .catch(() => ({ state: null, webrtc: null }));
+      const liveState = liveSnap.state;
+      if (liveSnap.webrtc?.audioCtxState === 'suspended') {
+        await page.mouse.click(80, 80).catch(() => { });
+        await page
+          .evaluate(() => window.postMessage({ __iwg_webrtc__: true, type: 'IWG_RESUME_AUDIO' }, '*'))
+          .catch(() => { });
+      }
       await reportDaemonHeartbeat({
         url: currentUrl,
         title: title || 'Google Voice',
@@ -742,6 +761,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
         sessionAuthenticated: true,
         callActive: Boolean(liveState?.callActive),
         isSpeaking: Boolean(liveState?.isSpeaking),
+        audioCtxState: liveSnap.webrtc?.audioCtxState || 'ready',
         lastAnswerClickTs: Number(liveState?.lastAnswerClickTs || 0),
         totalCallsAnswered: Number(liveState?.totalCallsAnswered || 0),
         hasPreloadedGreeting: liveState ? Boolean(liveState.hasPreloadedGreeting) : true,
