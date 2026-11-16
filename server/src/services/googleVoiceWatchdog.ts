@@ -183,6 +183,21 @@ export async function saveCloudGvCookies(
 
   await ensureSettingsTable();
 
+  const isFromCloudDaemon = String(source || '').startsWith('cloud-daemon');
+  const cloudLiveAndAuthed = Boolean(
+    state.cloudDaemon?.sessionAuthenticated &&
+      Date.now() - (state.cloudDaemon.lastHeartbeatAt || 0) < 45_000
+  );
+
+  // LOCK 1: Never allow an external browser extension timer to overwrite a live authenticated Cloud VM session!
+  if (!isFromCloudDaemon && cloudLiveAndAuthed && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== 'test') {
+    return {
+      ok: true,
+      count: state.cookieVaultCount || googleCookies.length,
+      updatedAt: state.cookieVaultUpdatedAt,
+    };
+  }
+
   if (!seenFingerprintsHydrated && process.env.NODE_ENV !== 'test') {
     seenFingerprintsHydrated = true;
     try {
@@ -196,10 +211,6 @@ export async function saveCloudGvCookies(
     } catch { }
   }
 
-  // Compute monotonic rotation fingerprint over Google's rotating PSIDTS & core session cookies.
-  // Because every Google RotateCookies token is unique, rejecting any already-seen fingerprint
-  // prevents an idle browser's 15s timer from ever regressing a newer PSIDTS back to an older one,
-  // while immediately accepting genuinely new rotations from EITHER the Cloud VM or Laptop Chrome!
   const authFingerprint = createHash('sha256')
     .update(
       googleCookies
@@ -231,6 +242,69 @@ export async function saveCloudGvCookies(
       updatedAt: state.cookieVaultUpdatedAt,
     };
   }
+
+  // LOCK 2: Pre-flight live verification against https://voice.google.com/u/0/calls BEFORE saving!
+  // Rejects any signed-out Chrome profile (302 to accounts/workspace) or wrong account (missing 4803319455).
+  if (!isFromCloudDaemon && process.env.NODE_ENV !== 'test') {
+    const gvCookiePairs = googleCookies
+      .filter((c) => {
+        const d = String(c.domain || '').toLowerCase().replace(/^\.+/, '');
+        return d === 'google.com' || d === 'voice.google.com';
+      })
+      .map((c) => `${c.name}=${c.value}`)
+      .join('; ');
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      const probe = await fetch('https://voice.google.com/u/0/calls', {
+        method: 'GET',
+        redirect: 'manual',
+        headers: {
+          Cookie: gvCookiePairs,
+          'User-Agent':
+            userAgent ||
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        },
+        signal: ctrl.signal,
+      });
+      clearTimeout(t);
+      if (probe.status !== 200) {
+        seenCookieAuthFingerprints.add(authFingerprint);
+        recordGvEvent(
+          'gv_cookie_sync_rejected',
+          `Blocked signed-out browser profile (${source}, HTTP ${probe.status}, ${googleCookies.length} cookies)`
+        );
+        return {
+          ok: true,
+          count: state.cookieVaultCount || 0,
+          updatedAt: state.cookieVaultUpdatedAt || '',
+        };
+      }
+      const html = await probe.text();
+      if (!html.includes('4803319455') && !html.toLowerCase().includes('king@iwillglobal.com')) {
+        seenCookieAuthFingerprints.add(authFingerprint);
+        recordGvEvent(
+          'gv_cookie_sync_rejected',
+          `Blocked non-(480) 331-9455 Google account profile (${source}, ${googleCookies.length} cookies)`
+        );
+        return {
+          ok: true,
+          count: state.cookieVaultCount || 0,
+          updatedAt: state.cookieVaultUpdatedAt || '',
+        };
+      }
+    } catch {
+      // Only allow through on transient network error if no vault exists yet
+      if (state.cookieVaultUpdatedAt) {
+        return {
+          ok: true,
+          count: state.cookieVaultCount || 0,
+          updatedAt: state.cookieVaultUpdatedAt,
+        };
+      }
+    }
+  }
+
   seenCookieAuthFingerprints.add(authFingerprint);
   if (seenCookieAuthFingerprints.size > 120) {
     const oldest = seenCookieAuthFingerprints.values().next().value;

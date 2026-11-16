@@ -740,29 +740,6 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
         return { reason: 'signed_out' };
       }
 
-      // Hot-sync any newly rotated vault cookies (__Secure-1PSIDTS / __Secure-3PSIDTS) in memory without restarting Chrome!
-      if (Date.now() - lastHotVaultCheck > 16000) {
-        lastHotVaultCheck = Date.now();
-        try {
-          const latestVault = await fetchCloudCookieVault();
-          if (
-            latestVault.updatedAt &&
-            latestVault.updatedAt !== activeAppliedVaultStamp &&
-            latestVault.cookies.length > 0
-          ) {
-            const hotCookies = normalizeCookiesForCdp(latestVault.cookies);
-            for (const ck of hotCookies) {
-              await client.send('Network.setCookie', ck).catch(() => { });
-            }
-            activeAppliedVaultStamp = String(latestVault.updatedAt);
-            writeFileSync(lastVaultStampFile, activeAppliedVaultStamp, 'utf8');
-            console.log(
-              `[Sarah Cloud Daemon ${INSTANCE_ID}] Hot-synced ${hotCookies.length} rotated Google cookies in memory (${activeAppliedVaultStamp}).`
-            );
-          }
-        } catch { }
-      }
-
       // Ensure controller stays attached across SPA route updates & inspect REAL SIP/Signaler-PA registration!
       await page
         .evaluate(
