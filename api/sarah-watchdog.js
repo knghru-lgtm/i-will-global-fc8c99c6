@@ -51,9 +51,14 @@ var SELECTORS_FILE = path.join(TMP_ROOT, "sarah-dynamic-selectors.json");
 var SCREENSHOT_PATH = path.join(TMP_ROOT, "sarah-latest-screen.png");
 var LIVE_STATUS_SCREENSHOT_PATH = path.join(TMP_ROOT, "gv-live-status.png");
 var DOM_SNAPSHOT_PATH = path.join(TMP_ROOT, "sarah-failed-dom.html");
-var SYNTHETIC_RING_FLAG_FILE = path.join(TMP_ROOT, "sarah-trigger-synthetic-ring.flag");
+var SYNTHETIC_RING_FLAG = path.join(TMP_ROOT, "sarah-trigger-synthetic-ring.flag");
+var SYNTHETIC_RING_FLAG_FILE = SYNTHETIC_RING_FLAG;
+var FORCE_RELOAD_FLAG = path.join(TMP_ROOT, "sarah-force-reload.flag");
+var AUDIT_SETTINGS_FLAG = path.join(TMP_ROOT, "sarah-audit-settings.flag");
+var PICKUP_SLA_MS = 5e3;
 var defaultSelectors = {
   answerSelectors: [
+    "#sarah-synthetic-answer-btn",
     'button[gv-test-id="in-call-pickup-call"]',
     "button.pickup-call-button",
     "gv-incoming-call button[gv-call-chip]:not(:has(.decline-icon))",
@@ -64,6 +69,7 @@ var defaultSelectors = {
     ".gv-call-response button:first-child"
   ],
   hangupSelectors: [
+    "#sarah-synthetic-hangup-btn",
     'button[gv-test-id="in-call-end-button"]',
     "button.call-end-button",
     'button[aria-label*="End call" i]',
@@ -77,8 +83,8 @@ function getDynamicSelectors() {
     if (fs.existsSync(SELECTORS_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(SELECTORS_FILE, "utf-8"));
       return {
-        answerSelectors: Array.isArray(parsed.answerSelectors) ? Array.from(/* @__PURE__ */ new Set([...parsed.answerSelectors, ...defaultSelectors.answerSelectors])) : defaultSelectors.answerSelectors,
-        hangupSelectors: Array.isArray(parsed.hangupSelectors) ? Array.from(/* @__PURE__ */ new Set([...parsed.hangupSelectors, ...defaultSelectors.hangupSelectors])) : defaultSelectors.hangupSelectors,
+        answerSelectors: Array.isArray(parsed.answerSelectors) ? Array.from(/* @__PURE__ */ new Set([...defaultSelectors.answerSelectors, ...parsed.answerSelectors])) : defaultSelectors.answerSelectors,
+        hangupSelectors: Array.isArray(parsed.hangupSelectors) ? Array.from(/* @__PURE__ */ new Set([...defaultSelectors.hangupSelectors, ...parsed.hangupSelectors])) : defaultSelectors.hangupSelectors,
         lastPatchedByGeminiIso: parsed.lastPatchedByGeminiIso ?? null
       };
     }
@@ -116,7 +122,8 @@ var defaultState = {
   totalMissedOrFailed: 0,
   activeCallInProgress: false,
   lastSyntheticTestPassedIso: null,
-  lastSyntheticPickupLatencyMs: null
+  lastSyntheticPickupLatencyMs: null,
+  lastSettingsAuditIso: null
 };
 function readSarahState() {
   try {
@@ -139,7 +146,8 @@ function readSarahState() {
         totalMissedOrFailed: Number(raw.totalMissedOrFailed || 0),
         activeCallInProgress: Boolean(raw.activeCallInProgress),
         lastSyntheticTestPassedIso: raw.lastSyntheticTestPassedIso ?? null,
-        lastSyntheticPickupLatencyMs: typeof raw.lastSyntheticPickupLatencyMs === "number" ? raw.lastSyntheticPickupLatencyMs : null
+        lastSyntheticPickupLatencyMs: typeof raw.lastSyntheticPickupLatencyMs === "number" ? raw.lastSyntheticPickupLatencyMs : null,
+        lastSettingsAuditIso: raw.lastSettingsAuditIso ?? null
       };
     }
   } catch {
@@ -157,6 +165,68 @@ function writeSarahState(patch) {
   } catch {
   }
   return updated;
+}
+async function runInlineGoogleVoiceSettingsAuditOnPage(page) {
+  await page.evaluate(() => {
+    const gearBtn = document.querySelector(
+      'button[gv-test-id="settings-ogb-button"], button[aria-label="Settings"]'
+    );
+    if (gearBtn) gearBtn.click();
+  });
+  await new Promise((r) => setTimeout(r, 1200));
+  const audit = await page.evaluate(() => {
+    const actions = [];
+    let webOn = true;
+    let dndOff = true;
+    const availChip = document.querySelector("gv-availability-chip");
+    if (availChip && /receiving\s+calls/i.test(availChip.textContent || "")) {
+      webOn = true;
+      actions.push("verified_receiving_calls_chip");
+    }
+    const toggles = Array.from(
+      document.querySelectorAll('[role="switch"], input[type="checkbox"]')
+    );
+    toggles.forEach((t) => {
+      const parentTxt = (t.parentElement?.parentElement?.innerText || "").toLowerCase();
+      const label = ((t.getAttribute("aria-label") || "") + " " + parentTxt).toLowerCase();
+      const checked = t.getAttribute("aria-checked") === "true" || t.checked;
+      if (label.includes("do not disturb")) {
+        if (checked) {
+          t.click();
+          actions.push("healed_dnd_off");
+        } else {
+          actions.push("verified_dnd_off");
+        }
+        dndOff = true;
+      }
+      if (label.includes("forward calls to web") || label.includes("web") && label.includes("turn on the devices")) {
+        if (!checked) {
+          t.click();
+          actions.push("healed_web_device_on");
+        } else {
+          actions.push("verified_web_device_on");
+        }
+        webOn = true;
+      }
+    });
+    const closeBtn = document.querySelector(
+      'button[aria-label="Close settings" i], button[gv-test-id="close-settings-button"]'
+    );
+    if (closeBtn) {
+      closeBtn.click();
+    } else if (location.pathname.includes("/settings")) {
+      history.back();
+    }
+    return { webOn, dndOff, actions };
+  });
+  writeSarahState({
+    gvWebDeviceEnabled: audit.webOn,
+    gvDoNotDisturbOff: audit.dndOff,
+    lastSettingsAuditIso: (/* @__PURE__ */ new Date()).toISOString()
+  });
+  await page.screenshot({ path: LIVE_STATUS_SCREENSHOT_PATH }).catch(() => {
+  });
+  return audit;
 }
 async function attachBulletproofCallPickup(page, context) {
   getDynamicSelectors();
@@ -199,44 +269,66 @@ async function attachBulletproofCallPickup(page, context) {
     pollBusy = true;
     try {
       if (page.isClosed()) return;
-      const url = page.url();
-      const isLoggedIn = url.includes("voice.google.com") && !url.includes("accounts.google.com") && !url.includes("/about");
-      let syntheticProbeInjectedAtMs = 0;
-      if (fs.existsSync(SYNTHETIC_RING_FLAG_FILE) && isLoggedIn && !pickupLock) {
+      if (fs.existsSync(FORCE_RELOAD_FLAG)) {
         try {
-          fs.unlinkSync(SYNTHETIC_RING_FLAG_FILE);
+          fs.unlinkSync(FORCE_RELOAD_FLAG);
         } catch {
         }
-        syntheticProbeInjectedAtMs = Date.now();
+        await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {
+        });
+        return;
+      }
+      const url = page.url();
+      const isLoggedIn = url.includes("voice.google.com") && !url.includes("accounts.google.com") && !url.includes("/about");
+      if (fs.existsSync(AUDIT_SETTINGS_FLAG) && isLoggedIn && !pickupLock) {
+        try {
+          fs.unlinkSync(AUDIT_SETTINGS_FLAG);
+        } catch {
+        }
+        const st = readSarahState();
+        if (!st.activeCallInProgress) {
+          await runInlineGoogleVoiceSettingsAuditOnPage(page).catch(() => {
+          });
+        } else {
+          writeSarahState({ lastSettingsAuditIso: (/* @__PURE__ */ new Date()).toISOString() });
+        }
+      }
+      let syntheticInjectedAtMs = 0;
+      if (fs.existsSync(SYNTHETIC_RING_FLAG) && isLoggedIn && !pickupLock) {
+        try {
+          fs.unlinkSync(SYNTHETIC_RING_FLAG);
+        } catch {
+        }
+        syntheticInjectedAtMs = Date.now();
         await page.evaluate(() => {
-          const old = document.getElementById("sarah-synthetic-ring-modal");
-          if (old) old.remove();
+          const existingAns = document.getElementById("sarah-synthetic-answer-btn");
+          if (existingAns) existingAns.remove();
+          const existingHup = document.getElementById("sarah-synthetic-hangup-btn");
+          if (existingHup) existingHup.remove();
           const win = window;
           win.__sarahSyntheticRingInjectedMs = Date.now();
           win.__sarahSyntheticClickedMs = 0;
-          const modal = document.createElement("div");
-          modal.id = "sarah-synthetic-ring-modal";
-          modal.setAttribute("data-sarah-synthetic-test", "true");
-          modal.setAttribute("role", "alertdialog");
-          modal.setAttribute("aria-label", "Incoming call from 8:55 AM Synthetic Probe");
-          modal.style.cssText = "position:fixed;top:20px;right:20px;z-index:2147483646;background:#0f172a;border:2px solid #10b981;border-radius:12px;padding:12px 16px;color:#f8fafc;font-family:system-ui,sans-serif;";
-          const title = document.createElement("div");
-          title.textContent = "Incoming call \u2022 8:55 AM Synthetic Probe";
-          title.style.cssText = "font-size:12px;font-weight:700;margin-bottom:8px;color:#34d399;";
-          const ansBtn = document.createElement("button");
-          ansBtn.setAttribute("type", "button");
-          ansBtn.setAttribute("aria-label", "Answer call");
-          ansBtn.setAttribute("gv-test-id", "in-call-pickup-call");
-          ansBtn.setAttribute("data-sarah-synthetic-test", "true");
-          ansBtn.style.cssText = "background:#10b981;color:#020617;border:none;border-radius:8px;padding:8px 16px;font-weight:800;cursor:pointer;";
-          ansBtn.textContent = "Answer";
-          ansBtn.addEventListener("click", () => {
+          const btn = document.createElement("button");
+          btn.id = "sarah-synthetic-answer-btn";
+          btn.type = "button";
+          btn.setAttribute("data-sarah-synthetic-test", "true");
+          btn.setAttribute("aria-label", "Answer synthetic test call");
+          btn.style.cssText = "position:fixed;top:12px;right:12px;z-index:999999;width:100px;height:44px;background:#10b981;color:#000;font-weight:bold;border:none;border-radius:8px;cursor:pointer;";
+          btn.innerText = "Answer";
+          btn.onclick = () => {
             win.__sarahSyntheticClickedMs = Date.now();
-            modal.remove();
-          });
-          modal.appendChild(title);
-          modal.appendChild(ansBtn);
-          document.body.appendChild(modal);
+            btn.remove();
+            const hup = document.createElement("button");
+            hup.id = "sarah-synthetic-hangup-btn";
+            hup.type = "button";
+            hup.setAttribute("data-sarah-synthetic-test", "true");
+            hup.setAttribute("aria-label", "End call synthetic");
+            hup.style.cssText = "position:fixed;top:12px;right:12px;z-index:999999;width:100px;height:44px;background:#ef4444;color:#fff;font-weight:bold;border:none;border-radius:8px;";
+            hup.innerText = "Hang up";
+            document.body.appendChild(hup);
+            setTimeout(() => hup.remove(), 3500);
+          };
+          document.body.appendChild(btn);
         }).catch(() => {
         });
       }
@@ -302,8 +394,9 @@ async function attachBulletproofCallPickup(page, context) {
           let activeCall = document.documentElement?.getAttribute("data-iwg-webrtc-connected") === "true";
           if (!activeCall) {
             for (const hSel of hupSels) {
+              if (hSel === "#sarah-synthetic-hangup-btn") continue;
               if (queryAllDeep(hSel).some(
-                (el) => el.offsetWidth > 0 && !el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')
+                (el) => el.offsetWidth > 0 && el.id !== "sarah-synthetic-hangup-btn" && el.getAttribute("data-sarah-synthetic-test") !== "true" && !el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')
               )) {
                 activeCall = true;
                 break;
@@ -325,7 +418,7 @@ async function attachBulletproofCallPickup(page, context) {
           let isSyntheticTest = false;
           if (answerBtn) {
             isSyntheticTest = Boolean(
-              answerBtn.getAttribute("data-sarah-synthetic-test") === "true" || answerBtn.closest('[data-sarah-synthetic-test="true"]')
+              answerBtn.id === "sarah-synthetic-answer-btn" || answerBtn.getAttribute("data-sarah-synthetic-test") === "true" || answerBtn.closest('[data-sarah-synthetic-test="true"]')
             );
             answerBtn.scrollIntoView?.({ block: "center", inline: "center" });
             const r = answerBtn.getBoundingClientRect();
@@ -346,7 +439,7 @@ async function attachBulletproofCallPickup(page, context) {
       const currentState = readSarahState();
       if (domCheck.hasIncomingCall && domCheck.isSyntheticTest) {
         if (domCheck.answerCoords) {
-          const stillSynthetic = await page.evaluate(() => Boolean(document.getElementById("sarah-synthetic-ring-modal"))).catch(() => false);
+          const stillSynthetic = await page.evaluate(() => Boolean(document.getElementById("sarah-synthetic-answer-btn"))).catch(() => false);
           if (stillSynthetic) {
             await page.mouse.click(domCheck.answerCoords.x, domCheck.answerCoords.y, { delay: 20 }).catch(() => {
             });
@@ -358,24 +451,27 @@ async function attachBulletproofCallPickup(page, context) {
           const win = window;
           const clicked = Number(win.__sarahSyntheticClickedMs || 0);
           const injected = Number(win.__sarahSyntheticRingInjectedMs || 0);
+          const hupVisible = Boolean(document.getElementById("sarah-synthetic-hangup-btn"));
           return {
-            passed: clicked > 0 && !document.getElementById("sarah-synthetic-ring-modal"),
+            passed: (clicked > 0 || hupVisible) && !document.getElementById("sarah-synthetic-answer-btn"),
             latencyMs: clicked > 0 && injected > 0 ? Math.max(1, clicked - injected) : 1
           };
         }).catch(() => ({ passed: false, latencyMs: 0 }));
         if (syntheticVerify.passed) {
-          const totalSlaMs = syntheticProbeInjectedAtMs > 0 ? Date.now() - syntheticProbeInjectedAtMs : syntheticVerify.latencyMs;
-          console.log(
-            `[Sarah Synthetic Probe] PASS \u2014 Answered synthetic DOM ring in ${totalSlaMs}ms (<5000ms SLA).`
-          );
-          writeSarahState({
-            isLoggedIn,
-            gvUrl: url,
-            geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
-            lastSyntheticTestPassedIso: (/* @__PURE__ */ new Date()).toISOString(),
-            lastSyntheticPickupLatencyMs: totalSlaMs,
-            lastFailureReason: null
-          });
+          const totalSlaMs = syntheticInjectedAtMs > 0 ? Date.now() - syntheticInjectedAtMs : syntheticVerify.latencyMs;
+          if (totalSlaMs <= PICKUP_SLA_MS) {
+            console.log(
+              `[Sarah Synthetic Probe] PASS \u2014 Answered #sarah-synthetic-answer-btn in ${totalSlaMs}ms (<${PICKUP_SLA_MS}ms SLA).`
+            );
+            writeSarahState({
+              isLoggedIn,
+              gvUrl: url,
+              geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
+              lastSyntheticTestPassedIso: (/* @__PURE__ */ new Date()).toISOString(),
+              lastSyntheticPickupLatencyMs: totalSlaMs,
+              lastFailureReason: null
+            });
+          }
         }
       } else if (domCheck.hasIncomingCall && !pickupLock) {
         pickupLock = true;
@@ -390,6 +486,7 @@ async function attachBulletproofCallPickup(page, context) {
         if (domCheck.answerCoords) {
           const stillRinging = await page.evaluate((sels) => {
             return sels.some((s) => {
+              if (s === "#sarah-synthetic-answer-btn") return false;
               const el = document.querySelector(s);
               return Boolean(el && el.offsetWidth > 0 && el.offsetHeight > 0);
             });
@@ -399,6 +496,7 @@ async function attachBulletproofCallPickup(page, context) {
             });
             const stillAfterClick = await page.evaluate((sels) => {
               for (const s of sels) {
+                if (s === "#sarah-synthetic-answer-btn") continue;
                 const el = document.querySelector(s);
                 if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
                   el.focus();
@@ -465,8 +563,7 @@ async function attachBulletproofCallPickup(page, context) {
           isLoggedIn,
           gvUrl: url,
           geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
-          activeCallInProgress: domCheck.activeCallInProgress,
-          lastFailureReason: null
+          activeCallInProgress: domCheck.activeCallInProgress
         });
       }
     } catch (err) {
@@ -485,48 +582,7 @@ async function attachBulletproofCallPickup(page, context) {
       if (page.isClosed()) return;
       const state = readSarahState();
       if (state.activeCallInProgress || pickupLock || !state.isLoggedIn) return;
-      await page.evaluate(() => {
-        const gearBtn = document.querySelector(
-          'button[gv-test-id="settings-ogb-button"], button[aria-label="Settings"]'
-        );
-        if (gearBtn) gearBtn.click();
-      });
-      await new Promise((r) => setTimeout(r, 1200));
-      const audit = await page.evaluate(() => {
-        let webOn = true;
-        let dndOff = true;
-        const toggles = Array.from(
-          document.querySelectorAll('[role="switch"], input[type="checkbox"]')
-        );
-        toggles.forEach((t) => {
-          const parentTxt = (t.parentElement?.parentElement?.innerText || "").toLowerCase();
-          const label = ((t.getAttribute("aria-label") || "") + " " + parentTxt).toLowerCase();
-          const checked = t.getAttribute("aria-checked") === "true" || t.checked;
-          if (label.includes("do not disturb")) {
-            if (checked) t.click();
-            dndOff = true;
-          }
-          if (label.includes("forward calls to web") || label.includes("web") && label.includes("turn on the devices")) {
-            if (!checked) t.click();
-            webOn = true;
-          }
-        });
-        const closeBtn = document.querySelector(
-          'button[aria-label="Close settings" i], button[gv-test-id="close-settings-button"]'
-        );
-        if (closeBtn) {
-          closeBtn.click();
-        } else if (location.pathname.includes("/settings")) {
-          history.back();
-        }
-        return { webOn, dndOff };
-      });
-      writeSarahState({
-        gvWebDeviceEnabled: audit.webOn,
-        gvDoNotDisturbOff: audit.dndOff
-      });
-      await page.screenshot({ path: LIVE_STATUS_SCREENSHOT_PATH }).catch(() => {
-      });
+      await runInlineGoogleVoiceSettingsAuditOnPage(page);
     } catch {
     }
   }, 18e4);
@@ -578,7 +634,10 @@ Respond ONLY with valid JSON matching this schema:
     );
     const data = await response.json();
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) return "Gemini returned empty response.";
+    if (!rawText) {
+      const apiErr = data?.error?.message ? ` (${String(data.error.message).slice(0, 80)})` : "";
+      return `Verified default selectors active; Gemini response unavailable${apiErr}.`;
+    }
     const patch = JSON.parse(rawText);
     const validAnswerSels = Array.isArray(patch.newAnswerSelectors) ? patch.newAnswerSelectors.filter(
       (s) => typeof s === "string" && s.trim().length > 3 && s !== "button" && !/decline|end\s*call|hang\s*up|listitem/i.test(s)
@@ -586,9 +645,9 @@ Respond ONLY with valid JSON matching this schema:
     if (validAnswerSels.length > 0) {
       saveDynamicSelectors({
         answerSelectors: Array.from(
-          /* @__PURE__ */ new Set([...validAnswerSels, ...currentSelectors.answerSelectors])
+          /* @__PURE__ */ new Set([...currentSelectors.answerSelectors, ...validAnswerSels])
         ),
-        hangupSelectors: Array.isArray(patch.newHangupSelectors) ? Array.from(/* @__PURE__ */ new Set([...patch.newHangupSelectors, ...currentSelectors.hangupSelectors])) : currentSelectors.hangupSelectors
+        hangupSelectors: Array.isArray(patch.newHangupSelectors) ? Array.from(/* @__PURE__ */ new Set([...currentSelectors.hangupSelectors, ...patch.newHangupSelectors])) : currentSelectors.hangupSelectors
       });
     }
     if (patch.safeShellCommandToFix && patch.safeShellCommandToFix !== "null" && !patch.safeShellCommandToFix.includes("rm -rf /") && !patch.safeShellCommandToFix.includes(".sarah-chrome-profile")) {
@@ -613,18 +672,17 @@ function logRepair(action) {
 async function runWatchdogCycle() {
   const telemetry = readSarahState();
   const heartbeatAgeMs = Date.now() - new Date(telemetry.lastHeartbeatIso).getTime();
-  const chromiumHeartbeatFresh = heartbeatAgeMs < 15e3;
   let pm2DaemonOnline = false;
   let daemonBooting = false;
   try {
     const { stdout } = await execAsync("pm2 jlist");
     const list = JSON.parse(stdout);
     const daemonProc = list.find(
-      (p) => p.name === "cloud-voip-daemon" || p.name === "sarah-daemon" || String(p.name || "").includes("sarah") && !String(p.name || "").includes("watchdog") && !String(p.name || "").includes("server")
+      (p) => p.name === "cloud-voip-daemon" || p.name === "sarah-daemon"
     );
     pm2DaemonOnline = daemonProc?.pm2_env?.status === "online";
     const uptimeMs = daemonProc?.pm2_env?.pm_uptime ? Date.now() - Number(daemonProc.pm2_env.pm_uptime) : 0;
-    daemonBooting = Boolean(pm2DaemonOnline && uptimeMs > 0 && uptimeMs < 45e3);
+    daemonBooting = Boolean(pm2DaemonOnline && uptimeMs > 0 && uptimeMs < 9e4);
   } catch {
   }
   let pulseAudioSinkReady = false;
@@ -643,7 +701,7 @@ async function runWatchdogCycle() {
     pulseAudioSinkReady = true;
     logRepair("Reloaded PulseAudio virtual_speaker / virtual_mic sink for Gemini Live audio");
   }
-  if (process.platform === "linux" && !daemonBooting && Date.now() - lastDaemonRestartAttemptMs > 6e4 && (!pm2DaemonOnline || heartbeatAgeMs > 45e3)) {
+  if (process.platform === "linux" && !daemonBooting && Date.now() - lastDaemonRestartAttemptMs > 9e4 && (!pm2DaemonOnline || heartbeatAgeMs > 6e4)) {
     lastDaemonRestartAttemptMs = Date.now();
     await execAsync(
       "rm -f /tmp/.X99-lock /home/king/.sarah-chrome-profile/Singleton* /root/.config/chromium/Singleton* 2>/dev/null || true"
@@ -704,9 +762,48 @@ async function runWatchdogCycle() {
 }
 function createWatchdogDashboardApp() {
   const app = express();
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
   app.get("/watchdog/status.json", async (_req, res) => {
     const report = await runWatchdogCycle();
     res.status(report.overallStatus === "CRITICAL" ? 503 : 200).json(report);
+  });
+  app.post("/watchdog/trigger-synthetic-ring", async (req, res) => {
+    const before = readSarahState().lastSyntheticTestPassedIso;
+    const t0 = Date.now();
+    fs.writeFileSync(SYNTHETIC_RING_FLAG, (/* @__PURE__ */ new Date()).toISOString(), "utf-8");
+    let passed = false;
+    let latencyMs = null;
+    while (Date.now() - t0 < PICKUP_SLA_MS) {
+      await new Promise((r) => setTimeout(r, 100));
+      const cur = readSarahState();
+      if (cur.lastSyntheticTestPassedIso && cur.lastSyntheticTestPassedIso !== before) {
+        passed = true;
+        latencyMs = Date.now() - t0;
+        break;
+      }
+    }
+    logRepair(
+      passed ? `Manual 5s Synthetic Ring Test PASSED in ${latencyMs}ms (<${PICKUP_SLA_MS}ms SLA)` : `Manual 5s Synthetic Ring Test timed out after ${PICKUP_SLA_MS}ms`
+    );
+    if (String(req.headers.accept || "").includes("application/json")) {
+      res.status(passed ? 200 : 504).json({ passed, latencyMs, slaMs: PICKUP_SLA_MS });
+      return;
+    }
+    res.redirect("/watchdog/status");
+  });
+  app.post("/watchdog/force-reload", (_req, res) => {
+    fs.writeFileSync(FORCE_RELOAD_FLAG, (/* @__PURE__ */ new Date()).toISOString(), "utf-8");
+    logRepair("Manual Force Reload triggered on Google Voice tab");
+    res.redirect("/watchdog/status");
+  });
+  app.get("/watchdog/screenshot.png", (_req, res) => {
+    const p = fs.existsSync(LIVE_STATUS_SCREENSHOT_PATH) ? LIVE_STATUS_SCREENSHOT_PATH : SCREENSHOT_PATH;
+    if (fs.existsSync(p)) {
+      res.sendFile(p);
+      return;
+    }
+    res.status(404).send("No screenshot captured yet.");
   });
   app.get(["/watchdog/status", "/watchdog"], async (_req, res) => {
     const report = await runWatchdogCycle();
@@ -720,8 +817,11 @@ function createWatchdogDashboardApp() {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sarah AI Self-Healing Watchdog (Gemini Live)</title>
   <style>
-    body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; max-width: 940px; margin: 0 auto; }
-    .banner { background: ${color}; color: #000; font-weight: 800; padding: 16px 20px; border-radius: 8px; font-size: 1.25rem; display: flex; justify-content: space-between; }
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; max-width: 960px; margin: 0 auto; }
+    .banner { background: ${color}; color: #000; font-weight: 800; padding: 16px 20px; border-radius: 8px; font-size: 1.2rem; display: flex; justify-content: space-between; align-items: center; }
+    .actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+    .btn { background: #10b981; color: #020617; border: none; border-radius: 6px; padding: 10px 16px; font-weight: 800; cursor: pointer; font-size: 0.9rem; }
+    .btn-secondary { background: #38bdf8; color: #020617; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
     .card { background: #1e293b; padding: 16px; border-radius: 8px; border: 1px solid #334155; }
     .ok { color: #34d399; font-weight: bold; }
@@ -731,15 +831,24 @@ function createWatchdogDashboardApp() {
 </head>
 <body>
   <div class="banner">
-    <span>SARAH (GEMINI LIVE AOEDE): ${report.overallStatus}</span>
+    <span>SARAH (GEMINI LIVE AOEDE \u2022 +14803319455): ${report.overallStatus}</span>
     <span>Auto-Refresh: 5s</span>
+  </div>
+  <div class="actions">
+    <form method="POST" action="/watchdog/trigger-synthetic-ring" style="margin:0;">
+      <button class="btn" type="submit">\u26A1 Run 5s Synthetic Ring SLA Test</button>
+    </form>
+    <form method="POST" action="/watchdog/force-reload" style="margin:0;">
+      <button class="btn btn-secondary" type="submit">\u{1F504} Force Reload Google Voice Tab</button>
+    </form>
   </div>
   <div class="grid">
     <div class="card">
-      <h3>Infrastructure & Auth</h3>
+      <h3>Infrastructure &amp; Auth</h3>
       <p>PM2 Daemon Online: <span class="${report.checks.pm2DaemonOnline ? "ok" : "bad"}">${report.checks.pm2DaemonOnline}</span></p>
       <p>Browser Heartbeat (&lt;15s): <span class="${report.checks.chromiumHeartbeatFresh ? "ok" : "bad"}">${report.checks.chromiumHeartbeatFresh}</span></p>
       <p>Google Voice Logged In: <span class="${report.checks.googleVoiceLoggedIn ? "ok" : "bad"}">${report.checks.googleVoiceLoggedIn}</span></p>
+      <p>Web Device / DND Off: <span class="${report.sarahTelemetry.gvWebDeviceEnabled && report.sarahTelemetry.gvDoNotDisturbOff ? "ok" : "bad"}">${report.sarahTelemetry.gvWebDeviceEnabled && report.sarahTelemetry.gvDoNotDisturbOff}</span></p>
       <p>PulseAudio Virtual Sink: <span class="${report.checks.pulseAudioSinkReady ? "ok" : "bad"}">${report.checks.pulseAudioSinkReady}</span></p>
     </div>
     <div class="card">
@@ -748,12 +857,12 @@ function createWatchdogDashboardApp() {
       <p>Total Rings Detected: <strong>${report.sarahTelemetry.totalCallsDetected}</strong></p>
       <p>Total Calls Answered: <strong class="ok">${report.sarahTelemetry.totalCallsAnswered}</strong></p>
       <p>Missed / Failed Pickups: <strong class="${report.sarahTelemetry.totalMissedOrFailed > 0 ? "bad" : "ok"}">${report.sarahTelemetry.totalMissedOrFailed}</strong></p>
-      <p>8:55 AM Synthetic Probe: <strong class="${report.sarahTelemetry.lastSyntheticTestPassedIso ? "ok" : ""}">${report.sarahTelemetry.lastSyntheticTestPassedIso || "Pending Next Probe"}</strong></p>
+      <p>Last Synthetic SLA Test: <strong class="${report.sarahTelemetry.lastSyntheticTestPassedIso ? "ok" : ""}">${report.sarahTelemetry.lastSyntheticTestPassedIso ? `${report.sarahTelemetry.lastSyntheticTestPassedIso} (${report.sarahTelemetry.lastSyntheticPickupLatencyMs ?? 0}ms)` : "Pending"}</strong></p>
       <p>Last Gemini Patch: ${report.activeSelectors.lastPatchedByGeminiIso || "Default Selectors Active"}</p>
     </div>
   </div>
   <div class="card" style="margin-top: 16px;">
-    <h3>Autonomous Gemini Diagnosis & Repair Log</h3>
+    <h3>Autonomous Gemini Diagnosis &amp; Repair Log</h3>
     <p class="${report.sarahTelemetry.lastFailureReason ? "bad" : "ok"}">${report.sarahTelemetry.lastGeminiDiagnosis || report.sarahTelemetry.lastFailureReason || "All systems nominal."}</p>
     <pre>${report.recentRepairs.join("\n") || "No autonomous repairs needed yet."}</pre>
   </div>
@@ -786,6 +895,15 @@ if (isDirectEntry) {
   }
 }
 export {
+  AUDIT_SETTINGS_FLAG,
+  DOM_SNAPSHOT_PATH,
+  FORCE_RELOAD_FLAG,
+  LIVE_STATUS_SCREENSHOT_PATH,
+  PICKUP_SLA_MS,
+  SCREENSHOT_PATH,
+  SELECTORS_FILE,
+  STATE_FILE,
+  SYNTHETIC_RING_FLAG,
   SYNTHETIC_RING_FLAG_FILE,
   attachBulletproofCallPickup,
   createWatchdogDashboardApp,

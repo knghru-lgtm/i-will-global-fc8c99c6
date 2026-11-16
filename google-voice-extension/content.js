@@ -237,7 +237,13 @@
   function isElementVisible(el) {
     if (!el || el.disabled) return false;
     if (el.hasAttribute?.('hidden') || el.getAttribute?.('aria-hidden') === 'true') return false;
-    if (el.closest?.('#iwg-gv-receptionist-badge, [hidden]')) return false;
+    if (
+      el.closest?.(
+        '#iwg-gv-receptionist-badge, [hidden], [data-sarah-synthetic-test="true"], #sarah-synthetic-answer-btn, #sarah-synthetic-hangup-btn'
+      )
+    ) {
+      return false;
+    }
     try {
       const style = window.getComputedStyle(el);
       if (!style || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {

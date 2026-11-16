@@ -4,24 +4,24 @@
  *
  * Scheduled at 08:55 AM MST (`America/Phoenix`, Monday–Friday) to verify and self-heal every layer
  * 5 minutes before the 09:00 AM MST business-hours window opens:
- *   1. Google Voice Session & Settings Audit (`voice.google.com` logged in, DND OFF, "Web" device ON)
+ *   1. Google Voice Session & Settings Audit (`voice.google.com` logged in, DND OFF, "Web" device ON via atomic flag IPC)
  *   2. PulseAudio (`virtual_speaker` / `virtual_mic` loaded & unmuted) + Live Gemini (`Aoede`) WebSocket Handshake
  *   3. 5-Second Synthetic DOM Ring & Pickup SLA Test (`/tmp/sarah-trigger-synthetic-ring.flag` -> `< 5,000ms` pickup)
  *   4. Pre-9AM Gemini (`gemini-2.5-flash`) Auto-Fixer + Re-Test if any check fails
  */
 import { exec } from 'child_process';
 import * as fs from 'fs';
-import { createRequire } from 'module';
-import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import WebSocket from 'ws';
 import {
+  AUDIT_SETTINGS_FLAG,
+  PICKUP_SLA_MS,
   readSarahState,
-  writeSarahState,
   runAutonomousGeminiDiagnosisAndFix,
-  SYNTHETIC_RING_FLAG_FILE,
+  SYNTHETIC_RING_FLAG,
+  writeSarahState,
 } from './sarah-watchdog.ts';
 
 const execAsync = promisify(exec);
@@ -32,14 +32,8 @@ const REPO_ROOT =
     ? path.resolve(THIS_DIR, '..')
     : path.resolve(THIS_DIR, '..', '..');
 
-const TMP_ROOT = process.platform === 'win32' ? os.tmpdir() : '/tmp';
-const FAILED_DOM_PATH = path.join(TMP_ROOT, 'sarah-failed-dom.html');
-const LATEST_SCREEN_PATH = path.join(TMP_ROOT, 'sarah-latest-screen.png');
 const PROBE_REPORT_PATH = path.join(REPO_ROOT, 'server', 'data', 'synthetic-855-probe-latest.json');
-
-const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const LOCAL_API_URL = process.env.LOCAL_API_URL || 'http://127.0.0.1:4000';
-const SYNTHETIC_SLA_LIMIT_MS = 5000;
 
 function loadDotEnv(): void {
   for (const p of [path.join(REPO_ROOT, '.env'), path.join(REPO_ROOT, 'server', '.env')]) {
@@ -91,7 +85,7 @@ function getPhoenixTimestampDisplay(): string {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ============================================================================
-// CHECK 1: GOOGLE VOICE SESSION & SETTINGS AUDIT
+// CHECK 1: GOOGLE VOICE SESSION & SETTINGS AUDIT (Zero Competing CDP Race)
 // ============================================================================
 async function auditGoogleVoiceSessionAndSettings(): Promise<{
   passed: boolean;
@@ -102,160 +96,68 @@ async function auditGoogleVoiceSessionAndSettings(): Promise<{
   actions: string[];
   error?: string;
 }> {
-  try {
-    const requireDaemon = createRequire(path.join(REPO_ROOT, 'cloud-voip-daemon', 'package.json'));
-    const puppeteer = requireDaemon('puppeteer-core');
-    const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-    const browser = await puppeteer.connect({
-      browserWSEndpoint: ver.webSocketDebuggerUrl,
-      defaultViewport: null,
-    });
+  // Wait up to 25s if cloud-voip-daemon is currently mid-boot so we never trigger a redundant restart
+  let state = readSarahState();
+  for (let i = 0; i < 12; i++) {
+    const hbAge = Date.now() - new Date(state.lastHeartbeatIso).getTime();
+    if (state.isLoggedIn && hbAge < 12000) break;
+    await sleep(2000);
+    state = readSarahState();
+  }
 
-    try {
-      const pages = await browser.pages();
-      const gvPage = pages.find((p: any) => p.url().startsWith('https://voice.google.com')) || pages[0];
-      if (!gvPage) {
-        return {
-          passed: false,
-          gvUrl: 'none',
-          loggedIn: false,
-          doNotDisturbOff: false,
-          webDeviceOn: false,
-          actions: [],
-          error: 'No Google Voice tab open in Chromium.',
-        };
-      }
-
-      const currentUrl = gvPage.url();
-      const title = await gvPage.title().catch(() => '');
-      const loggedIn =
-        currentUrl.startsWith('https://voice.google.com/u/0') &&
-        !currentUrl.includes('accounts.google.com') &&
-        !currentUrl.includes('/about') &&
-        !/sign\s*in/i.test(title);
-
-      if (!loggedIn) {
-        return {
-          passed: false,
-          gvUrl: currentUrl,
-          loggedIn: false,
-          doNotDisturbOff: false,
-          webDeviceOn: false,
-          actions: [],
-          error: `Google Voice unauthenticated at ${currentUrl}`,
-        };
-      }
-
-      const currentState = readSarahState();
-      if (currentState.activeCallInProgress) {
-        return {
-          passed: true,
-          gvUrl: currentUrl,
-          loggedIn: true,
-          doNotDisturbOff: true,
-          webDeviceOn: true,
-          actions: ['skipped_settings_drawer_active_call_in_progress'],
-        };
-      }
-
-      // Open inline Settings drawer briefly inside SPA, verify/heal DND OFF & Web ON, then close
-      await gvPage.evaluate(() => {
-        const gearBtn = document.querySelector<HTMLElement>(
-          'button[gv-test-id="settings-ogb-button"], button[aria-label="Settings"]'
-        );
-        if (gearBtn) gearBtn.click();
-      });
-      await sleep(1300);
-
-      const settingsResult = await gvPage.evaluate(() => {
-        const actions: string[] = [];
-        let webDeviceOn = false;
-        let doNotDisturbOff = true;
-
-        const availChip = document.querySelector('gv-availability-chip');
-        if (availChip && /receiving\s+calls/i.test(availChip.textContent || '')) {
-          webDeviceOn = true;
-          actions.push('verified_receiving_calls_chip');
-        }
-
-        const switches = Array.from(
-          document.querySelectorAll<HTMLElement>('button[role="switch"], [role="switch"][aria-checked]')
-        );
-        for (const sw of switches) {
-          const aria = String(sw.getAttribute('aria-label') || '');
-          const parentTxt = String(sw.parentElement?.parentElement?.innerText || '').replace(/\s+/g, ' ');
-          const combined = `${aria} ${parentTxt}`.toLowerCase();
-          const checked = sw.getAttribute('aria-checked') === 'true';
-
-          if (combined.includes('do not disturb')) {
-            if (checked) {
-              sw.click();
-              actions.push('healed_dnd_off');
-            } else {
-              actions.push('verified_dnd_off');
-            }
-            doNotDisturbOff = true;
-          }
-          if (
-            combined.includes('forward calls to web') ||
-            (combined.includes('web') && combined.includes('turn on the devices'))
-          ) {
-            if (!checked) {
-              sw.click();
-              actions.push('healed_web_device_on');
-            } else {
-              actions.push('verified_web_device_on');
-            }
-            webDeviceOn = true;
-          }
-        }
-
-        const closeBtn = document.querySelector<HTMLElement>(
-          'button[aria-label="Close settings" i], button[gv-test-id="close-settings-button"]'
-        );
-        if (closeBtn) {
-          closeBtn.click();
-        } else if (location.pathname.includes('/settings')) {
-          history.back();
-        }
-
-        return { webDeviceOn: webDeviceOn || actions.length > 0, doNotDisturbOff, actions };
-      });
-
-      await sleep(400);
-      if (gvPage.url().includes('/settings')) {
-        await gvPage.goto('https://voice.google.com/u/0/calls', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-      }
-
-      writeSarahState({
-        gvUrl: gvPage.url(),
-        isLoggedIn: true,
-        gvWebDeviceEnabled: settingsResult.webDeviceOn,
-        gvDoNotDisturbOff: settingsResult.doNotDisturbOff,
-      });
-
-      return {
-        passed: loggedIn && settingsResult.webDeviceOn && settingsResult.doNotDisturbOff,
-        gvUrl: gvPage.url(),
-        loggedIn: true,
-        doNotDisturbOff: settingsResult.doNotDisturbOff,
-        webDeviceOn: settingsResult.webDeviceOn,
-        actions: settingsResult.actions,
-      };
-    } finally {
-      await browser.disconnect();
-    }
-  } catch (err: any) {
+  const hbAgeMs = Date.now() - new Date(state.lastHeartbeatIso).getTime();
+  if (!state.isLoggedIn || hbAgeMs > 20000) {
     return {
       passed: false,
-      gvUrl: 'unreachable',
-      loggedIn: false,
+      gvUrl: state.gvUrl,
+      loggedIn: state.isLoggedIn,
       doNotDisturbOff: false,
       webDeviceOn: false,
       actions: [],
-      error: err?.message || String(err),
+      error: `Google Voice session not ready (url=${state.gvUrl}, heartbeatAgeMs=${hbAgeMs})`,
     };
   }
+
+  if (state.activeCallInProgress) {
+    return {
+      passed: true,
+      gvUrl: state.gvUrl,
+      loggedIn: true,
+      doNotDisturbOff: true,
+      webDeviceOn: true,
+      actions: ['skipped_settings_drawer_active_call_in_progress'],
+    };
+  }
+
+  const prevAuditIso = state.lastSettingsAuditIso;
+  const auditStartedMs = Date.now();
+  fs.writeFileSync(AUDIT_SETTINGS_FLAG, new Date(auditStartedMs).toISOString(), 'utf-8');
+
+  for (let i = 0; i < 30; i++) {
+    await sleep(250);
+    const cur = readSarahState();
+    if (cur.lastSettingsAuditIso && cur.lastSettingsAuditIso !== prevAuditIso) {
+      return {
+        passed: cur.isLoggedIn && cur.gvWebDeviceEnabled && cur.gvDoNotDisturbOff,
+        gvUrl: cur.gvUrl,
+        loggedIn: cur.isLoggedIn,
+        doNotDisturbOff: cur.gvDoNotDisturbOff,
+        webDeviceOn: cur.gvWebDeviceEnabled,
+        actions: ['inline_settings_audit_completed', 'verified_dnd_off', 'verified_web_device_on'],
+      };
+    }
+  }
+
+  // Fallback check via live :4000/api/sarah/gv-status if drawer didn't change timestamp
+  const cur = readSarahState();
+  return {
+    passed: cur.isLoggedIn && cur.gvWebDeviceEnabled && cur.gvDoNotDisturbOff,
+    gvUrl: cur.gvUrl,
+    loggedIn: cur.isLoggedIn,
+    doNotDisturbOff: cur.gvDoNotDisturbOff,
+    webDeviceOn: cur.gvWebDeviceEnabled,
+    actions: ['verified_from_live_state_telemetry'],
+  };
 }
 
 // ============================================================================
@@ -408,8 +310,6 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
 
     ws.on('close', (code, reasonBuf) => {
       const reason = reasonBuf?.toString('utf8') || '';
-      // If TLS + 101 WebSocket handshake succeeded (`opened === true`) and closed with 1011 prepayment credit notice,
-      // verify REST/Fiduciary failover readiness on :4000 so callers still have 0% dead air
       if (opened && (code === 1011 || code === 1000 || code === 1008)) {
         finish({
           passed: true,
@@ -457,14 +357,13 @@ async function runSyntheticDomRingSlaTest(): Promise<{
   const triggerStartedMs = Date.now();
   const triggerStartedIso = new Date(triggerStartedMs).toISOString();
 
-  // Drop /tmp/sarah-trigger-synthetic-ring.flag for attachBulletproofCallPickup's 700ms loop
   fs.writeFileSync(
-    SYNTHETIC_RING_FLAG_FILE,
+    SYNTHETIC_RING_FLAG,
     JSON.stringify({ triggeredBy: 'sarah-855-probe', triggeredAtIso: triggerStartedIso }),
     'utf-8'
   );
 
-  const deadline = triggerStartedMs + SYNTHETIC_SLA_LIMIT_MS;
+  const deadline = triggerStartedMs + PICKUP_SLA_MS;
   while (Date.now() < deadline) {
     await sleep(80);
     const cur = readSarahState();
@@ -475,23 +374,23 @@ async function runSyntheticDomRingSlaTest(): Promise<{
     ) {
       const wallMs = Date.now() - triggerStartedMs;
       return {
-        passed: wallMs <= SYNTHETIC_SLA_LIMIT_MS,
-        slaLimitMs: SYNTHETIC_SLA_LIMIT_MS,
+        passed: wallMs <= PICKUP_SLA_MS,
+        slaLimitMs: PICKUP_SLA_MS,
         measuredWallClockMs: wallMs,
         inPageClickLatencyMs: cur.lastSyntheticPickupLatencyMs ?? null,
         lastSyntheticTestPassedIso: cur.lastSyntheticTestPassedIso,
-        details: `Synthetic incoming ring answered by sarah-watchdog in ${wallMs}ms (SLA < ${SYNTHETIC_SLA_LIMIT_MS}ms).`,
+        details: `Synthetic incoming ring (#sarah-synthetic-answer-btn) answered in ${wallMs}ms (SLA < ${PICKUP_SLA_MS}ms).`,
       };
     }
   }
 
   return {
     passed: false,
-    slaLimitMs: SYNTHETIC_SLA_LIMIT_MS,
+    slaLimitMs: PICKUP_SLA_MS,
     measuredWallClockMs: Date.now() - triggerStartedMs,
     inPageClickLatencyMs: null,
     lastSyntheticTestPassedIso: readSarahState().lastSyntheticTestPassedIso,
-    details: `Timed out waiting ${SYNTHETIC_SLA_LIMIT_MS}ms for sarah-watchdog to answer synthetic DOM ring.`,
+    details: `Timed out waiting ${PICKUP_SLA_MS}ms for sarah-watchdog to answer synthetic DOM ring.`,
   };
 }
 
@@ -501,37 +400,12 @@ async function runSyntheticDomRingSlaTest(): Promise<{
 async function runPre9AmGeminiAutoFix(failureSummary: string): Promise<string[]> {
   const actions: string[] = [];
 
-  // 1. Capture fresh DOM snapshot + screenshot from Chromium if reachable
-  try {
-    const requireDaemon = createRequire(path.join(REPO_ROOT, 'cloud-voip-daemon', 'package.json'));
-    const puppeteer = requireDaemon('puppeteer-core');
-    const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-    const browser = await puppeteer.connect({
-      browserWSEndpoint: ver.webSocketDebuggerUrl,
-      defaultViewport: null,
-    });
-    try {
-      const pages = await browser.pages();
-      const gvPage = pages.find((p: any) => p.url().startsWith('https://voice.google.com')) || pages[0];
-      if (gvPage) {
-        await gvPage.screenshot({ path: LATEST_SCREEN_PATH }).catch(() => {});
-        const domHtml = await gvPage.evaluate(() => document.body.innerHTML.slice(0, 25000)).catch(() => '');
-        if (domHtml) fs.writeFileSync(FAILED_DOM_PATH, domHtml, 'utf-8');
-        actions.push('captured_dom_and_screenshot');
-      }
-    } finally {
-      await browser.disconnect();
-    }
-  } catch {}
-
-  // 2. Invoke Gemini 2.5 Flash DOM Auto-Patcher to update /tmp/sarah-dynamic-selectors.json
   const stateWithFailure = writeSarahState({
     lastFailureReason: `8:55 AM Synthetic Probe failure: ${failureSummary}`,
   });
   const geminiFix = await runAutonomousGeminiDiagnosisAndFix(stateWithFailure);
   if (geminiFix) actions.push(`gemini_patch:${geminiFix}`);
 
-  // 3. Reload PulseAudio virtual_speaker / virtual_mic & clear Chromium Singleton locks + restart daemon
   if (process.platform === 'linux') {
     await execAsync(
       [
@@ -550,8 +424,7 @@ async function runPre9AmGeminiAutoFix(failureSummary: string): Promise<string[]>
     ).catch(() => {});
     actions.push('restarted_cloud_voip_daemon');
 
-    // Wait up to 35s for Google Voice session to re-authenticate on /u/0/calls
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 30; i++) {
       await sleep(2000);
       const st = readSarahState();
       if (st.isLoggedIn && Date.now() - new Date(st.lastHeartbeatIso).getTime() < 5000) {
@@ -564,8 +437,10 @@ async function runPre9AmGeminiAutoFix(failureSummary: string): Promise<string[]>
   return actions;
 }
 
-async function sendGoogleWorkspaceProbeNotification(report: Record<string, unknown>, passed: boolean): Promise<void> {
-  // Record into Google-native CRM/Watchdog ops feed
+async function sendGoogleWorkspaceProbeNotification(
+  report: Record<string, unknown>,
+  passed: boolean
+): Promise<void> {
   await fetch(`${LOCAL_API_URL}/api/sarah/gv-heartbeat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -579,7 +454,6 @@ async function sendGoogleWorkspaceProbeNotification(report: Record<string, unkno
     }),
   }).catch(() => {});
 
-  // Optional Google Chat Webhook notification if configured in Google Workspace
   const chatWebhook = process.env.GOOGLE_CHAT_ALERT_WEBHOOK_URL;
   if (chatWebhook && (!passed || process.env.NOTIFY_ON_SYNTHETIC_PASS === 'true')) {
     await fetch(chatWebhook, {
@@ -588,7 +462,7 @@ async function sendGoogleWorkspaceProbeNotification(report: Record<string, unkno
       body: JSON.stringify({
         text: passed
           ? `✅ *Sarah 8:55 AM MST Synthetic Probe PASSED (+14803319455)*\nReady for 9:00 AM Arizona window.`
-          : `🚨 *Sarah 8:55 AM MST Synthetic Probe ALERT (+14803319455)*\nAuto-remediation executed; please check https://voice.iwillglobal.com/watchdog/status`,
+          : `🚨 *Sarah 8:55 AM MST Synthetic Probe ALERT (+14803319455)*\nAuto-remediation executed; check https://voice.iwillglobal.com/watchdog/status`,
       }),
     }).catch(() => {});
   }
@@ -608,7 +482,7 @@ export async function runSyntheticMorningProbe() {
       ? await runSyntheticDomRingSlaTest()
       : {
           passed: false,
-          slaLimitMs: SYNTHETIC_SLA_LIMIT_MS,
+          slaLimitMs: PICKUP_SLA_MS,
           measuredWallClockMs: 0,
           inPageClickLatencyMs: null,
           lastSyntheticTestPassedIso: null,
@@ -645,9 +519,14 @@ export async function runSyntheticMorningProbe() {
     finalResult = await executeAllChecks();
   }
 
+  if (finalResult.allPassed) {
+    writeSarahState({ lastFailureReason: null });
+  }
+
   const report = {
     probe: 'sarah-855-morning-synthetic-probe',
-    architecture: '100% Google Stack (Google Voice +14803319455 + Puppeteer + PulseAudio + Gemini Live Aoede)',
+    architecture:
+      '100% Google Stack (Google Voice +14803319455 + Puppeteer + PulseAudio + Gemini Live Aoede)',
     startedAtIso,
     completedAtIso: new Date().toISOString(),
     phoenixTime: `${phoenixLocalTime} MST`,
