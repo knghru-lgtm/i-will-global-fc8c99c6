@@ -19,7 +19,10 @@ const puppeteer = requireFromDaemon('puppeteer-core');
 const API_BASE = process.env.LOCAL_API_URL || 'http://127.0.0.1:4000';
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 
-const CALL_SCENARIOS = [
+const countArg = process.argv.find((a) => a.startsWith('--count='));
+const requestedCount = countArg ? Math.max(1, Math.min(10, Number(countArg.split('=')[1]) || 10)) : 10;
+
+const ALL_CALL_SCENARIOS = [
   { num: 1, mode: 'business_hours', phone: '(602) 555-0181', name: 'Martha Jenkins', utterance: 'Hi Sarah, I am turning 65 next month in Phoenix and need Medicare help.' },
   { num: 2, mode: 'business_hours', phone: '(480) 555-0182', name: 'Robert Alvarez', utterance: 'Hello, I want a quote on Term Life Insurance with living benefits for my family.' },
   { num: 3, mode: 'business_hours', phone: '(623) 555-0183', name: 'Evelyn Carter', utterance: 'Hi, I am looking for ACA family health insurance with zero deductible options.' },
@@ -31,6 +34,14 @@ const CALL_SCENARIOS = [
   { num: 9, mode: 'after_hours', phone: '(520) 555-0189', name: 'Barbara White' },
   { num: 10, mode: 'after_hours', phone: '(928) 555-0190', name: 'Anthony Davis' },
 ];
+
+const CALL_SCENARIOS =
+  requestedCount === 5
+    ? [ALL_CALL_SCENARIOS[0], ALL_CALL_SCENARIOS[1], ALL_CALL_SCENARIOS[2], ALL_CALL_SCENARIOS[5], ALL_CALL_SCENARIOS[6]].map((s, idx) => ({
+        ...s,
+        num: idx + 1,
+      }))
+    : ALL_CALL_SCENARIOS.slice(0, requestedCount).map((s, idx) => ({ ...s, num: idx + 1 }));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -46,7 +57,8 @@ async function waitUntil(fn, timeoutMs = 28000, pollMs = 150) {
 }
 
 async function main() {
-  console.log('\n=== RUNNING 10 FULL LIVE BROWSER + WEBRTC AUDIO TEST CALLS ON GOOGLE VOICE ===\n');
+  const totalCalls = CALL_SCENARIOS.length;
+  console.log(`\n=== RUNNING ${totalCalls} FULL LIVE BROWSER + WEBRTC AUDIO TEST CALLS ON GOOGLE VOICE ===\n`);
 
   // 1. Check live /api/sarah/gv-status
   const gvStatus = await fetch(`${API_BASE}/api/sarah/gv-status`).then((r) => r.json());
@@ -189,7 +201,7 @@ async function main() {
 
       const totalMs = Date.now() - tStart;
       const row = {
-        call: `#${String(sc.num).padStart(2, '0')}/10`,
+        call: `#${String(sc.num).padStart(2, '0')}/${String(totalCalls).padStart(2, '0')}`,
         mode: sc.mode,
         caller: sc.name,
         ring1PickupMs: `${answeredSnap.ringToAnswerMs}ms`,
@@ -210,7 +222,7 @@ async function main() {
       window.__IWG_GV_HANGUP_NOW__?.();
     });
 
-    console.log('\n=== ALL 10/10 FULL LIVE BROWSER + WEBRTC CALLS PASSED (0 FAILURES) ===');
+    console.log(`\n=== ALL ${totalCalls}/${totalCalls} FULL LIVE BROWSER + WEBRTC CALLS PASSED (0 FAILURES) ===`);
     console.table(summaryRows);
   } finally {
     await browser.disconnect();
