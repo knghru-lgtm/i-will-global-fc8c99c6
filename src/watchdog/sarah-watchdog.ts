@@ -269,21 +269,32 @@ export async function attachBulletproofCallPickup(
 
       const domCheck = await page.evaluate(
         (ansSels: string[], hupSels: string[]) => {
+          // Collect document + open ShadowRoots ONCE per 700ms tick (<1ms, zero main-thread lag)
+          const roots: Array<Document | ShadowRoot> = [document];
+          const collectShadowRoots = (root: Document | ShadowRoot) => {
+            try {
+              const all = root.querySelectorAll('*');
+              for (let i = 0; i < all.length; i++) {
+                const sr = (all[i] as HTMLElement).shadowRoot;
+                if (sr) {
+                  roots.push(sr);
+                  collectShadowRoots(sr);
+                }
+              }
+            } catch {}
+          };
+          collectShadowRoots(document);
+
           const queryAllDeep = (selector: string): HTMLElement[] => {
             const results: HTMLElement[] = [];
-            const traverse = (root: Document | ShadowRoot | Element) => {
+            for (let i = 0; i < roots.length; i++) {
               try {
-                root.querySelectorAll(selector).forEach((el) => results.push(el as HTMLElement));
+                const list = roots[i].querySelectorAll(selector);
+                for (let j = 0; j < list.length; j++) {
+                  results.push(list[j] as HTMLElement);
+                }
               } catch {}
-              try {
-                root.querySelectorAll('*').forEach((el) => {
-                  if ((el as HTMLElement).shadowRoot) {
-                    traverse((el as HTMLElement).shadowRoot!);
-                  }
-                });
-              } catch {}
-            };
-            traverse(document);
+            }
             return results;
           };
 
@@ -495,12 +506,16 @@ export async function attachBulletproofCallPickup(
           gvUrl: url,
           geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
           activeCallInProgress: domCheck.activeCallInProgress,
+          lastFailureReason: null,
         });
       }
     } catch (err: any) {
-      writeSarahState({
-        lastFailureReason: `Puppeteer poll error: ${err?.message || String(err)}`,
-      });
+      const msg = String(err?.message || err);
+      if (!/Execution context was destroyed|Target closed/i.test(msg)) {
+        writeSarahState({
+          lastFailureReason: `Puppeteer poll error: ${msg}`,
+        });
+      }
     } finally {
       pollBusy = false;
     }

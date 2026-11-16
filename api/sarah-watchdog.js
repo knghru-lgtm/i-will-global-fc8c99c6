@@ -199,23 +199,32 @@ async function attachBulletproofCallPickup(page, context) {
       const { answerSelectors, hangupSelectors } = getDynamicSelectors();
       const domCheck = await page.evaluate(
         (ansSels, hupSels) => {
+          const roots = [document];
+          const collectShadowRoots = (root) => {
+            try {
+              const all = root.querySelectorAll("*");
+              for (let i = 0; i < all.length; i++) {
+                const sr = all[i].shadowRoot;
+                if (sr) {
+                  roots.push(sr);
+                  collectShadowRoots(sr);
+                }
+              }
+            } catch {
+            }
+          };
+          collectShadowRoots(document);
           const queryAllDeep = (selector) => {
             const results = [];
-            const traverse = (root) => {
+            for (let i = 0; i < roots.length; i++) {
               try {
-                root.querySelectorAll(selector).forEach((el) => results.push(el));
+                const list = roots[i].querySelectorAll(selector);
+                for (let j = 0; j < list.length; j++) {
+                  results.push(list[j]);
+                }
               } catch {
               }
-              try {
-                root.querySelectorAll("*").forEach((el) => {
-                  if (el.shadowRoot) {
-                    traverse(el.shadowRoot);
-                  }
-                });
-              } catch {
-              }
-            };
-            traverse(document);
+            }
             return results;
           };
           const allButtons = queryAllDeep('button, [role="button"], a');
@@ -374,13 +383,17 @@ async function attachBulletproofCallPickup(page, context) {
           isLoggedIn,
           gvUrl: url,
           geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
-          activeCallInProgress: domCheck.activeCallInProgress
+          activeCallInProgress: domCheck.activeCallInProgress,
+          lastFailureReason: null
         });
       }
     } catch (err) {
-      writeSarahState({
-        lastFailureReason: `Puppeteer poll error: ${err?.message || String(err)}`
-      });
+      const msg = String(err?.message || err);
+      if (!/Execution context was destroyed|Target closed/i.test(msg)) {
+        writeSarahState({
+          lastFailureReason: `Puppeteer poll error: ${msg}`
+        });
+      }
     } finally {
       pollBusy = false;
     }
