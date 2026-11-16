@@ -5,7 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import puppeteer from 'puppeteer-core';
-import { attachBulletproofCallPickup } from '../api/sarah-watchdog.js';
+import {
+  attachBulletproofCallPickup,
+  readSarahState,
+  writeSarahState,
+} from '../api/sarah-watchdog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -44,52 +48,41 @@ let latestWebSettingsSummary = {
 
 function recordCallState(update = {}) {
   try {
-    let prev = {};
-    if (existsSync(CALL_STATE_FILE)) {
-      try {
-        prev = JSON.parse(readFileSync(CALL_STATE_FILE, 'utf8')) || {};
-      } catch {
-        prev = {};
-      }
-    }
-    const nowTs = Date.now();
-    const nowIso = new Date(nowTs).toISOString();
-    const status = String(update.status || prev.status || 'IDLE');
-    const history = Array.isArray(prev.history) ? prev.history.slice(-24) : [];
-    if (update.status) {
-      history.push({
-        status,
-        ts: nowTs,
-        isoTime: nowIso,
-        caller: update.caller ?? prev.caller ?? '',
-        details: update.details || '',
-      });
-    }
-    const nextState = {
-      ...prev,
-      ...update,
-      status,
-      timestamp: nowTs,
-      isoTime: nowIso,
-      instanceId: INSTANCE_ID,
-      build: EXTENSION_BUILD,
-      webCallingVerified: latestWebSettingsSummary.webDeviceEnabled,
-      webSettingsActions: latestWebSettingsSummary.actions,
-      lastIncomingDetectedTs:
-        status === 'INCOMING_CALL_DETECTED' ? nowTs : prev.lastIncomingDetectedTs || 0,
-      lastCallActiveTs:
-        status === 'CALL_ACTIVE' ? nowTs : prev.lastCallActiveTs || 0,
-      lastPickupFailedTs:
-        status === 'CALL_PICKUP_FAILED' ? nowTs : prev.lastPickupFailedTs || 0,
-      totalPickupFailures:
-        status === 'CALL_PICKUP_FAILED'
-          ? Number(prev.totalPickupFailures || 0) + 1
-          : Number(prev.totalPickupFailures || 0),
-      missedCallDebugScreenshot: existsSync(MISSED_CALL_DEBUG_PNG) ? MISSED_CALL_DEBUG_PNG : null,
-      history,
+    const prev = readSarahState();
+    const nowIso = new Date().toISOString();
+    const status = String(update.status || 'IDLE');
+    const urlStr = String(update.url || prev.gvUrl || '');
+    const patch = {
+      gvUrl: urlStr || prev.gvUrl,
+      isLoggedIn:
+        status === 'UNAUTHENTICATED'
+          ? false
+          : urlStr
+            ? urlStr.includes('voice.google.com') && !urlStr.includes('accounts.google.com') && !urlStr.includes('/about')
+            : prev.isLoggedIn,
+      gvWebDeviceEnabled: latestWebSettingsSummary.webDeviceEnabled || prev.gvWebDeviceEnabled,
+      gvDoNotDisturbOff: true,
     };
-    writeFileSync(CALL_STATE_FILE, JSON.stringify(nextState, null, 2), 'utf8');
-    return nextState;
+    if (status === 'INCOMING_CALL_DETECTED') {
+      patch.incomingRingDetectedAt = nowIso;
+      patch.totalCallsDetected = prev.totalCallsDetected + 1;
+    } else if (status === 'CALL_ACTIVE') {
+      patch.activeCallInProgress = true;
+      if (!prev.activeCallInProgress) {
+        patch.lastCallAnsweredAt = nowIso;
+        patch.totalCallsAnswered = prev.totalCallsAnswered + 1;
+      }
+      patch.lastFailureReason = null;
+    } else if (status === 'CALL_PICKUP_FAILED') {
+      patch.lastPickupFailureAt = nowIso;
+      patch.lastFailureReason = String(
+        update.details || 'Answer clicked but call did not transition to active state.'
+      );
+      patch.totalMissedOrFailed = prev.totalMissedOrFailed + 1;
+    } else if (status === 'CALL_ENDED' || status === 'IDLE') {
+      patch.activeCallInProgress = false;
+    }
+    return writeSarahState(patch);
   } catch {
     return null;
   }
@@ -848,9 +841,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
       } catch { }
 
       // Attach 700ms Bulletproof 3-Vector Call Pickup + 3-Min Settings Auditor + Gemini Auto-Patcher
-      bulletproofPickupHandle = await attachBulletproofCallPickup(page, context, {
-        userAgent: effectiveUa,
-      });
+      await attachBulletproofCallPickup(page, context);
 
       // Verify Google Voice Web ringing ("Prefer Wi-Fi and mobile data" + Web ON + Call Screening OFF + DND OFF)
       await verifyGoogleVoiceWebSettings(page);
