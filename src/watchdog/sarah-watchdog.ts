@@ -65,6 +65,9 @@ interface WatchdogPersistedState {
   lastPreWindowMaintDate: string;
   totalTicks: number;
   totalAutoFixesApplied: number;
+  healthyStreakMinutes: number;
+  lastTopMissedCallSignature: string;
+  learnedEvents: Array<{ ts: string; type: string; detail: string }>;
 }
 
 function resolveRepoRoot(): string {
@@ -93,6 +96,8 @@ async function inspectLiveCdpSipRegistration(): Promise<{
   hasVoipErrorBanner: boolean;
   lastSignalerStatus: number;
   sipUnregistered: boolean;
+  audioInputCount: number;
+  topMissedCallSignature: string;
 }> {
   try {
     const requireDaemon = createRequire(path.join(REPO_ROOT, 'cloud-voip-daemon', 'package.json'));
@@ -103,11 +108,34 @@ async function inspectLiveCdpSipRegistration(): Promise<{
       const pages = await browser.pages();
       const gvPage = pages.find((p: any) => p.url().startsWith('https://voice.google.com')) || pages[0];
       if (!gvPage) {
-        return { reachable: true, hasVoipErrorBanner: false, lastSignalerStatus: 0, sipUnregistered: false };
+        return {
+          reachable: true,
+          hasVoipErrorBanner: false,
+          lastSignalerStatus: 0,
+          sipUnregistered: false,
+          audioInputCount: 1,
+          topMissedCallSignature: '',
+        };
       }
-      const res = await gvPage.evaluate(() => {
+      const res = await gvPage.evaluate(async () => {
+        // Auto-accept "Receive calls on the web -> Allow" banner if present
+        try {
+          for (const b of Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]'))) {
+            if (b.offsetWidth > 0 && /^allow$/i.test((b.textContent || '').trim())) {
+              const ctx = String(b.parentElement?.parentElement?.innerText || '');
+              if (/receive calls on the web|turn on web calling/i.test(ctx)) b.click();
+            }
+          }
+        } catch {}
+
+        const devs = await navigator.mediaDevices?.enumerateDevices?.().catch(() => []);
+        const audioInputCount = Array.isArray(devs) ? devs.filter((d) => d.kind === 'audioinput').length : 0;
+
         const bodyTxt = String(document.body?.innerText || '');
         const hasVoipErrorBanner = /unable to make or receive calls over the internet/i.test(bodyTxt);
+        const missedMatch = bodyTxt.match(/Missed call from [^.]{1,80}\.\s*[A-Za-z]+,\s*[A-Za-z]+\s+\d+\s+\d{4},\s*\d+:\d+\s*[AP]M/i);
+        const topMissedCallSignature = missedMatch ? missedMatch[0].replace(/\s+/g, ' ').trim() : '';
+
         const entries = (performance.getEntriesByType('resource') || []) as PerformanceResourceTiming[];
         let lastSignalerStatus = 0;
         let recentVoice401 = false;
@@ -128,14 +156,28 @@ async function inspectLiveCdpSipRegistration(): Promise<{
           lastSignalerStatus === 401 ||
           lastSignalerStatus === 403 ||
           (recentVoice401 && lastSignalerStatus !== 200);
-        return { reachable: true, hasVoipErrorBanner, lastSignalerStatus, sipUnregistered };
+        return {
+          reachable: true,
+          hasVoipErrorBanner,
+          lastSignalerStatus,
+          sipUnregistered,
+          audioInputCount,
+          topMissedCallSignature,
+        };
       });
       return res;
     } finally {
       await browser.disconnect();
     }
   } catch {
-    return { reachable: false, hasVoipErrorBanner: false, lastSignalerStatus: 0, sipUnregistered: false };
+    return {
+      reachable: false,
+      hasVoipErrorBanner: false,
+      lastSignalerStatus: 0,
+      sipUnregistered: false,
+      audioInputCount: 1,
+      topMissedCallSignature: '',
+    };
   }
 }
 
@@ -195,10 +237,21 @@ function loadState(): WatchdogPersistedState {
         lastPreWindowMaintDate: String(parsed.lastPreWindowMaintDate || ''),
         totalTicks: Number(parsed.totalTicks || 0),
         totalAutoFixesApplied: Number(parsed.totalAutoFixesApplied || 0),
+        healthyStreakMinutes: Number(parsed.healthyStreakMinutes || 0),
+        lastTopMissedCallSignature: String(parsed.lastTopMissedCallSignature || ''),
+        learnedEvents: Array.isArray(parsed.learnedEvents) ? parsed.learnedEvents.slice(-50) : [],
       };
     }
   } catch {}
-  return { consecutiveFailures: 0, lastPreWindowMaintDate: '', totalTicks: 0, totalAutoFixesApplied: 0 };
+  return {
+    consecutiveFailures: 0,
+    lastPreWindowMaintDate: '',
+    totalTicks: 0,
+    totalAutoFixesApplied: 0,
+    healthyStreakMinutes: 0,
+    lastTopMissedCallSignature: '',
+    learnedEvents: [],
+  };
 }
 
 function saveState(st: WatchdogPersistedState): void {
@@ -210,12 +263,13 @@ function saveState(st: WatchdogPersistedState): void {
 
 export async function collectSystemTelemetry() {
   const home = os.homedir();
-  const [pm2Raw, dfRootRaw, dfShmRaw, pulseSinksRaw, pulseMuteRaw, caddyHttpsRaw, localHealth, gvStatus, cdpSip] =
+  const [pm2Raw, dfRootRaw, dfShmRaw, pulseSinksRaw, pulseSourcesRaw, pulseMuteRaw, caddyHttpsRaw, localHealth, gvStatus, cdpSip] =
     await Promise.all([
       runLinuxShell('pm2 jlist'),
       runLinuxShell('df -P / | tail -1'),
       runLinuxShell('df -P /dev/shm 2>/dev/null | tail -1'),
       runLinuxShell('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sinks short 2>/dev/null || true'),
+      runLinuxShell('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sources short 2>/dev/null || true'),
       runLinuxShell('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null || true'),
       runLinuxShell(
         `curl -fsS -k -o /dev/null -w "%{http_code}" --max-time 5 --resolve ${PUBLIC_FQDN}:443:127.0.0.1 https://${PUBLIC_FQDN}/health 2>/dev/null || echo 0`
@@ -273,6 +327,7 @@ export async function collectSystemTelemetry() {
       diskUsePct: parsePct(dfRootRaw),
       shmUsePct: parsePct(dfShmRaw),
       pulseSinks: pulseSinksRaw,
+      pulseSources: pulseSourcesRaw,
       pulseSinkMuted: /yes/i.test(pulseMuteRaw),
       caddyHttpsCode: Number(caddyHttpsRaw || 0),
     },
@@ -399,9 +454,13 @@ export function evaluateTelemetry(
     };
   }
 
-  // 4. Playbook C: PulseAudio SarahCloudNullSink Missing/Muted or Suspended WebRTC AudioContext
+  // 4. Playbook C: PulseAudio SarahCloudNullSink / SarahCloudVirtualMic (audioinput) Missing/Muted or Suspended WebRTC AudioContext
   const missingOrMutedSink =
-    host.platform === 'linux' && (!host.pulseSinks.includes('SarahCloudNullSink') || host.pulseSinkMuted);
+    host.platform === 'linux' &&
+    (!host.pulseSinks.includes('SarahCloudNullSink') ||
+      !host.pulseSources.includes('SarahCloudVirtualMic') ||
+      host.pulseSinkMuted ||
+      (cdpSip?.reachable && cdpSip.audioInputCount === 0));
   const suspendedWebRtc =
     gvStatus?.audioCtxState && gvStatus.audioCtxState !== 'ready' && gvStatus.audioCtxState !== 'running';
 
@@ -530,7 +589,7 @@ export function evaluateTelemetry(
       layer: 'BROWSER',
       root_cause:
         'All 6 supervision layers (Linux/SHM/Locks, PM2 v22, PulseAudio 48kHz, Chromium Google Voice Ring-1 DOM, Caddy HTTPS, and CRM DB) are nominal.',
-      evidence: `online=true, sessionAuthenticated=true, signalerHttp=${telemetry.cdpSip?.lastSignalerStatus || 200}, voipBannerError=${Boolean(telemetry.cdpSip?.hasVoipErrorBanner)}, activeMode=${gvStatus.activeMode}, heartbeatAgeMs=${gvStatus.heartbeatAgeMs}ms, daemonMem=${daemonProc?.memMB ?? 0}MB, serverMem=${serverProc?.memMB ?? 0}MB, hostMem=${host.memUsedPct}%, disk=${host.diskUsePct}%, shm=${host.shmUsePct}%, caddyHttps=${host.caddyHttpsCode || 200}, phoenix=${phoenix.weekday} ${phoenix.hhmm} MST`,
+      evidence: `online=true, sessionAuthenticated=true, signalerHttp=${telemetry.cdpSip?.lastSignalerStatus || 200}, audioInputs=${telemetry.cdpSip?.audioInputCount ?? 1}, voipBannerError=${Boolean(telemetry.cdpSip?.hasVoipErrorBanner)}, activeMode=${gvStatus.activeMode}, heartbeatAgeMs=${gvStatus.heartbeatAgeMs}ms, streak=${state.healthyStreakMinutes}m, autoFixes=${state.totalAutoFixesApplied}, daemonMem=${daemonProc?.memMB ?? 0}MB, serverMem=${serverProc?.memMB ?? 0}MB, hostMem=${host.memUsedPct}%, disk=${host.diskUsePct}%, shm=${host.shmUsePct}%, caddyHttps=${host.caddyHttpsCode || 200}, phoenix=${phoenix.weekday} ${phoenix.hhmm} MST`,
     },
     dispatch: [],
     admin_escalation: { notify_human: false, alert_message: null },
@@ -555,7 +614,7 @@ async function executeDispatchInstruction(item: DispatchInstruction): Promise<Ar
         results.push({ action: act, ok: true, output: out.slice(-280) });
       } else if (act === 'PLAYBOOK_C_RESET_PULSEAUDIO_SINK') {
         const out = await runLinuxShell(
-          `export XDG_RUNTIME_DIR="/run/user/$(id -u)"; pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 2>/dev/null || true; pactl list short sinks | grep -q SarahCloudNullSink || pactl load-module module-null-sink sink_name=SarahCloudNullSink rate=48000 channels=1; pactl set-default-sink SarahCloudNullSink; pactl set-sink-mute SarahCloudNullSink 0; pactl set-default-source SarahCloudNullSink.monitor 2>/dev/null || true; pactl set-source-mute SarahCloudNullSink.monitor 0 2>/dev/null || true; pactl list short sinks`,
+          `export XDG_RUNTIME_DIR="/run/user/$(id -u)"; pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 2>/dev/null || true; pactl list short sinks | grep -q SarahCloudNullSink || pactl load-module module-null-sink sink_name=SarahCloudNullSink rate=48000 channels=1 sink_properties=device.description="Sarah_48kHz_Studio_Speaker"; pactl set-default-sink SarahCloudNullSink; pactl set-sink-mute SarahCloudNullSink 0; pactl list short sources | grep -q SarahCloudVirtualMic || pactl load-module module-remap-source master=SarahCloudNullSink.monitor source_name=SarahCloudVirtualMic source_properties=device.description="Sarah_48kHz_Studio_Microphone"; pactl set-default-source SarahCloudVirtualMic; pactl set-source-mute SarahCloudVirtualMic 0; pactl list short sources`,
           20_000
         );
         results.push({ action: act, ok: true, output: out });
@@ -681,6 +740,46 @@ export async function runWatchdogTick(): Promise<ManagerDispatchReport> {
   const telemetry = await collectSystemTelemetry();
   let report = evaluateTelemetry(telemetry, state);
 
+  // Self-learning missed-call detector: if a brand-new missed call appears on /u/0/calls while online,
+  // record forensic evidence in the learning ledger and run Playbook C + B calibration immediately.
+  const currentMissedSig = telemetry.cdpSip?.topMissedCallSignature || '';
+  if (currentMissedSig && state.lastTopMissedCallSignature && currentMissedSig !== state.lastTopMissedCallSignature) {
+    state.learnedEvents.push({
+      ts: new Date().toISOString(),
+      type: 'missed_call_self_calibration',
+      detail: `${currentMissedSig} | signaler=${telemetry.cdpSip?.lastSignalerStatus} | audioInputs=${telemetry.cdpSip?.audioInputCount}`,
+    });
+    if (report.dispatch.length === 0) {
+      report.system_status = 'DEGRADED';
+      report.diagnosis = {
+        layer: 'BROWSER',
+        root_cause: `Self-learning watchdog detected new missed-call entry (${currentMissedSig}); triggering proactive audioinput + WebRTC + DOM calibration.`,
+        evidence: `audioInputs=${telemetry.cdpSip?.audioInputCount}, signalerHttp=${telemetry.cdpSip?.lastSignalerStatus}`,
+      };
+      report.dispatch = [
+        {
+          target_agent: 'INFRA_AGENT',
+          priority: 'P1_HIGH',
+          task_summary: 'Verify 48kHz SarahCloudVirtualMic audioinput and SarahCloudNullSink audiooutput.',
+          exact_commands_or_actions: ['PLAYBOOK_C_RESET_PULSEAUDIO_SINK'],
+          verification_check: 'SarahCloudVirtualMic is active and unmuted',
+          timeout_seconds: 30,
+        },
+        {
+          target_agent: 'BROWSER_AGENT',
+          priority: 'P1_HIGH',
+          task_summary: 'Re-verify WebRTC 48kHz AudioContext and Google Voice Web ringing readiness.',
+          exact_commands_or_actions: ['PLAYBOOK_C_RESUME_WEBRTC_AUDIO'],
+          verification_check: 'audioCtxState=running and virtualTrackReadyState=live',
+          timeout_seconds: 30,
+        },
+      ];
+    }
+  }
+  if (currentMissedSig) {
+    state.lastTopMissedCallSignature = currentMissedSig;
+  }
+
   if (report.dispatch.length > 0) {
     const executionResults: NonNullable<ManagerDispatchReport['execution_results']> = [];
     for (const item of report.dispatch) {
@@ -707,9 +806,11 @@ export async function runWatchdogTick(): Promise<ManagerDispatchReport> {
       }
     } else {
       state.consecutiveFailures = 0;
+      state.healthyStreakMinutes += 1;
     }
   } else {
     state.consecutiveFailures = 0;
+    state.healthyStreakMinutes += 1;
   }
 
   saveState(state);

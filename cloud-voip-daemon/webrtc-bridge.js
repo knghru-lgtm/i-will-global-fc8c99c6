@@ -147,7 +147,63 @@
     if (!baseTrack) return null;
     const cloned = baseTrack.clone();
     cloned.enabled = true;
+    const origGetSettings = typeof cloned.getSettings === 'function' ? cloned.getSettings.bind(cloned) : null;
+    cloned.getSettings = function () {
+      const base = origGetSettings ? origGetSettings() : {};
+      return {
+        ...base,
+        deviceId: base.deviceId || 'default',
+        groupId: base.groupId || 'sarah-48khz-studio-bus',
+        sampleRate: 48000,
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      };
+    };
     return cloned;
+  }
+
+  // Ensure enumerateDevices() ALWAYS reports both audioinput and audiooutput so Google Voice registers Web ringing!
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
+    const origEnumerateDevices = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+    navigator.mediaDevices.enumerateDevices = async function () {
+      const devices = await origEnumerateDevices().catch(() => []);
+      const out = Array.isArray(devices) ? devices.slice() : [];
+      if (!out.some((d) => d && d.kind === 'audioinput')) {
+        out.unshift({
+          deviceId: 'default',
+          kind: 'audioinput',
+          label: 'Sarah 48kHz Studio Microphone',
+          groupId: 'sarah-48khz-studio-bus',
+          toJSON() {
+            return {
+              deviceId: this.deviceId,
+              kind: this.kind,
+              label: this.label,
+              groupId: this.groupId,
+            };
+          },
+        });
+      }
+      if (!out.some((d) => d && d.kind === 'audiooutput')) {
+        out.push({
+          deviceId: 'default',
+          kind: 'audiooutput',
+          label: 'Sarah 48kHz Studio Speaker',
+          groupId: 'sarah-48khz-studio-bus',
+          toJSON() {
+            return {
+              deviceId: this.deviceId,
+              kind: this.kind,
+              label: this.label,
+              groupId: this.groupId,
+            };
+          },
+        });
+      }
+      return out;
+    };
   }
 
   // 1. Intercept navigator.mediaDevices.getUserMedia — NEVER open the physical PC microphone!

@@ -962,6 +962,21 @@
       return;
     }
 
+    // Auto-accept Google Voice's first-run "Receive calls on the web -> Allow" banner if it ever appears
+    try {
+      const allowBtns = document.querySelectorAll('button, [role="button"]');
+      for (const b of allowBtns) {
+        if (!isElementVisible(b)) continue;
+        const t = String(b.textContent || '').trim();
+        if (/^allow$/i.test(t)) {
+          const bannerCtx = String(b.parentElement?.parentElement?.innerText || '');
+          if (/receive calls on the web|turn on web calling/i.test(bannerCtx)) {
+            clickElement(b);
+          }
+        }
+      }
+    } catch {}
+
     const answerBtns = findVisibleAnswerButtons(elements);
 
     // Confirm pending click succeeded as soon as WebRTC connects, Hangup appears, or Answer button disappears
@@ -1276,7 +1291,7 @@
     updateStatusBanner('🟢 Sarah Natural Voice (Vindemiatrix) Auto-Answer ON • (480) 331-9455', '#10b981');
   }
 
-  const intervalId = setInterval(() => scanGoogleVoiceDom(false), 200);
+  const intervalId = setInterval(() => scanGoogleVoiceDom(false), 100);
   const heartbeatIntervalId = IS_TOP_FRAME ? setInterval(sendWatchdogHeartbeat, 4000) : null;
   if (IS_TOP_FRAME) {
     setTimeout(sendWatchdogHeartbeat, 400);

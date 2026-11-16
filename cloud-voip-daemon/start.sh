@@ -25,9 +25,15 @@ export PULSE_LATENCY_MSEC=20
 if command -v pulseaudio >/dev/null 2>&1; then
   pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true
   if ! pactl list short sinks 2>/dev/null | grep -q "SarahCloudNullSink"; then
-    pactl load-module module-null-sink sink_name=SarahCloudNullSink rate=48000 channels=1 sink_properties=device.description="SarahCloudNullSink" 2>/dev/null || true
+    pactl load-module module-null-sink sink_name=SarahCloudNullSink rate=48000 channels=1 sink_properties=device.description="Sarah_48kHz_Studio_Speaker" 2>/dev/null || true
   fi
   pactl set-default-sink SarahCloudNullSink 2>/dev/null || true
+  pactl set-sink-mute SarahCloudNullSink 0 2>/dev/null || true
+  if ! pactl list short sources 2>/dev/null | grep -q "SarahCloudVirtualMic"; then
+    pactl load-module module-remap-source master=SarahCloudNullSink.monitor source_name=SarahCloudVirtualMic source_properties=device.description="Sarah_48kHz_Studio_Microphone" 2>/dev/null || true
+  fi
+  pactl set-default-source SarahCloudVirtualMic 2>/dev/null || true
+  pactl set-source-mute SarahCloudVirtualMic 0 2>/dev/null || true
 fi
 
 # 3. Ultra-slim 16-bit 800x600 Xvfb (no GLX/TCP bloat — saves ~45 MB RAM on e2-small)
