@@ -285,12 +285,12 @@ async function runInlineGoogleVoiceSettingsAuditOnPage(page: Page): Promise<{
     return { webOn, dndOff, actions };
   });
 
+  await new Promise((r) => setTimeout(r, 250));
   writeSarahState({
     gvWebDeviceEnabled: audit.webOn,
     gvDoNotDisturbOff: audit.dndOff,
     lastSettingsAuditIso: new Date().toISOString(),
   });
-  await page.screenshot({ path: LIVE_STATUS_SCREENSHOT_PATH }).catch(() => {});
   return audit;
 }
 

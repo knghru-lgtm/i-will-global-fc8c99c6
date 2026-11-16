@@ -424,7 +424,7 @@ async function runPre9AmGeminiAutoFix(failureSummary: string): Promise<string[]>
     ).catch(() => {});
     actions.push('restarted_cloud_voip_daemon');
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 48; i++) {
       await sleep(2000);
       const st = readSarahState();
       if (st.isLoggedIn && Date.now() - new Date(st.lastHeartbeatIso).getTime() < 5000) {

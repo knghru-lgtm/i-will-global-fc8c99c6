@@ -53,13 +53,14 @@ if command -v pm2 >/dev/null 2>&1; then
   pm2 delete sarah-855-probe 2>/dev/null || true
 
   pm2 stop cloud-voip-daemon 2>/dev/null || true
+  rm -f /tmp/sarah-call-state.json /tmp/sarah-trigger-synthetic-ring.flag /tmp/sarah-audit-settings.flag 2>/dev/null || true
   sleep 1
   pm2 start cloud-voip-daemon --update-env 2>/dev/null || pm2 start ecosystem.config.cjs --only cloud-voip-daemon
   pm2 restart sarah-server --update-env 2>/dev/null || pm2 start ecosystem.config.cjs --only sarah-server
   pm2 start src/watchdog/sarah-watchdog.ts --name sarah-watchdog --interpreter npx --interpreter-args "tsx"
 
   echo "⏳ Waiting for Google Voice WebRTC session to come online..."
-  for i in $(seq 1 30); do
+  for i in $(seq 1 48); do
     if grep -q '"isLoggedIn": true' /tmp/sarah-call-state.json 2>/dev/null && curl -fsS http://127.0.0.1:4000/api/sarah/gv-status 2>/dev/null | grep -q '"online":true'; then
       echo "✅ Google Voice (+14803319455) authenticated & online."
       break
