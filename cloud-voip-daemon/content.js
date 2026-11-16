@@ -422,7 +422,7 @@
     preloadSarahNaturalGreeting();
   }
 
-  function playSingleWavBase64(base64, mime = 'audio/wav', maxMs = 18000) {
+  function playSingleWavBase64(base64, mime = 'audio/wav', maxMs = 30000) {
     return new Promise((resolve) => {
       if (!base64) return resolve(false);
 
@@ -1062,6 +1062,25 @@
 
     const answerBtns = findVisibleAnswerButtons(elements);
     const liveIncomingText = detectLiveIncomingCallContainer(elements);
+
+    // If 700ms Bulletproof Pickup Loop answered directly before content.js set pendingAnswerAttempt, greet immediately!
+    if (!pendingAnswerAttempt && IS_TOP_FRAME && now - lastCallEndedTs > 1200 && hasActiveCallIndicators(elements)) {
+      const detectedCaller = extractActiveCallerPhone();
+      logCallStateToNode({
+        status: 'CALL_ACTIVE',
+        caller: detectedCaller,
+        activeCallVerified: true,
+        activeVerificationMs: 0,
+        url: window.location.href,
+        details: 'Active call verified directly after 700ms Bulletproof Pickup Loop.',
+      });
+      setTimeout(() => {
+        if (!callActive) {
+          onIncomingCallAnswered(detectedCaller);
+        }
+      }, 150);
+      return;
+    }
 
     // STRICT 2,000ms ACTIVE-CALL VERIFICATION:
     // NEVER treat answerBtns.length === 0 alone as answered! Require an active call timer (00:01),

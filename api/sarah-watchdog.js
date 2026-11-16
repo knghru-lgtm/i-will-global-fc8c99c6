@@ -690,7 +690,7 @@ async function inspectLiveCdpDeepDom(captureFreshScreenshot = false) {
     const requireDaemon = createRequire(path.join(REPO_ROOT, "cloud-voip-daemon", "package.json"));
     const puppeteer = requireDaemon("puppeteer-core");
     const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-    const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl });
+    const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl, defaultViewport: null });
     try {
       const pages = await browser.pages();
       const gvPage = pages.find((p) => p.url().startsWith("https://voice.google.com")) || pages[0];
@@ -1305,7 +1305,7 @@ async function executeDispatchInstruction(item) {
         const requireDaemon = createRequire(path.join(REPO_ROOT, "cloud-voip-daemon", "package.json"));
         const puppeteer = requireDaemon("puppeteer-core");
         const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-        const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl });
+        const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl, defaultViewport: null });
         try {
           if (act === "AUDIT_GV_SETTINGS") {
             const auditRes = await auditAndHealGoogleVoiceSettings(browser);
@@ -1424,7 +1424,7 @@ async function runWatchdogTick(captureFreshScreenshot = false) {
         const requireDaemon = createRequire(path.join(REPO_ROOT, "cloud-voip-daemon", "package.json"));
         const puppeteer = requireDaemon("puppeteer-core");
         const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-        const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl });
+        const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl, defaultViewport: null });
         try {
           const auditRes = await auditAndHealGoogleVoiceSettings(browser);
           state.lastSettingsAuditAt = auditRes.lastAuditAt;

@@ -936,7 +936,7 @@ export async function inspectLiveCdpDeepDom(captureFreshScreenshot = false): Pro
     const requireDaemon = createRequire(path.join(REPO_ROOT, 'cloud-voip-daemon', 'package.json'));
     const puppeteer = requireDaemon('puppeteer-core');
     const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-    const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl });
+    const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl, defaultViewport: null });
     try {
       const pages = await browser.pages();
       const gvPage = pages.find((p: any) => p.url().startsWith('https://voice.google.com')) || pages[0];
@@ -1656,7 +1656,7 @@ async function executeDispatchInstruction(item: DispatchInstruction): Promise<Ar
         const requireDaemon = createRequire(path.join(REPO_ROOT, 'cloud-voip-daemon', 'package.json'));
         const puppeteer = requireDaemon('puppeteer-core');
         const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-        const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl });
+        const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl, defaultViewport: null });
         try {
           if (act === 'AUDIT_GV_SETTINGS') {
             const auditRes = await auditAndHealGoogleVoiceSettings(browser);
@@ -1779,7 +1779,7 @@ export async function runWatchdogTick(captureFreshScreenshot = false): Promise<M
         const requireDaemon = createRequire(path.join(REPO_ROOT, 'cloud-voip-daemon', 'package.json'));
         const puppeteer = requireDaemon('puppeteer-core');
         const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-        const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl });
+        const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl, defaultViewport: null });
         try {
           const auditRes = await auditAndHealGoogleVoiceSettings(browser);
           state.lastSettingsAuditAt = auditRes.lastAuditAt;

@@ -69,7 +69,7 @@ async function main() {
 
   // 2. Attach to live Google Voice Chrome via CDP
   const ver = await fetch(`${CDP_URL}/json/version`).then((r) => r.json());
-  const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl });
+  const browser = await puppeteer.connect({ browserWSEndpoint: ver.webSocketDebuggerUrl, defaultViewport: null });
 
   try {
     const pages = await browser.pages();
@@ -138,7 +138,7 @@ async function main() {
             }
             return null;
           }, prevPlaybacks),
-        26000,
+        32000,
         180
       );
       assert.ok(greetingDone, `Call #${sc.num}: Greeting audio playback did not complete!`);
