@@ -72,7 +72,7 @@ export async function executeSubAgentDispatch(item, { apiBase = 'http://127.0.0.
       } else if (act.includes('PLAYBOOK_C') || act.includes('SarahCloudNullSink')) {
         const { stdout } = await execFileAsync('/bin/sh', [
           '-c',
-          `pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 2>/dev/null || true; pactl list short sinks | grep -q SarahCloudNullSink || pactl load-module module-null-sink sink_name=SarahCloudNullSink rate=48000 channels=1; pactl set-default-sink SarahCloudNullSink; pactl list short sinks`,
+          `export XDG_RUNTIME_DIR="/run/user/$(id -u)"; pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 2>/dev/null || true; pactl list short sinks | grep -q SarahCloudNullSink || pactl load-module module-null-sink sink_name=SarahCloudNullSink rate=48000 channels=1; pactl set-default-sink SarahCloudNullSink; pactl list short sinks`,
         ], { timeout: 20000 });
         results.push({ action: 'PLAYBOOK_C_RESET_PULSEAUDIO_SINK', ok: true, output: stdout.trim() });
       } else if (act.includes('PLAYBOOK_D') || act.includes('pm2 flush')) {

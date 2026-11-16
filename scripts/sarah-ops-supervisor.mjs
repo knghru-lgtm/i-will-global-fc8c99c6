@@ -101,7 +101,7 @@ export async function collectSystemTelemetry() {
       .then((r) => r.json())
       .catch(() => null),
     runShellSafe('df -P / | tail -1'),
-    runShellSafe('pactl list sinks short 2>/dev/null || true'),
+    runShellSafe('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sinks short 2>/dev/null || true'),
   ]);
 
   let diskUsePct = 0;
