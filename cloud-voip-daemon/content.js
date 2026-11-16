@@ -768,6 +768,7 @@
       prospect_phone: callerPhone || '',
       address: '',
       state: 'AZ',
+      force_work_hours: isBusinessHours,
     };
 
     callHistory.push({ speaker: 'sarah', text: selectedGreetingText });
