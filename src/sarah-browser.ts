@@ -80,7 +80,7 @@ export async function launchSarahExclusiveBrowser(): Promise<{
     ignoreDefaultArgs: [
       '--enable-automation',
       '--disable-extensions', // Handled explicitly in args below to prevent override
-      '--mute-audio', // CRITICAL: Never mute audio or Gemini Live Aoede cannot hear/speak
+      '--mute-audio', // CRITICAL: Never mute audio or Gemini Live Vindemiatrix cannot hear/speak
     ],
     args: [
       '--no-sandbox',
@@ -91,7 +91,7 @@ export async function launchSarahExclusiveBrowser(): Promise<{
       '--disable-component-extensions-with-background-pages',
       '--disable-default-apps',
       '--disable-sync', // Prevents Chrome profile sync from re-downloading Chrome Voice extensions
-      // UNTHROTTLED WEBRTC & AUDIO STREAMING FOR GEMINI LIVE (AOEDE):
+      // UNTHROTTLED WEBRTC & AUDIO STREAMING FOR GEMINI LIVE (VINDEMIATRIX):
       '--autoplay-policy=no-user-gesture-required',
       '--use-fake-ui-for-media-stream',
       '--disable-background-timer-throttling',
@@ -153,7 +153,7 @@ export async function launchSarahExclusiveBrowser(): Promise<{
   // 5. Attach the 700ms Multi-Vector Call Pickup & Gemini Auto-Patcher Loop
   await attachBulletproofCallPickup(primaryPage, context);
   console.log(
-    '[Sarah Boot] Exclusive Call Pickup & Anti-Hijack Lock active (100% Google-Native / Gemini Live Aoede).'
+    '[Sarah Boot] Exclusive Call Pickup & Anti-Hijack Lock active (100% Google-Native / Gemini Live Vindemiatrix).'
   );
 
   return { browser, page: primaryPage };

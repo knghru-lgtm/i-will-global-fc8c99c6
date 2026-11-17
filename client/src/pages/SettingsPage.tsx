@@ -1153,9 +1153,8 @@ export const SettingsPage: React.FC = () => {
                   ))
                 ) : (
                   <>
-                    <option value="Vindemiatrix">Vindemiatrix (Google GenAI Natural Female ★ Active)</option>
+                    <option value="Vindemiatrix">Vindemiatrix (Google GenAI Natural Female ★ Locked)</option>
                     <option value="Kore">Kore (Google GenAI Warm Female)</option>
-                    <option value="Aoede">Aoede (Google GenAI Clear Female)</option>
                     <option value="Leda">Leda (Google GenAI Calm Healthcare)</option>
                   </>
                 )}

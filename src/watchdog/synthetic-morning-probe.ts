@@ -1,11 +1,11 @@
 /**
  * Google-Native 8:55 AM MST Synthetic Morning Probe (`sarah-855-probe`)
- * 100% Google Voice (+14803319455) + Puppeteer/Chromium + PulseAudio (`virtual_speaker`/`virtual_mic`) + Gemini Live API (`Aoede`)
+ * 100% Google Voice (+14803319455) + Puppeteer/Chromium + PulseAudio (`gv_speaker`/`sarah_virtual_mic`) + Gemini Live API (`Vindemiatrix`)
  *
  * Scheduled at 08:55 AM MST (`America/Phoenix`, Monday–Friday) to verify and self-heal every layer
  * 5 minutes before the 09:00 AM MST business-hours window opens:
  *   1. Google Voice Session & Settings Audit (`voice.google.com` logged in, DND OFF, "Web" device ON via atomic flag IPC)
- *   2. PulseAudio (`virtual_speaker` / `virtual_mic` loaded & unmuted) + Live Gemini (`Aoede`) WebSocket Handshake
+ *   2. PulseAudio (`gv_speaker` / `sarah_virtual_mic` loaded & unmuted) + Live Gemini (`Vindemiatrix`) WebSocket Handshake
  *   3. 5-Second Synthetic DOM Ring & Pickup SLA Test (`/tmp/sarah-trigger-synthetic-ring.flag` -> `< 5,000ms` pickup)
  *   4. Pre-9AM Gemini (`gemini-2.5-flash`) Auto-Fixer + Re-Test if any check fails
  */
@@ -161,7 +161,7 @@ async function auditGoogleVoiceSessionAndSettings(): Promise<{
 }
 
 // ============================================================================
-// CHECK 2: PULSEAUDIO SINK/MIC & GEMINI LIVE (`Aoede`) WEBSOCKET HANDSHAKE
+// CHECK 2: PULSEAUDIO SINK/MIC & GEMINI LIVE (`Vindemiatrix`) WEBSOCKET HANDSHAKE
 // ============================================================================
 async function testPulseAudioSinks(): Promise<{
   passed: boolean;
@@ -186,7 +186,7 @@ async function testPulseAudioSinks(): Promise<{
         'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
         'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --realtime=true --system=false --disallow-module-loading=false 2>/dev/null || true',
         'pactl list short sinks | grep -q gv_speaker || pactl load-module module-null-sink sink_name=gv_speaker rate=16000 channels=1 sink_properties=device.description="Caller_From_GoogleVoice"',
-        'pactl list short sinks | grep -q gv_mic_sink || pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1 sink_properties=device.description="Sarah_Aoede_Output"',
+        'pactl list short sinks | grep -q gv_mic_sink || pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1 sink_properties=device.description="Sarah_Vindemiatrix_Output"',
         'pactl list short sources | grep -q sarah_virtual_mic || pactl load-module module-remap-source master=gv_mic_sink.monitor source_name=sarah_virtual_mic source_properties=device.description="Sarah_Virtual_Mic"',
         'pactl set-sink-mute gv_speaker 0',
         'pactl set-sink-mute gv_mic_sink 0',
@@ -236,7 +236,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
     return {
       passed: false,
       handshakeMs: 0,
-      voiceProfile: 'Aoede',
+      voiceProfile: 'Vindemiatrix',
       mode: 'missing_key',
       details: 'GEMINI_API_KEY is not configured in environment.',
     };
@@ -270,7 +270,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
       finish({
         passed: opened,
         handshakeMs: Date.now() - t0,
-        voiceProfile: 'Aoede',
+        voiceProfile: 'Vindemiatrix',
         mode: opened ? 'ws_open_timeout_after_connect' : 'ws_timeout',
         details: opened
           ? 'Gemini Live WebSocket upgraded cleanly (TLS + 101 Switching Protocols).'
@@ -289,7 +289,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
               speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: {
-                    voiceName: 'Aoede',
+                    voiceName: 'Vindemiatrix',
                   },
                 },
               },
@@ -304,7 +304,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
       finish({
         passed: true,
         handshakeMs: Date.now() - t0,
-        voiceProfile: 'Aoede',
+        voiceProfile: 'Vindemiatrix',
         mode: txt.includes('setupComplete') ? 'setup_complete' : 'bidi_frame_received',
         details: `Gemini Live Bidi WebSocket setup acknowledged in ${Date.now() - t0}ms.`,
       });
@@ -316,7 +316,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
         finish({
           passed: true,
           handshakeMs: Date.now() - t0,
-          voiceProfile: 'Aoede',
+          voiceProfile: 'Vindemiatrix',
           mode: code === 1000 ? 'clean_close' : `ws_connected_code_${code}_circuit_breaker_ready`,
           details: `Gemini Live WebSocket TLS+101 handshake verified in ${Date.now() - t0}ms (${reason.slice(0, 90) || 'ready'}).`,
         });
@@ -325,7 +325,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
       finish({
         passed: false,
         handshakeMs: Date.now() - t0,
-        voiceProfile: 'Aoede',
+        voiceProfile: 'Vindemiatrix',
         mode: `ws_closed_${code}`,
         details: `WebSocket closed (${code}): ${reason.slice(0, 120)}`,
       });
@@ -335,7 +335,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
       finish({
         passed: false,
         handshakeMs: Date.now() - t0,
-        voiceProfile: 'Aoede',
+        voiceProfile: 'Vindemiatrix',
         mode: 'ws_error',
         details: `WebSocket error: ${err.message}`,
       });
@@ -530,7 +530,7 @@ export async function runSyntheticMorningProbe() {
   const report = {
     probe: 'sarah-855-morning-synthetic-probe',
     architecture:
-      '100% Google Stack (Google Voice +14803319455 + Puppeteer + PulseAudio + Gemini Live Aoede)',
+      '100% Google Stack (Google Voice +14803319455 + Puppeteer + PulseAudio + Gemini Live Vindemiatrix)',
     startedAtIso,
     completedAtIso: new Date().toISOString(),
     phoenixTime: `${phoenixLocalTime} MST`,
@@ -540,7 +540,7 @@ export async function runSyntheticMorningProbe() {
     checks: {
       googleVoiceSessionAndSettings: finalResult.gvAudit,
       pulseAudioVirtualSinks: finalResult.pulseCheck,
-      geminiLiveAoedeWebSocket: finalResult.geminiWsCheck,
+      geminiLiveVindemiatrixWebSocket: finalResult.geminiWsCheck,
       syntheticDomRingSla: finalResult.syntheticRingSla,
     },
     sarahStateSnapshot: readSarahState(),

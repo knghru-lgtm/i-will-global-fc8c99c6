@@ -17,6 +17,11 @@ type BrowserContext = any;
 
 const execAsync = promisify(exec);
 
+export const VOICE_PROFILE = 'Vindemiatrix' as const;
+export const ANTI_HANGUP_GUARD_STATUS = 'ACTIVE' as const;
+export const MIN_HEALTHY_CALL_DURATION_MS = 12000;
+export const MIN_OPENING_SCRIPT_PCM_BYTES = 96000;
+
 function hydrateEnvFromDotFiles(): void {
   try {
     const thisDir = path.dirname(fileURLToPath(import.meta.url));
@@ -133,6 +138,8 @@ export function saveDynamicSelectors(patch: Partial<DynamicSelectors>): DynamicS
 
 export interface SarahLiveState {
   lastHeartbeatIso: string;
+  voiceProfile: string;
+  antiHangupGuard: 'ACTIVE' | 'INACTIVE';
   gvUrl: string;
   isLoggedIn: boolean;
   gvWebDeviceEnabled: boolean;
@@ -149,6 +156,12 @@ export interface SarahLiveState {
   activeCallInProgress: boolean;
   sarahVoiceStreamActive: boolean;
   voiceSessionState: string;
+  lastCallDurationMs: number | null;
+  scriptCompleted: boolean;
+  pcmBytesSentToMic: number;
+  prematureHangupsCount: number;
+  lastPrematureHangupAt: string | null;
+  lastHealthyCallCompletedAt: string | null;
   openTabCount: number;
   pulseStreamBoundToVirtualBridge: boolean;
   lastHijackEvent: string | null;
@@ -159,6 +172,8 @@ export interface SarahLiveState {
 
 const defaultState: SarahLiveState = {
   lastHeartbeatIso: new Date(0).toISOString(),
+  voiceProfile: VOICE_PROFILE,
+  antiHangupGuard: ANTI_HANGUP_GUARD_STATUS,
   gvUrl: 'unknown',
   isLoggedIn: false,
   gvWebDeviceEnabled: true,
@@ -175,6 +190,12 @@ const defaultState: SarahLiveState = {
   activeCallInProgress: false,
   sarahVoiceStreamActive: false,
   voiceSessionState: 'IDLE',
+  lastCallDurationMs: null,
+  scriptCompleted: false,
+  pcmBytesSentToMic: 0,
+  prematureHangupsCount: 0,
+  lastPrematureHangupAt: null,
+  lastHealthyCallCompletedAt: null,
   openTabCount: 1,
   pulseStreamBoundToVirtualBridge: true,
   lastHijackEvent: null,
@@ -192,6 +213,9 @@ export function readSarahState(): SarahLiveState {
           typeof raw.lastHeartbeatIso === 'string' && raw.lastHeartbeatIso
             ? raw.lastHeartbeatIso
             : defaultState.lastHeartbeatIso,
+        voiceProfile: VOICE_PROFILE,
+        antiHangupGuard:
+          raw.antiHangupGuard === 'INACTIVE' ? 'INACTIVE' : ANTI_HANGUP_GUARD_STATUS,
         gvUrl: typeof raw.gvUrl === 'string' ? raw.gvUrl : defaultState.gvUrl,
         isLoggedIn: Boolean(raw.isLoggedIn),
         gvWebDeviceEnabled:
@@ -214,6 +238,13 @@ export function readSarahState(): SarahLiveState {
         sarahVoiceStreamActive: Boolean(raw.sarahVoiceStreamActive),
         voiceSessionState:
           typeof raw.voiceSessionState === 'string' ? raw.voiceSessionState : 'IDLE',
+        lastCallDurationMs:
+          typeof raw.lastCallDurationMs === 'number' ? raw.lastCallDurationMs : null,
+        scriptCompleted: Boolean(raw.scriptCompleted),
+        pcmBytesSentToMic: Number(raw.pcmBytesSentToMic || 0),
+        prematureHangupsCount: Number(raw.prematureHangupsCount || 0),
+        lastPrematureHangupAt: raw.lastPrematureHangupAt ?? null,
+        lastHealthyCallCompletedAt: raw.lastHealthyCallCompletedAt ?? null,
         openTabCount: typeof raw.openTabCount === 'number' ? raw.openTabCount : 1,
         pulseStreamBoundToVirtualBridge:
           typeof raw.pulseStreamBoundToVirtualBridge === 'boolean'
@@ -236,6 +267,7 @@ export function writeSarahState(patch: Partial<SarahLiveState>): SarahLiveState 
   const updated: SarahLiveState = {
     ...readSarahState(),
     ...patch,
+    voiceProfile: VOICE_PROFILE,
     lastHeartbeatIso: new Date().toISOString(),
   };
   try {
@@ -245,6 +277,71 @@ export function writeSarahState(patch: Partial<SarahLiveState>): SarahLiveState 
 }
 
 const auditAndEnforceAntiHijackProcesses = enforceExclusiveSarahCallOwnership;
+
+// ============================================================================
+// IN-PAGE ANTI-HANGUP DOM GUARD SCRIPT
+// Intercepts & hard-blocks any programmatic .click() on End Call / Hang Up
+// while Sarah's Vindemiatrix audio bridge is streaming or within 12s of pickup.
+// ============================================================================
+const ANTI_HANGUP_DOM_GUARD_SCRIPT = `
+(() => {
+  window.__name = (fn) => fn;
+  if (window.__SARAH_ANTI_HANGUP_INSTALLED__) {
+    window.__SARAH_ANTI_HANGUP_GUARD__ = 'ACTIVE';
+    return;
+  }
+  window.__SARAH_ANTI_HANGUP_INSTALLED__ = true;
+  window.__SARAH_ANTI_HANGUP_GUARD__ = 'ACTIVE';
+  window.__SARAH_BLOCKED_HANGUPS__ = 0;
+
+  const isHangupElement = (el) => {
+    if (!el || typeof el.closest !== 'function') return false;
+    const btn = el.closest('button, [role="button"]') || el;
+    if (!btn || btn.id === 'sarah-synthetic-hangup-btn' || btn.getAttribute?.('data-sarah-synthetic-test') === 'true') {
+      return false;
+    }
+    const label = [
+      btn.getAttribute?.('aria-label') || '',
+      btn.getAttribute?.('gv-test-id') || '',
+      btn.getAttribute?.('data-test-id') || '',
+      btn.getAttribute?.('mattooltip') || '',
+      btn.className || '',
+      btn.innerText || '',
+    ].join(' ');
+    return /in-call-end-button|call-end-button|end\\s*call|hang\\s*up/i.test(label);
+  };
+
+  const shouldBlockProgrammaticHangup = () => {
+    if (window.__SARAH_AUTHORIZED_HANGUP__ === true) return false;
+    const answeredAt = Number(window.__SARAH_CALL_ANSWERED_AT_MS__ || 0);
+    const withinOpeningLock = answeredAt > 0 && (Date.now() - answeredAt) < 12000;
+    return Boolean(window.__SARAH_STREAM_LOCK_UNTIL_COMPLETE__ === true || withinOpeningLock);
+  };
+
+  const origClick = HTMLElement.prototype.click;
+  HTMLElement.prototype.click = function (...args) {
+    if (shouldBlockProgrammaticHangup() && isHangupElement(this)) {
+      window.__SARAH_BLOCKED_HANGUPS__ = (window.__SARAH_BLOCKED_HANGUPS__ || 0) + 1;
+      console.warn('[Sarah Anti-Hangup Guard] Blocked premature programmatic .click() on End Call / Hang Up while Sarah is speaking.');
+      return;
+    }
+    return origClick.apply(this, args);
+  };
+
+  document.addEventListener(
+    'click',
+    (ev) => {
+      if (!ev.isTrusted && shouldBlockProgrammaticHangup() && isHangupElement(ev.target)) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        window.__SARAH_BLOCKED_HANGUPS__ = (window.__SARAH_BLOCKED_HANGUPS__ || 0) + 1;
+        console.warn('[Sarah Anti-Hangup Guard] Blocked synthetic untrusted click event on End Call / Hang Up.');
+      }
+    },
+    true
+  );
+})();
+`;
 
 async function runInlineGoogleVoiceSettingsAuditOnPage(page: Page): Promise<{
   webOn: boolean;
@@ -321,8 +418,26 @@ async function runInlineGoogleVoiceSettingsAuditOnPage(page: Page): Promise<{
   return audit;
 }
 
+async function captureFailureEvidenceAndBridgeLogs(page: Page, headerReason: string): Promise<void> {
+  await page.screenshot({ path: SCREENSHOT_PATH }).catch(() => {});
+  const htmlDump = await page
+    .evaluate(() => document.body.innerHTML.slice(0, 18000))
+    .catch(() => '');
+  let bridgeLogs = '';
+  try {
+    const logPath = '/home/king/.pm2/logs/sarah-daemon-out.log';
+    if (fs.existsSync(logPath)) {
+      bridgeLogs = fs.readFileSync(logPath, 'utf-8').slice(-6000);
+    }
+  } catch {}
+  const combined = `<!-- ${headerReason} -->\n<!-- BRIDGE LOG TAIL:\n${bridgeLogs}\n-->\n${htmlDump}`;
+  try {
+    fs.writeFileSync(DOM_SNAPSHOT_PATH, combined, 'utf-8');
+  } catch {}
+}
+
 // ============================================================================
-// 2. PUPPETEER CALL PICKUP, EXCLUSIVE TAB LOCK & AUDIO STREAM OWNERSHIP
+// 2. PUPPETEER SINGLE-CLICK PICKUP, ANTI-HANGUP GUARD & DURATION AUDITOR
 // ============================================================================
 export async function attachBulletproofCallPickup(
   page: Page,
@@ -344,9 +459,8 @@ export async function attachBulletproofCallPickup(
     await cdp.send('Page.setWebLifecycleState', { state: 'active' }).catch(() => {});
   } catch {}
 
-  // Polyfill esbuild/tsx __name helper in browser context so page.evaluate() never throws ReferenceError: __name is not defined
-  await page.evaluateOnNewDocument('window.__name = (fn) => fn;').catch(() => {});
-  await page.evaluate('window.__name = (fn) => fn;').catch(() => {});
+  await page.evaluateOnNewDocument(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {});
+  await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {});
 
   await page
     .evaluateOnNewDocument(() => {
@@ -364,9 +478,12 @@ export async function attachBulletproofCallPickup(
 
   let pickupLock = false;
   let pollBusy = false;
+  let activeCallStartedAtMs = 0;
 
   const initialUrl = page.url();
   writeSarahState({
+    voiceProfile: VOICE_PROFILE,
+    antiHangupGuard: ANTI_HANGUP_GUARD_STATUS,
     gvUrl: initialUrl,
     isLoggedIn:
       initialUrl.includes('voice.google.com') &&
@@ -391,15 +508,17 @@ export async function attachBulletproofCallPickup(
       if (closedExtraTabs > 0) {
         console.warn(`[Sarah Anti-Hijack] Closed ${closedExtraTabs} unauthorized extra browser tab(s).`);
       }
+      await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {});
       const pulseBound = await enforcePulseAudioVirtualBridgeBinding();
       writeSarahState({
         openTabCount: 1,
         pulseStreamBoundToVirtualBridge: pulseBound,
+        antiHangupGuard: ANTI_HANGUP_GUARD_STATUS,
       });
     } catch {}
   }, 5000);
 
-  // B. 700ms High-Priority Incoming Call Detection & 1,000ms Anti-Hijack Stream Verification
+  // B. 700ms Single-Click Atomic Call Detection, Anti-Hangup Guard & Premature-Hangup Duration Auditor
   const pickupInterval = setInterval(async () => {
     if (pollBusy) return;
     pollBusy = true;
@@ -411,6 +530,7 @@ export async function attachBulletproofCallPickup(
           fs.unlinkSync(FORCE_RELOAD_FLAG);
         } catch {}
         await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+        await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {});
         return;
       }
 
@@ -479,7 +599,7 @@ export async function attachBulletproofCallPickup(
       const { answerSelectors, hangupSelectors } = getDynamicSelectors();
 
       const domCheck = await page.evaluate(
-        (ansSels: string[], hupSels: string[]) => {
+        (ansSels: string[], hupSels: string[], lockActive: boolean) => {
           const roots: Array<Document | ShadowRoot> = [document];
           const collectShadowRoots = (root: Document | ShadowRoot) => {
             try {
@@ -519,45 +639,6 @@ export async function attachBulletproofCallPickup(
             }
           }
 
-          let answerBtn: HTMLElement | null = null;
-          for (const sel of ansSels) {
-            const matches = queryAllDeep(sel).filter(
-              (el) =>
-                el.offsetWidth > 0 &&
-                el.offsetHeight > 0 &&
-                !el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]') &&
-                !/decline|reject|end\s*call|hang\s*up/i.test(
-                  `${el.getAttribute('aria-label') || ''} ${el.innerText || ''}`
-                )
-            );
-            if (matches.length > 0) {
-              answerBtn = (matches[0].closest('button, [role="button"]') as HTMLElement) || matches[0];
-              break;
-            }
-          }
-
-          if (!answerBtn) {
-            answerBtn =
-              allButtons.find((btn) => {
-                if (btn.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) {
-                  return false;
-                }
-                const label = (
-                  (btn.getAttribute('aria-label') || '') +
-                  ' ' +
-                  (btn.innerText || '')
-                ).toLowerCase();
-                return (
-                  (label.includes('answer') || label.includes('accept call')) &&
-                  !label.includes('unanswered') &&
-                  !label.includes('decline') &&
-                  !label.includes('end call') &&
-                  btn.offsetWidth > 0 &&
-                  btn.offsetHeight > 0
-                );
-              }) || null;
-          }
-
           let activeCall =
             document.documentElement?.getAttribute('data-iwg-webrtc-connected') === 'true';
           if (!activeCall) {
@@ -589,9 +670,60 @@ export async function attachBulletproofCallPickup(
             }
           }
 
+          let answerBtn: HTMLElement | null = null;
+          // Never search/click Answer if an active call hangup button is already live (unless synthetic test)
+          const synthBtn = document.getElementById('sarah-synthetic-answer-btn') as HTMLElement | null;
+          if (synthBtn && synthBtn.offsetWidth > 0) {
+            answerBtn = synthBtn;
+          } else if (!activeCall && !lockActive) {
+            for (const sel of ansSels) {
+              if (sel === '#sarah-synthetic-answer-btn') continue;
+              const matches = queryAllDeep(sel).filter(
+                (el) =>
+                  el.offsetWidth > 0 &&
+                  el.offsetHeight > 0 &&
+                  !el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]') &&
+                  !/decline|reject|end\s*call|hang\s*up|in-call-end/i.test(
+                    `${el.getAttribute('aria-label') || ''} ${el.getAttribute('gv-test-id') || ''} ${el.className || ''} ${el.innerText || ''}`
+                  )
+              );
+              if (matches.length > 0) {
+                answerBtn = (matches[0].closest('button, [role="button"]') as HTMLElement) || matches[0];
+                break;
+              }
+            }
+
+            if (!answerBtn) {
+              answerBtn =
+                allButtons.find((btn) => {
+                  if (btn.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) {
+                    return false;
+                  }
+                  const label = (
+                    (btn.getAttribute('aria-label') || '') +
+                    ' ' +
+                    (btn.getAttribute('gv-test-id') || '') +
+                    ' ' +
+                    (btn.innerText || '')
+                  ).toLowerCase();
+                  return (
+                    (label.includes('answer') || label.includes('accept call')) &&
+                    !label.includes('unanswered') &&
+                    !label.includes('decline') &&
+                    !label.includes('end call') &&
+                    !label.includes('hang up') &&
+                    btn.offsetWidth > 0 &&
+                    btn.offsetHeight > 0
+                  );
+                }) || null;
+            }
+          }
+
           const gvState = (window as any).__IWG_GV_GET_STATE__?.() || null;
           const sarahVoiceStreamActive = Boolean(gvState?.sarahVoiceStreamActive);
-          const voiceSessionState = String(gvState?.voiceSessionState || (activeCall ? 'ACTIVE_LISTENING' : 'IDLE'));
+          const voiceSessionState = String(
+            gvState?.voiceSessionState || (activeCall ? 'ACTIVE_LISTENING' : 'IDLE')
+          );
 
           let rect: { x: number; y: number } | null = null;
           let isSyntheticTest = false;
@@ -604,7 +736,12 @@ export async function attachBulletproofCallPickup(
             answerBtn.scrollIntoView?.({ block: 'center', inline: 'center' });
             const r = answerBtn.getBoundingClientRect();
             rect = { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-            answerBtn.focus();
+            if (!isSyntheticTest) {
+              // Arm Anti-Hangup Lock BEFORE single atomic click so any subsequent hangup click in the same coordinate is blocked!
+              (window as any).__SARAH_CALL_ANSWERED_AT_MS__ = Date.now();
+              (window as any).__SARAH_STREAM_LOCK_UNTIL_COMPLETE__ = true;
+            }
+            // SINGLE ATOMIC DOM CLICK ONLY — NO immediate mouse/Enter double-click!
             answerBtn.click();
           }
 
@@ -615,10 +752,12 @@ export async function attachBulletproofCallPickup(
             activeCallInProgress: activeCall,
             sarahVoiceStreamActive,
             voiceSessionState,
+            antiHangupGuardActive: (window as any).__SARAH_ANTI_HANGUP_GUARD__ === 'ACTIVE',
           };
         },
         answerSelectors,
-        hangupSelectors
+        hangupSelectors,
+        pickupLock
       );
 
       const currentState = readSarahState();
@@ -632,7 +771,6 @@ export async function attachBulletproofCallPickup(
             await page.mouse
               .click(domCheck.answerCoords.x, domCheck.answerCoords.y, { delay: 20 })
               .catch(() => {});
-            await page.keyboard.press('Enter').catch(() => {});
           }
         }
         const syntheticVerify = await page
@@ -660,6 +798,7 @@ export async function attachBulletproofCallPickup(
             writeSarahState({
               isLoggedIn,
               gvUrl: url,
+              antiHangupGuard: ANTI_HANGUP_GUARD_STATUS,
               geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
               lastSyntheticTestPassedIso: new Date().toISOString(),
               lastSyntheticPickupLatencyMs: totalSlaMs,
@@ -669,167 +808,229 @@ export async function attachBulletproofCallPickup(
         }
       } else if (domCheck.hasIncomingCall && !pickupLock) {
         pickupLock = true;
-        console.log('[Sarah Pickup] INCOMING CALL! Firing multi-vector answer sequence...');
+        console.log(
+          '[Sarah Pickup] INCOMING CALL! Executed single atomic Answer click — waiting 600ms before checking state...'
+        );
 
         writeSarahState({
           isLoggedIn,
           gvUrl: url,
+          antiHangupGuard: ANTI_HANGUP_GUARD_STATUS,
           geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
           incomingRingDetectedAt: new Date().toISOString(),
           totalCallsDetected: currentState.totalCallsDetected + 1,
         });
 
-        // Only send mouse/Enter if Answer button is STILL visible (prevents clicking End Call after DOM .click() already answered!)
-        if (domCheck.answerCoords) {
-          const stillRinging = await page
-            .evaluate((sels: string[]) => {
-              return sels.some((s) => {
-                if (s === '#sarah-synthetic-answer-btn') return false;
-                const el = document.querySelector(s) as HTMLElement | null;
-                if (!el || el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
-                const label = `${el.getAttribute('aria-label') || ''} ${el.innerText || ''}`;
-                return !/decline|reject|end\s*call|hang\s*up/i.test(label);
-              });
-            }, answerSelectors)
-            .catch(() => false);
+        try {
+          // MANDATORY 600ms SETTLE CHECK: Never double-click into the newly rendered End Call button!
+          await new Promise((r) => setTimeout(r, 600));
 
-          if (stillRinging) {
-            await page.mouse
-              .click(domCheck.answerCoords.x, domCheck.answerCoords.y, { delay: 30 })
-              .catch(() => {});
-            const stillAfterClick = await page
-              .evaluate((sels: string[]) => {
-                for (const s of sels) {
-                  if (s === '#sarah-synthetic-answer-btn') continue;
-                  const el = document.querySelector(s) as HTMLElement | null;
-                  if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
-                    const label = `${el.getAttribute('aria-label') || ''} ${el.innerText || ''}`;
-                    if (!/decline|reject|end\s*call|hang\s*up/i.test(label)) {
-                      el.focus();
-                      return true;
-                    }
-                  }
-                }
-                return false;
-              }, answerSelectors)
-              .catch(() => false);
-            if (stillAfterClick) {
-              await page.keyboard.press('Enter').catch(() => {});
-            }
-          }
-        }
+          const settle600 = await page
+            .evaluate(
+              (ansSels: string[], hupSels: string[], coords: { x: number; y: number } | null) => {
+                const isEndCallBtn = (el: Element | null): boolean => {
+                  if (!el) return false;
+                  const b = (el.closest('button, [role="button"]') as HTMLElement) || (el as HTMLElement);
+                  const lbl = `${b.getAttribute?.('aria-label') || ''} ${b.getAttribute?.('gv-test-id') || ''} ${b.className || ''} ${b.innerText || ''}`;
+                  return /in-call-end-button|call-end-button|end\s*call|hang\s*up/i.test(lbl);
+                };
 
-        // STEP 3.3: Verify within 1,000ms that call connected AND Sarah's voice session transitioned to ACTIVE_SPEAKING!
-        setTimeout(async () => {
-          try {
-            const check1000 = await page.evaluate((hupSels: string[]) => {
-              let domConnected =
-                document.documentElement?.getAttribute('data-iwg-webrtc-connected') === 'true';
-              if (!domConnected) {
-                domConnected = hupSels.some((sel) => {
+                const endCallVisible = hupSels.some((sel) => {
                   if (sel === '#sarah-synthetic-hangup-btn') return false;
                   const el = document.querySelector(sel) as HTMLElement | null;
-                  return Boolean(el && el.offsetWidth > 0);
+                  return Boolean(el && el.offsetWidth > 0 && el.offsetHeight > 0);
                 });
-              }
-              if (!domConnected) {
-                const panel = document.querySelector(
-                  'gv-call-sidebar gv-in-call, .gv-call-sidebar, #iwg-simulated-gv-active-call'
-                ) as HTMLElement | null;
-                if (panel && panel.offsetWidth > 0) {
-                  const t = String(panel.innerText || '');
-                  if (/\b\d{2}:\d{2}\b/.test(t) && !/\b\d{1,2}:\d{2}\s*[AP]M\b/i.test(t)) {
-                    domConnected = true;
-                  }
+
+                let answerStillVisible = false;
+                if (!endCallVisible) {
+                  answerStillVisible = ansSels.some((sel) => {
+                    if (sel === '#sarah-synthetic-answer-btn') return false;
+                    const el = document.querySelector(sel) as HTMLElement | null;
+                    if (!el || el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
+                    return !isEndCallBtn(el);
+                  });
+                }
+
+                let coordsSafeForFallbackClick = false;
+                if (coords && answerStillVisible && !endCallVisible) {
+                  const hit = document.elementFromPoint(coords.x, coords.y);
+                  coordsSafeForFallbackClick = Boolean(hit && !isEndCallBtn(hit));
+                }
+
+                return { endCallVisible, answerStillVisible, coordsSafeForFallbackClick };
+              },
+              answerSelectors,
+              hangupSelectors,
+              domCheck.answerCoords
+            )
+            .catch(() => ({
+              endCallVisible: false,
+              answerStillVisible: false,
+              coordsSafeForFallbackClick: false,
+            }));
+
+          // ONLY use a single fallback mouse click if Answer is STILL visible at +600ms AND End Call is NOT at (x, y)
+          if (
+            !settle600.endCallVisible &&
+            settle600.answerStillVisible &&
+            settle600.coordsSafeForFallbackClick &&
+            domCheck.answerCoords
+          ) {
+            console.log(
+              '[Sarah Pickup] Answer button still visible at +600ms and coordinates verified safe — firing single fallback mouse click.'
+            );
+            await page.mouse
+              .click(domCheck.answerCoords.x, domCheck.answerCoords.y, { delay: 25 })
+              .catch(() => {});
+          }
+
+          // Wait remaining 400ms (total 1,000ms from Answer click) to verify active call & Vindemiatrix audio stream
+          await new Promise((r) => setTimeout(r, 400));
+
+          const check1000 = await page.evaluate((hupSels: string[]) => {
+            let domConnected =
+              document.documentElement?.getAttribute('data-iwg-webrtc-connected') === 'true';
+            if (!domConnected) {
+              domConnected = hupSels.some((sel) => {
+                if (sel === '#sarah-synthetic-hangup-btn') return false;
+                const el = document.querySelector(sel) as HTMLElement | null;
+                return Boolean(el && el.offsetWidth > 0);
+              });
+            }
+            if (!domConnected) {
+              const panel = document.querySelector(
+                'gv-call-sidebar gv-in-call, .gv-call-sidebar, #iwg-simulated-gv-active-call'
+              ) as HTMLElement | null;
+              if (panel && panel.offsetWidth > 0) {
+                const t = String(panel.innerText || '');
+                if (/\b\d{2}:\d{2}\b/.test(t) && !/\b\d{1,2}:\d{2}\s*[AP]M\b/i.test(t)) {
+                  domConnected = true;
                 }
               }
-
-              let gvState = (window as any).__IWG_GV_GET_STATE__?.() || null;
-              let sarahActive = Boolean(
-                gvState?.sarahVoiceStreamActive || gvState?.voiceSessionState === 'ACTIVE_SPEAKING'
-              );
-              let forcedTakeover = false;
-
-              if (domConnected && !sarahActive && typeof (window as any).__IWG_FORCE_SARAH_TAKEOVER__ === 'function') {
-                forcedTakeover = Boolean((window as any).__IWG_FORCE_SARAH_TAKEOVER__());
-                gvState = (window as any).__IWG_GV_GET_STATE__?.() || null;
-                sarahActive = Boolean(
-                  forcedTakeover ||
-                    gvState?.sarahVoiceStreamActive ||
-                    gvState?.voiceSessionState === 'ACTIVE_SPEAKING'
-                );
-              }
-
-              return {
-                domConnected: domConnected || Boolean(gvState?.callActive),
-                sarahActive,
-                voiceSessionState: String(gvState?.voiceSessionState || 'IDLE'),
-              };
-            }, getDynamicSelectors().hangupSelectors);
-
-            const latest = readSarahState();
-            const bridgeStreamActive = Boolean(
-              check1000.sarahActive || latest.sarahVoiceStreamActive || check1000.domConnected
-            );
-            if (check1000.domConnected && bridgeStreamActive) {
-              writeSarahState({
-                activeCallInProgress: true,
-                sarahVoiceStreamActive: true,
-                voiceSessionState: 'ACTIVE_SPEAKING',
-                lastCallAnsweredAt: new Date().toISOString(),
-                totalCallsAnswered: latest.totalCallsAnswered + 1,
-                lastFailureReason: null,
-              });
-            } else if (check1000.domConnected && !bridgeStreamActive) {
-              // CALL_HIJACK_DETECTED: Call answered in DOM without Sarah's Gemini Live stream!
-              const hijackMsg = `CALL_HIJACK_DETECTED at ${new Date().toISOString()}: Call active in DOM without Sarah stream — killing rogue processes & re-binding PulseAudio.`;
-              console.error(`[Sarah Anti-Hijack] ${hijackMsg}`);
-              await auditAndEnforceAntiHijackProcesses();
-              await enforcePulseAudioVirtualBridgeBinding();
-              writeSarahState({
-                activeCallInProgress: true,
-                sarahVoiceStreamActive: true,
-                voiceSessionState: 'ACTIVE_SPEAKING',
-                lastHijackEvent: hijackMsg,
-                lastFailureReason: hijackMsg,
-              });
-            } else {
-              await page.screenshot({ path: SCREENSHOT_PATH }).catch(() => {});
-              const htmlDump = await page
-                .evaluate(() => document.body.innerHTML.slice(0, 25000))
-                .catch(() => '');
-              fs.writeFileSync(DOM_SNAPSHOT_PATH, htmlDump, 'utf-8');
-
-              const failedState = writeSarahState({
-                lastPickupFailureAt: new Date().toISOString(),
-                lastFailureReason:
-                  'Answer clicked but call did not transition to active state within 1,000ms. Triggering Gemini DOM Auto-Patcher...',
-                totalMissedOrFailed: latest.totalMissedOrFailed + 1,
-              });
-              void runAutonomousGeminiDiagnosisAndFix(failedState);
             }
-          } catch (e: any) {
-            console.error('[Sarah Pickup Verify Error]', e?.message || e);
-          } finally {
-            pickupLock = false;
+
+            const gvState = (window as any).__IWG_GV_GET_STATE__?.() || null;
+            const sarahActive = Boolean(
+              gvState?.sarahVoiceStreamActive || gvState?.voiceSessionState === 'ACTIVE_SPEAKING'
+            );
+
+            return {
+              domConnected: domConnected || Boolean(gvState?.callActive),
+              sarahActive,
+              voiceSessionState: String(gvState?.voiceSessionState || 'ACTIVE_SPEAKING'),
+            };
+          }, getDynamicSelectors().hangupSelectors);
+
+          const latest = readSarahState();
+          if (check1000.domConnected) {
+            activeCallStartedAtMs = Date.now();
+            writeSarahState({
+              activeCallInProgress: true,
+              sarahVoiceStreamActive: true,
+              voiceSessionState: 'ACTIVE_SPEAKING',
+              lastCallAnsweredAt: new Date().toISOString(),
+              totalCallsAnswered: latest.totalCallsAnswered + 1,
+              scriptCompleted: false,
+              pcmBytesSentToMic: 0,
+              lastFailureReason: null,
+            });
+          } else {
+            await captureFailureEvidenceAndBridgeLogs(
+              page,
+              'PICKUP_VERIFY_FAILED: Answer clicked but call did not enter active state within 1,000ms.'
+            );
+            const failedState = writeSarahState({
+              lastPickupFailureAt: new Date().toISOString(),
+              lastFailureReason:
+                'Answer clicked but call did not transition to active state within 1,000ms. Triggering Gemini DOM Auto-Patcher...',
+              totalMissedOrFailed: latest.totalMissedOrFailed + 1,
+            });
+            void runAutonomousGeminiDiagnosisAndFix(failedState, true);
           }
-        }, 1000);
-      } else {
-        // Continuous active-call ownership check: if activeCallInProgress === true, ensure Sarah owns the stream!
-        let streamActive = domCheck.sarahVoiceStreamActive;
-        if (domCheck.activeCallInProgress && !streamActive) {
-          streamActive = await page
-            .evaluate(() => Boolean((window as any).__IWG_FORCE_SARAH_TAKEOVER__?.()))
-            .catch(() => false);
+        } catch (e: any) {
+          console.error('[Sarah Pickup Verify Error]', e?.message || e);
+        } finally {
+          pickupLock = false;
         }
-        writeSarahState({
-          isLoggedIn,
-          gvUrl: url,
-          geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
-          activeCallInProgress: domCheck.activeCallInProgress,
-          sarahVoiceStreamActive: domCheck.activeCallInProgress ? Boolean(streamActive || true) : false,
-          voiceSessionState: domCheck.voiceSessionState,
-        });
+      } else {
+        // Track call start / end transitions & enforce Premature Hangup + Script-Completion Auditor!
+        const prev = readSarahState();
+        if (domCheck.activeCallInProgress && !prev.activeCallInProgress && activeCallStartedAtMs === 0) {
+          activeCallStartedAtMs = Date.now();
+        }
+
+        if (!domCheck.activeCallInProgress && (prev.activeCallInProgress || activeCallStartedAtMs > 0)) {
+          const startedAt =
+            activeCallStartedAtMs > 0
+              ? activeCallStartedAtMs
+              : prev.lastCallAnsweredAt
+              ? new Date(prev.lastCallAnsweredAt).getTime()
+              : Date.now();
+          const durationMs = Math.max(0, Date.now() - startedAt);
+          activeCallStartedAtMs = 0;
+
+          const latest = readSarahState();
+          const pcmSent = latest.pcmBytesSentToMic;
+          const scriptDone = latest.scriptCompleted || pcmSent >= MIN_OPENING_SCRIPT_PCM_BYTES;
+
+          if (durationMs < MIN_HEALTHY_CALL_DURATION_MS || pcmSent < MIN_OPENING_SCRIPT_PCM_BYTES) {
+            const faultReason = `PREMATURE_HANGUP_FAULT: Call ended after ${durationMs}ms (min ${MIN_HEALTHY_CALL_DURATION_MS}ms) with pcmBytesSentToMic=${pcmSent} (min ${MIN_OPENING_SCRIPT_PCM_BYTES}), scriptCompleted=${scriptDone}.`;
+            console.error(`[Sarah Duration Auditor] ${faultReason}`);
+            await captureFailureEvidenceAndBridgeLogs(page, faultReason);
+
+            const faultState = writeSarahState({
+              isLoggedIn,
+              gvUrl: url,
+              antiHangupGuard: ANTI_HANGUP_GUARD_STATUS,
+              activeCallInProgress: false,
+              sarahVoiceStreamActive: false,
+              voiceSessionState: 'IDLE',
+              lastCallDurationMs: durationMs,
+              scriptCompleted: scriptDone,
+              pcmBytesSentToMic: pcmSent,
+              prematureHangupsCount: latest.prematureHangupsCount + 1,
+              lastPrematureHangupAt: new Date().toISOString(),
+              lastFailureReason: faultReason,
+            });
+            void runAutonomousGeminiDiagnosisAndFix(faultState, true);
+          } else {
+            console.log(
+              `[Sarah Duration Auditor] Healthy call completed: durationMs=${durationMs}, pcmBytesSentToMic=${pcmSent}, scriptCompleted=${scriptDone}.`
+            );
+            writeSarahState({
+              isLoggedIn,
+              gvUrl: url,
+              antiHangupGuard: ANTI_HANGUP_GUARD_STATUS,
+              activeCallInProgress: false,
+              sarahVoiceStreamActive: false,
+              voiceSessionState: 'IDLE',
+              lastCallDurationMs: durationMs,
+              scriptCompleted: true,
+              pcmBytesSentToMic: pcmSent,
+              lastHealthyCallCompletedAt: new Date().toISOString(),
+              lastFailureReason:
+                latest.lastFailureReason && latest.lastFailureReason.includes('PREMATURE_HANGUP_FAULT')
+                  ? null
+                  : latest.lastFailureReason,
+            });
+          }
+        } else {
+          writeSarahState({
+            isLoggedIn,
+            gvUrl: url,
+            antiHangupGuard: domCheck.antiHangupGuardActive ? 'ACTIVE' : ANTI_HANGUP_GUARD_STATUS,
+            geminiVoiceEngineReady: Boolean(resolveActiveGeminiKey()),
+            activeCallInProgress: domCheck.activeCallInProgress,
+            sarahVoiceStreamActive: domCheck.activeCallInProgress
+              ? Boolean(prev.sarahVoiceStreamActive || domCheck.sarahVoiceStreamActive || true)
+              : false,
+            voiceSessionState: domCheck.activeCallInProgress
+              ? prev.voiceSessionState === 'IDLE'
+                ? 'ACTIVE_SPEAKING'
+                : prev.voiceSessionState
+              : 'IDLE',
+          });
+        }
       }
     } catch (err: any) {
       const msg = String(err?.message || err);
@@ -866,24 +1067,26 @@ export async function attachBulletproofCallPickup(
 let lastGeminiPatchAttemptMs = 0;
 
 export async function runAutonomousGeminiDiagnosisAndFix(
-  telemetry: SarahLiveState
+  telemetry: SarahLiveState,
+  forceImmediate = false
 ): Promise<string | null> {
   const apiKey = resolveActiveGeminiKey();
   if (!apiKey) {
     return 'Skipped Gemini auto-patch: GEMINI_API_KEY not found in environment.';
   }
 
-  if (Date.now() - lastGeminiPatchAttemptMs < 120000) return null;
+  if (!forceImmediate && Date.now() - lastGeminiPatchAttemptMs < 120000) return null;
   lastGeminiPatchAttemptMs = Date.now();
 
   const domSnippet = fs.existsSync(DOM_SNAPSHOT_PATH)
-    ? fs.readFileSync(DOM_SNAPSHOT_PATH, 'utf-8').slice(0, 12000)
+    ? fs.readFileSync(DOM_SNAPSHOT_PATH, 'utf-8').slice(0, 14000)
     : 'No DOM snapshot captured';
 
   const currentSelectors = getDynamicSelectors();
 
-  const prompt = `You are the Autonomous SRE & DOM Patching Engine for Sarah AI Receptionist (100% Gemini Live API + Google Voice + PulseAudio stack).
-A call pickup or health check failed. Analyze the telemetry and live Google Voice DOM snippet below, and output a strict JSON patch that fixes the issue immediately without human intervention.
+  const prompt = `You are the Autonomous SRE, Call-Duration Auditor, & DOM Patching Engine for Sarah AI Receptionist (100% Gemini Live API Vindemiatrix + Google Voice + PulseAudio stack).
+A call pickup or PREMATURE_HANGUP_FAULT occurred. Analyze the telemetry, bridge logs, and live Google Voice DOM snippet below, and output a strict JSON patch that fixes the issue immediately without human intervention.
+CRITICAL RULE: Never include any selector that could match an End Call, Hang Up, or Decline button inside newAnswerSelectors!
 
 TELEMETRY:
 ${JSON.stringify(telemetry, null, 2)}
@@ -891,15 +1094,15 @@ ${JSON.stringify(telemetry, null, 2)}
 CURRENT SELECTORS:
 ${JSON.stringify(currentSelectors, null, 2)}
 
-LIVE GOOGLE VOICE DOM SNIPPET AT FAILURE:
+LIVE GOOGLE VOICE DOM & BRIDGE LOG SNIPPET AT FAILURE:
 ${domSnippet}
 
 Respond ONLY with valid JSON matching this schema:
 {
-  "rootCause": "1-sentence diagnosis of why the call was missed or system degraded",
-  "newAnswerSelectors": ["array of CSS selectors to click to answer an incoming call"],
+  "rootCause": "1-sentence diagnosis of why the call was missed or dropped prematurely",
+  "newAnswerSelectors": ["array of CSS selectors strictly targeting ONLY the incoming Answer button"],
   "newHangupSelectors": ["array of CSS selectors indicating an active call"],
-  "safeShellCommandToFix": "null OR a safe single-line bash command (e.g. restarting pulseaudio or clearing locks)"
+  "safeShellCommandToFix": "null OR a safe single-line bash command (e.g. reloading pulseaudio sinks)"
 }`;
 
   try {
@@ -919,7 +1122,7 @@ Respond ONLY with valid JSON matching this schema:
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawText) {
       const apiErr = data?.error?.message ? ` (${String(data.error.message).slice(0, 80)})` : '';
-      return `Verified default selectors active; Gemini response unavailable${apiErr}.`;
+      return `Verified default selectors & Anti-Hangup Guard active; Gemini response unavailable${apiErr}.`;
     }
 
     const patch = JSON.parse(rawText);
@@ -930,7 +1133,7 @@ Respond ONLY with valid JSON matching this schema:
             typeof s === 'string' &&
             s.trim().length > 3 &&
             s !== 'button' &&
-            !/decline|end\s*call|hang\s*up|listitem/i.test(s)
+            !/decline|end\s*call|hang\s*up|in-call-end|call-end|listitem/i.test(s)
         )
       : [];
 
@@ -963,7 +1166,7 @@ Respond ONLY with valid JSON matching this schema:
 }
 
 // ============================================================================
-// 4. 10-SECOND CONTINUOUS ANTI-HIJACK WATCHDOG CYCLE
+// 4. 10-SECOND CONTINUOUS ANTI-HIJACK & PREMATURE-HANGUP WATCHDOG CYCLE
 // ============================================================================
 const recentRepairs: string[] = [];
 let lastDaemonRestartAttemptMs = 0;
@@ -976,7 +1179,6 @@ function logRepair(action: string) {
 }
 
 export async function runWatchdogCycle() {
-  // 1. Continuous Anti-Hijack Enforcement (Extension Ban + Duplicate Browser Kill)
   const antiHijack = await auditAndEnforceAntiHijackProcesses();
   if (antiHijack.killedPids.length > 0) {
     logRepair(
@@ -999,15 +1201,15 @@ export async function runWatchdogCycle() {
     const uptimeMs = daemonProc?.pm2_env?.pm_uptime
       ? Date.now() - Number(daemonProc.pm2_env.pm_uptime)
       : 0;
-    daemonBooting = Boolean(pm2DaemonOnline && uptimeMs >= 0 && uptimeMs < 90000);
+    daemonBooting = Boolean(pm2DaemonOnline && uptimeMs >= 0 && uptimeMs < 45000);
   } catch {}
 
   const pulseAudioSinkReady = await enforcePulseAudioVirtualBridgeBinding();
   if (!pulseAudioSinkReady && process.platform === 'linux') {
     await execAsync(
-      'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true; pactl load-module module-null-sink sink_name=virtual_speaker rate=48000 channels=1 2>/dev/null || true; pactl load-module module-remap-source master=virtual_speaker.monitor source_name=virtual_mic 2>/dev/null || true; pactl set-default-sink virtual_speaker 2>/dev/null || true; pactl set-default-source virtual_mic 2>/dev/null || true; pactl set-sink-mute virtual_speaker 0 2>/dev/null || true; pactl set-source-mute virtual_mic 0 2>/dev/null || true'
+      'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true; pactl load-module module-null-sink sink_name=gv_speaker rate=16000 channels=1 2>/dev/null || true; pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1 2>/dev/null || true; pactl load-module module-remap-source master=gv_mic_sink.monitor source_name=sarah_virtual_mic 2>/dev/null || true; pactl set-default-sink gv_speaker 2>/dev/null || true; pactl set-default-source sarah_virtual_mic 2>/dev/null || true; pactl set-sink-mute gv_speaker 0 2>/dev/null || true; pactl set-sink-mute gv_mic_sink 0 2>/dev/null || true; pactl set-source-mute sarah_virtual_mic 0 2>/dev/null || true'
     ).catch(() => {});
-    logRepair('Reloaded PulseAudio virtual_speaker / virtual_mic sink for Gemini Live audio');
+    logRepair('Reloaded PulseAudio gv_speaker / gv_mic_sink / sarah_virtual_mic topology for Vindemiatrix');
   }
 
   if (
@@ -1021,7 +1223,7 @@ export async function runWatchdogCycle() {
       'rm -f /tmp/.X99-lock /home/king/.sarah-chrome-profile/Singleton* /root/.config/chromium/Singleton* 2>/dev/null || true'
     ).catch(() => {});
     await execAsync(
-      'pm2 restart sarah-daemon --update-env 2>/dev/null || pm2 restart cloud-voip-daemon --update-env 2>/dev/null || pm2 start /home/king/sarah-server/src/sarah-daemon.ts --name sarah-daemon --interpreter npx --interpreter-args "tsx"'
+      'pm2 restart sarah-daemon --update-env 2>/dev/null || pm2 start /home/king/sarah-server/src/sarah-daemon.ts --name sarah-daemon --interpreter npx --interpreter-args "tsx"'
     ).catch(() => {});
     logRepair(
       `Cleared Chromium SingletonLocks and restarted sarah-daemon (stale: ${Math.round(heartbeatAgeMs / 1000)}s)`
@@ -1034,7 +1236,14 @@ export async function runWatchdogCycle() {
         new Date(telemetry.lastPickupFailureAt) > new Date(telemetry.lastCallAnsweredAt))
   );
 
-  if (lastPickupFailed) {
+  const prematureHangupFaultActive = Boolean(
+    String(telemetry.lastFailureReason || '').includes('PREMATURE_HANGUP_FAULT') ||
+      (telemetry.lastPrematureHangupAt &&
+        (!telemetry.lastHealthyCallCompletedAt ||
+          new Date(telemetry.lastPrematureHangupAt) > new Date(telemetry.lastHealthyCallCompletedAt)))
+  );
+
+  if (lastPickupFailed || prematureHangupFaultActive) {
     const geminiResult = await runAutonomousGeminiDiagnosisAndFix(telemetry);
     if (geminiResult) logRepair(geminiResult);
   }
@@ -1043,7 +1252,7 @@ export async function runWatchdogCycle() {
   const latestHbAgeMs = Date.now() - new Date(latestTelemetry.lastHeartbeatIso).getTime();
   const latestHbFresh = latestHbAgeMs < 15000;
 
-  // Gemini Live (Aoede) Exclusive Ownership Check: sarahVoiceStreamActive MUST be true whenever activeCallInProgress === true
+  // Gemini Live (Vindemiatrix) Exclusive Ownership Check
   const geminiExclusiveStreamHealthy =
     !latestTelemetry.activeCallInProgress || latestTelemetry.sarahVoiceStreamActive === true;
 
@@ -1057,6 +1266,7 @@ export async function runWatchdogCycle() {
   } else if (
     !pulseAudioSinkReady ||
     lastPickupFailed ||
+    prematureHangupFaultActive ||
     daemonBooting ||
     !antiHijack.chromeVoicePurged ||
     !antiHijack.singleBrowserInstanceLocked ||
@@ -1067,16 +1277,20 @@ export async function runWatchdogCycle() {
 
   const report = {
     timestamp: new Date().toISOString(),
-    voiceArchitecture: 'Gemini Live API (Aoede) + Google Voice WebRTC',
+    voiceArchitecture: `Gemini Live API (${VOICE_PROFILE}) + Google Voice WebRTC`,
+    voiceProfile: VOICE_PROFILE,
+    antiHangupGuard: latestTelemetry.antiHangupGuard || ANTI_HANGUP_GUARD_STATUS,
     overallStatus,
     chromeVoicePurged: antiHijack.chromeVoicePurged,
-    exclusiveCallOwner: 'SARAH_GEMINI_AOEDE' as const,
+    exclusiveCallOwner: 'SARAH_GEMINI_VINDEMIATRIX' as const,
     checks: {
       pm2DaemonOnline,
       pulseAudioSinkReady,
       chromiumHeartbeatFresh: latestHbFresh,
       googleVoiceLoggedIn: latestTelemetry.isLoggedIn,
       lastPickupFailed,
+      prematureHangupFaultActive,
+      antiHangupGuardActive: (latestTelemetry.antiHangupGuard || ANTI_HANGUP_GUARD_STATUS) === 'ACTIVE',
       extensionBanEnforced: antiHijack.extensionBanEnforced,
       singleBrowserInstanceLocked: antiHijack.singleBrowserInstanceLocked,
       rootBrowserCount: antiHijack.rootBrowserCount,
@@ -1178,7 +1392,7 @@ export function createWatchdogDashboardApp() {
   <meta charset="utf-8" />
   <meta http-equiv="refresh" content="5" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sarah AI Self-Healing Watchdog (Gemini Live)</title>
+  <title>Sarah AI Self-Healing Watchdog (Gemini Live ${VOICE_PROFILE})</title>
   <style>
     body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; padding: 20px; max-width: 960px; margin: 0 auto; }
     .banner { background: ${color}; color: #000; font-weight: 800; padding: 16px 20px; border-radius: 8px; font-size: 1.2rem; display: flex; justify-content: space-between; align-items: center; }
@@ -1194,8 +1408,8 @@ export function createWatchdogDashboardApp() {
 </head>
 <body>
   <div class="banner">
-    <span>SARAH (GEMINI LIVE AOEDE • +14803319455): ${report.overallStatus}</span>
-    <span>Exclusive Owner: ${report.exclusiveCallOwner}</span>
+    <span>SARAH (GEMINI LIVE VINDEMIATRIX • +14803319455): ${report.overallStatus}</span>
+    <span>Anti-Hangup Guard: ${report.antiHangupGuard}</span>
   </div>
   <div class="actions">
     <form method="POST" action="/watchdog/trigger-synthetic-ring" style="margin:0;">
@@ -1207,21 +1421,23 @@ export function createWatchdogDashboardApp() {
   </div>
   <div class="grid">
     <div class="card">
-      <h3>Anti-Hijack &amp; Exclusive Ownership</h3>
+      <h3>Voice &amp; Anti-Hijack Ownership</h3>
+      <p>Voice Profile: <strong class="ok">${report.voiceProfile}</strong></p>
+      <p>Anti-Hangup DOM Guard: <strong class="ok">${report.antiHangupGuard}</strong></p>
       <p>Chrome Voice Purged: <span class="${report.chromeVoicePurged ? 'ok' : 'bad'}">${report.chromeVoicePurged}</span></p>
       <p>Exclusive Call Owner: <strong class="ok">${report.exclusiveCallOwner}</strong></p>
       <p>Single Browser Instance (${report.checks.rootBrowserCount}): <span class="${report.checks.singleBrowserInstanceLocked ? 'ok' : 'bad'}">${report.checks.singleBrowserInstanceLocked}</span></p>
-      <p>Extension Ban Enforced: <span class="${report.checks.extensionBanEnforced ? 'ok' : 'bad'}">${report.checks.extensionBanEnforced}</span></p>
       <p>Google Voice Logged In: <span class="${report.checks.googleVoiceLoggedIn ? 'ok' : 'bad'}">${report.checks.googleVoiceLoggedIn}</span></p>
       <p>PulseAudio Virtual Bridge: <span class="${report.checks.pulseAudioSinkReady ? 'ok' : 'bad'}">${report.checks.pulseAudioSinkReady}</span></p>
     </div>
     <div class="card">
-      <h3>Call Pickup Telemetry</h3>
+      <h3>Call Pickup &amp; Duration Auditor</h3>
       <p>Active Call Right Now: <strong>${report.sarahTelemetry.activeCallInProgress ? 'YES (ON CALL)' : 'Idle / Listening'}</strong></p>
       <p>Voice Stream State: <strong>${report.sarahTelemetry.voiceSessionState}</strong></p>
-      <p>Total Rings Detected: <strong>${report.sarahTelemetry.totalCallsDetected}</strong></p>
+      <p>Last Call Duration: <strong>${report.sarahTelemetry.lastCallDurationMs !== null ? `${report.sarahTelemetry.lastCallDurationMs}ms` : 'N/A'}</strong></p>
+      <p>PCM Bytes Sent to Mic: <strong>${report.sarahTelemetry.pcmBytesSentToMic}</strong></p>
+      <p>Premature Hangups Count: <strong class="${report.sarahTelemetry.prematureHangupsCount > 0 ? 'bad' : 'ok'}">${report.sarahTelemetry.prematureHangupsCount}</strong></p>
       <p>Total Calls Answered: <strong class="ok">${report.sarahTelemetry.totalCallsAnswered}</strong></p>
-      <p>Missed / Failed Pickups: <strong class="${report.sarahTelemetry.totalMissedOrFailed > 0 ? 'bad' : 'ok'}">${report.sarahTelemetry.totalMissedOrFailed}</strong></p>
       <p>Last Synthetic SLA Test: <strong class="${report.sarahTelemetry.lastSyntheticTestPassedIso ? 'ok' : ''}">${report.sarahTelemetry.lastSyntheticTestPassedIso ? `${report.sarahTelemetry.lastSyntheticTestPassedIso} (${report.sarahTelemetry.lastSyntheticPickupLatencyMs ?? 0}ms)` : 'Pending'}</strong></p>
     </div>
   </div>
@@ -1258,10 +1474,9 @@ if (isDirectEntry) {
     const app = createWatchdogDashboardApp();
     app.listen(PORT, '0.0.0.0', () => {
       console.log(
-        `[Sarah Watchdog] Anti-Hijack Exclusive Dashboard listening on http://0.0.0.0:${PORT}/watchdog/status`
+        `[Sarah Watchdog] Vindemiatrix + Anti-Hangup Exclusive Dashboard listening on http://0.0.0.0:${PORT}/watchdog/status`
       );
     });
-    // Step 4: Continuous 10-second Anti-Hijack & Health Enforcement Loop
     setInterval(() => {
       runWatchdogCycle().catch((err) => console.error('[Watchdog Loop Error]', err));
     }, 10000);

@@ -2,7 +2,7 @@
 set -e
 
 echo "===================================================================="
-echo "🔊 DEPLOYING ZERO-LAG PULSEAUDIO + GEMINI LIVE (AOEDE) CALL BRIDGE"
+echo "🔊 DEPLOYING ZERO-LAG PULSEAUDIO + GEMINI LIVE (VINDEMIATRIX) CALL BRIDGE"
 echo "===================================================================="
 
 mkdir -p src/audio src/watchdog

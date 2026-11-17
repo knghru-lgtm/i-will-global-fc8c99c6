@@ -7291,7 +7291,7 @@ async function handleGvHeartbeat(payload) {
       needsCookieSync: false,
       reloadExtension: true,
       closeTab: true,
-      exclusiveCallOwner: "SARAH_GEMINI_AOEDE"
+      exclusiveCallOwner: "SARAH_GEMINI_VINDEMIATRIX"
     };
   }
   const prevRunner = runner === "cloud-daemon" ? state.cloudDaemon : state.localExtension;

@@ -15,10 +15,11 @@ import {
 } from './watchdog/anti-hijack.ts';
 import {
   setupZeroLagPulseAudioTopology,
-  GeminiAoedeCallBridge,
+  GeminiVindemiatrixCallBridge,
   enforceChromiumPulseBinding,
   CALLER_SINK,
   SARAH_VIRTUAL_MIC,
+  VOICE_PROFILE,
 } from './audio/gemini-pulse-bridge.ts';
 
 type Browser = any;
@@ -34,9 +35,17 @@ const USER_DATA_DIR =
     : '/root/.config/sarah-chromium-profile');
 const GOOGLE_VOICE_URL = 'https://voice.google.com/u/0/calls';
 
-const SARAH_SYSTEM_PROMPT = `You are Sarah, the warm, poised, and helpful AI receptionist for I Will Global LLC (IWG Insurance and Financial Services).
-Speak naturally with a friendly, reassuring cadence.
-Greet callers warmly, ask for their name and how you can help them today (such as scheduling a consultation with King Amen-Ra or Aneesha Sullivan, or answering general Medicare/health plan reception questions), and keep responses concise for phone conversation.`;
+export const SARAH_SYSTEM_PROMPT = `You are Sarah, the warm, poised, human-indistinguishable receptionist for I Will Global Insurance and Financial Services on (480) 331-9455.
+
+VOICE & CADENCE RULES (Vindemiatrix):
+- Speak with natural, unhurried, human-indistinguishable conversational warmth and gentle, natural breath pacing between phrases.
+- Never sound robotic, rushed, clipped, or abrupt. Let sentences land naturally before pausing to listen.
+
+MANDATORY RECEPTION FLOW & CALL-COMPLETION LAW:
+1. Warm Opening Greeting: Greet every caller warmly ("Thank you for calling I Will Global Insurance and Financial Services, this is Sarah speaking. Whom do I have the pleasure of speaking with, and how may I help you today?").
+2. Gather Caller Details: Patiently gather the caller's full name, callback phone number if needed, state, and exact reason for calling (Medicare Advantage/Supplement review, Life Insurance/IUL, Annuities/Retirement, Dental/Vision, Hospital Indemnity, or speaking/scheduling with King Amen-Ra or Aneesha Sullivan).
+3. Confirm Next Steps: Clearly confirm their appointment details, callback confirmation, or warm transfer steps, and ask if there is anything else you can help them with today.
+4. NEVER TERMINATE OR STOP PREMATURELY: You must NEVER hang up, end the conversation early, or go silent before completing your greeting, gathering the caller's name and reason for calling, confirming next steps, and hearing the caller say goodbye.`;
 
 function resolvePuppeteer() {
   const requireFromDaemon = createRequire(path.join(REPO_ROOT, 'cloud-voip-daemon', 'package.json'));
@@ -227,7 +236,6 @@ export async function launchSarahExclusiveBrowser(): Promise<{
     await new Promise((r) => setTimeout(r, 2500));
   }
 
-  // Fallback to encrypted native Linux cookie vault if profile landed on accounts.google.com
   if (primaryPage.url().includes('accounts.google.com') || primaryPage.url().includes('workspace.google.com')) {
     const hydrated = await hydrateFromVaultCookies();
     if (hydrated) {
@@ -247,7 +255,6 @@ export async function launchSarahExclusiveBrowser(): Promise<{
   }
   await primaryPage.evaluate('window.__name = (fn) => fn;').catch(() => {});
 
-  // Dismiss any promotional banner so full call sidebar height stays visible
   setTimeout(async () => {
     await primaryPage
       .evaluate(() => {
@@ -262,22 +269,30 @@ export async function launchSarahExclusiveBrowser(): Promise<{
       .catch(() => {});
   }, 4000);
 
-  // 3. Attach 700ms Bulletproof Call Pickup & Gemini Auto-Patcher
+  // 3. Attach 700ms Bulletproof Single-Click Call Pickup, Anti-Hangup DOM Guard, & Duration Auditor
   await attachBulletproofCallPickup(primaryPage, context);
 
-  // 4. Wire Zero-Lag Gemini Live (Aoede) Audio Bridge to Active Call State
-  const aoedeBridge = new GeminiAoedeCallBridge({
+  // 4. Wire Zero-Lag Gemini Live (Vindemiatrix) Audio Bridge to Active Call State
+  const vindemiatrixBridge = new GeminiVindemiatrixCallBridge({
     onEndCallRequest: () => {
       const { hangupSelectors } = getDynamicSelectors();
       primaryPage
         .evaluate((sels: string[]) => {
-          for (const sel of sels) {
-            if (sel === '#sarah-synthetic-hangup-btn') continue;
-            const btn = document.querySelector<HTMLElement>(sel);
-            if (btn && btn.offsetWidth > 0) {
-              btn.click();
-              return;
+          const win = window as any;
+          win.__SARAH_AUTHORIZED_HANGUP__ = true;
+          try {
+            for (const sel of sels) {
+              if (sel === '#sarah-synthetic-hangup-btn') continue;
+              const btn = document.querySelector<HTMLElement>(sel);
+              if (btn && btn.offsetWidth > 0) {
+                btn.click();
+                return;
+              }
             }
+          } finally {
+            setTimeout(() => {
+              win.__SARAH_AUTHORIZED_HANGUP__ = false;
+            }, 250);
           }
         }, hangupSelectors)
         .catch(() => {});
@@ -288,9 +303,21 @@ export async function launchSarahExclusiveBrowser(): Promise<{
     const state = readSarahState();
     if (state.activeCallInProgress) {
       enforceChromiumPulseBinding();
-      aoedeBridge.startCallBridge(SARAH_SYSTEM_PROMPT);
+      vindemiatrixBridge.startCallBridge(SARAH_SYSTEM_PROMPT);
+      const bStatus = vindemiatrixBridge.getBridgeStatus();
+      const shouldLockHangup = Boolean(bStatus.isRunning && (!bStatus.scriptCompleted || bStatus.isSpeaking));
+      primaryPage
+        .evaluate((locked: boolean) => {
+          (window as any).__SARAH_STREAM_LOCK_UNTIL_COMPLETE__ = locked;
+        }, shouldLockHangup)
+        .catch(() => {});
     } else {
-      aoedeBridge.stopCallBridge();
+      vindemiatrixBridge.stopCallBridge();
+      primaryPage
+        .evaluate(() => {
+          (window as any).__SARAH_STREAM_LOCK_UNTIL_COMPLETE__ = false;
+        })
+        .catch(() => {});
     }
   }, 250);
 
@@ -303,20 +330,20 @@ export async function launchSarahExclusiveBrowser(): Promise<{
       body: JSON.stringify({
         runner: 'cloud-daemon',
         url: state.gvUrl,
-        title: 'Google Voice (Sarah Gemini Aoede Pulse Bridge)',
+        title: `Google Voice (Sarah Gemini ${VOICE_PROFILE} Pulse Bridge)`,
         visibilityState: 'visible',
         sessionAuthenticated: state.isLoggedIn,
         callActive: state.activeCallInProgress,
         isSpeaking: state.sarahVoiceStreamActive,
         totalCallsAnswered: state.totalCallsAnswered,
         hasPreloadedGreeting: true,
-        receivingCallsText: 'Zero-Lag PulseAudio (gv_speaker <-> sarah_virtual_mic) + Gemini Aoede ACTIVE',
+        receivingCallsText: `Zero-Lag PulseAudio (gv_speaker <-> sarah_virtual_mic) + Gemini ${VOICE_PROFILE} ACTIVE`,
       }),
     }).catch(() => {});
   }, 6000);
 
   console.log(
-    '[Sarah Daemon] Live! Exclusive Google Voice Pickup + Gemini Aoede Audio Bridge active.'
+    `[Sarah Daemon] Live! Exclusive Google Voice Pickup + Gemini ${VOICE_PROFILE} Audio Bridge active.`
   );
   return { browser, page: primaryPage };
 }

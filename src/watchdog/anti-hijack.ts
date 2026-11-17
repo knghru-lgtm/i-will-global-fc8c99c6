@@ -25,7 +25,7 @@ export async function enforcePulseAudioVirtualBridgeBinding(): Promise<boolean> 
       'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
       'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --realtime=true --system=false --disallow-module-loading=false 2>/dev/null || true',
       'pactl list short sinks 2>/dev/null | grep -q gv_speaker || pactl load-module module-null-sink sink_name=gv_speaker rate=16000 channels=1 sink_properties=device.description="Caller_From_GoogleVoice" 2>/dev/null || true',
-      'pactl list short sinks 2>/dev/null | grep -q gv_mic_sink || pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1 sink_properties=device.description="Sarah_Aoede_Output" 2>/dev/null || true',
+      'pactl list short sinks 2>/dev/null | grep -q gv_mic_sink || pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1 sink_properties=device.description="Sarah_Vindemiatrix_Output" 2>/dev/null || true',
       'pactl list short sources 2>/dev/null | grep -q sarah_virtual_mic || pactl load-module module-remap-source master=gv_mic_sink.monitor source_name=sarah_virtual_mic source_properties=device.description="Sarah_Virtual_Mic" 2>/dev/null || true',
       'pactl set-default-sink gv_speaker 2>/dev/null || true',
       'pactl set-default-source sarah_virtual_mic 2>/dev/null || true',

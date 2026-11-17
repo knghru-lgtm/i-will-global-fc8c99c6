@@ -188,8 +188,8 @@ export async function saveCloudGvCookies(
     src.startsWith('cloud-daemon') || src.startsWith('vm-direct-login') || process.env.NODE_ENV === 'test';
   const cloudCurrentlyAuthenticated = Boolean(
     state.cloudDaemon &&
-      Date.now() - state.cloudDaemon.lastHeartbeatAt < 30_000 &&
-      state.cloudDaemon.sessionAuthenticated === true
+    Date.now() - state.cloudDaemon.lastHeartbeatAt < 30_000 &&
+    state.cloudDaemon.sessionAuthenticated === true
   );
 
   // Protect live standalone Cloud VM session when already authenticated, while allowing instant self-heal when unauthenticated!
@@ -447,7 +447,7 @@ export async function handleGvHeartbeat(payload: any) {
       needsCookieSync: false,
       reloadExtension: true,
       closeTab: true,
-      exclusiveCallOwner: 'SARAH_GEMINI_AOEDE',
+      exclusiveCallOwner: 'SARAH_GEMINI_VINDEMIATRIX',
     };
   }
 
