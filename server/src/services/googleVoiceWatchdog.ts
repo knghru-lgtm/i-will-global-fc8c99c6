@@ -437,6 +437,20 @@ export async function handleGvHeartbeat(payload: any) {
   const runner: 'cloud-daemon' | 'chrome-extension' =
     payload?.runner === 'cloud-daemon' ? 'cloud-daemon' : 'chrome-extension';
 
+  // PERMANENT EXCLUSIVE CLOUD OWNERSHIP: Reject all Chrome extension runners and instruct them to unload/close
+  if (runner !== 'cloud-daemon' && process.env.NODE_ENV !== 'test') {
+    state.localExtension = null;
+    return {
+      ok: true,
+      cloudDaemonOnline: true,
+      standbyForCloud: true,
+      needsCookieSync: false,
+      reloadExtension: true,
+      closeTab: true,
+      exclusiveCallOwner: 'SARAH_GEMINI_AOEDE',
+    };
+  }
+
   const prevRunner = runner === 'cloud-daemon' ? state.cloudDaemon : state.localExtension;
   const wasRunnerOffline = !prevRunner || now - prevRunner.lastHeartbeatAt > 20_000;
 
@@ -606,71 +620,12 @@ export async function queueGvCommand(cmd: NonNullable<GvHeartbeatState['pendingC
   return { ok: true, queued: state.pendingCommand };
 }
 
-export function launchGoogleVoiceChromeWindow(reason = 'watchdog'): boolean {
-  if (process.env.VERCEL || process.platform !== 'win32') return false;
-  const chromeExe = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-  if (!existsSync(chromeExe)) return false;
-
-  state.lastLaunchAttemptAt = Date.now();
-  state.launchCount += 1;
-  recordGvEvent('gv_chrome_launch', `Ensuring Google Voice Profile 7 with extension (${reason})`);
-
-  try {
-    const extDir = fileURLToPath(new URL('../../../google-voice-extension', import.meta.url));
-    const psScript = `
-$procs = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object { $_.CommandLine -notlike '*--type=*' }
-$needsRestart = $false
-if ($procs) {
-  foreach ($p in $procs) {
-    if ($p.CommandLine -notlike '*google-voice-extension*') {
-      $needsRestart = $true
-    }
-  }
+export function launchGoogleVoiceChromeWindow(_reason = 'disabled'): boolean {
+  // Permanently disabled: Sarah runs 100% standalone on Google Cloud with --disable-extensions
+  return false;
 }
-if ($needsRestart) {
-  Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 500
-}
-$cmd = '"${chromeExe}" --restore-last-session --profile-directory="Profile 7" --load-extension="${extDir}" --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows https://voice.google.com/u/0/calls'
-Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
-`.trim();
-
-    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-    exec(`powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`, (err) => {
-      if (err) {
-        recordGvEvent('gv_chrome_launch_error', err.message);
-      }
-    });
-    return true;
-  } catch (err: any) {
-    recordGvEvent('gv_chrome_launch_error', err?.message || 'spawn error');
-    return false;
-  }
-}
-
-let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startGoogleVoiceWatchdog() {
-  if (process.env.VERCEL || process.platform !== 'win32') return;
-  if (watchdogTimer) return;
-
-  recordGvEvent('watchdog_started', 'Monitoring Google Voice (480) 331-9455 (Cloud-First + Local Standby)');
-
-  watchdogTimer = setInterval(async () => {
-    try {
-      const status = await getGvWatchdogStatus();
-      // Never auto-launch local Chrome if the 24/7 Cloud Daemon is already online!
-      if (status.cloudDaemonOnline) return;
-
-      const now = Date.now();
-      const heartbeatMissing = !status.online;
-      const cooldownElapsed = now - state.lastLaunchAttemptAt > 30_000;
-
-      if (heartbeatMissing && cooldownElapsed && process.env.IWG_DISABLE_LOCAL_CHROME !== '1') {
-        launchGoogleVoiceChromeWindow('cloud_offline_fallback');
-      }
-    } catch {
-      // ignore
-    }
-  }, 10_000);
+  // Permanently disabled local Windows Chrome launcher: exclusive ownership belongs to Cloud VM sarah-watchdog
+  return;
 }

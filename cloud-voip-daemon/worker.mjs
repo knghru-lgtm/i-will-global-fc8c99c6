@@ -312,6 +312,15 @@ async function waitForLocalApiReady(maxWaitMs = 25000) {
 async function launchResilientBrowser(execPath) {
   mkdirSync(CHROME_PROFILE_DIR, { recursive: true });
   reapZombieChromeProcesses();
+  // Purge background Service Workers and any Chrome Voice extension folders before launch (preserving Default/Cookies!)
+  for (const rel of [
+    path.join('Default', 'Service Worker'),
+    path.join('Default', 'Extensions', 'kcnhkahnjcbndmmehfkdnkjomaanaooo'),
+  ]) {
+    try {
+      rmSync(path.join(CHROME_PROFILE_DIR, rel), { recursive: true, force: true });
+    } catch { }
+  }
 
   const usesSarahChromeWrapper = String(execPath || '').endsWith('sarah-chrome');
   const chromeArgs = [
@@ -589,6 +598,18 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
 
   const browser = await launchResilientBrowser(execPath);
   activeBrowser = browser;
+  const spawnedBrowserPid = browser.process()?.pid;
+  if (spawnedBrowserPid) {
+    try {
+      writeFileSync(path.join(TMP_DIR, 'sarah-browser.pid'), String(spawnedBrowserPid), 'utf8');
+      if (process.platform === 'linux') {
+        // Enforce Single-Browser-Instance Lock: kill any root Chrome/Chromium process whose PID !== spawnedBrowserPid
+        execSync(
+          `ps -eo pid,ppid,args | awk '$1 != ${spawnedBrowserPid} && $2 != ${spawnedBrowserPid} && ($3 ~ /chrome|chromium/) && $0 !~ /--type=|crashpad/ { print $1 }' | xargs -r kill -9 2>/dev/null || true`
+        );
+      }
+    } catch { }
+  }
   const sessionStartedAt = Date.now();
   let bulletproofPickupHandle = null;
 

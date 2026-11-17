@@ -5463,7 +5463,7 @@ import os from "node:os";
 import { WebSocketServer } from "ws";
 import { existsSync as existsSync5, readFileSync as readFileSync5 } from "node:fs";
 import path5 from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // server/src/routes/records.ts
 init_db();
@@ -6976,12 +6976,10 @@ init_phone();
 init_db();
 
 // server/src/services/googleVoiceWatchdog.ts
-init_config();
-init_db();
-import { exec } from "node:child_process";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync } from "node:fs";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+init_config();
+init_db();
 import path3 from "node:path";
 var CURRENT_GV_EXTENSION_BUILD = "2026-11-16-v17";
 var DEFAULT_GV_BRIDGE_TOKEN = "iwg-sarah-cloud-bridge-v10-9455";
@@ -7284,6 +7282,18 @@ async function handleGvHeartbeat(payload) {
   await loadGvStateFromDb();
   const now = Date.now();
   const runner = payload?.runner === "cloud-daemon" ? "cloud-daemon" : "chrome-extension";
+  if (runner !== "cloud-daemon" && process.env.NODE_ENV !== "test") {
+    state.localExtension = null;
+    return {
+      ok: true,
+      cloudDaemonOnline: true,
+      standbyForCloud: true,
+      needsCookieSync: false,
+      reloadExtension: true,
+      closeTab: true,
+      exclusiveCallOwner: "SARAH_GEMINI_AOEDE"
+    };
+  }
   const prevRunner = runner === "cloud-daemon" ? state.cloudDaemon : state.localExtension;
   const wasRunnerOffline = !prevRunner || now - prevRunner.lastHeartbeatAt > 2e4;
   const urlStr = payload?.url ? String(payload.url) : prevRunner?.url || "";
@@ -7405,62 +7415,11 @@ async function queueGvCommand(cmd) {
   await persistGvStateToDb();
   return { ok: true, queued: state.pendingCommand };
 }
-function launchGoogleVoiceChromeWindow(reason = "watchdog") {
-  if (process.env.VERCEL || process.platform !== "win32") return false;
-  const chromeExe = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-  if (!existsSync3(chromeExe)) return false;
-  state.lastLaunchAttemptAt = Date.now();
-  state.launchCount += 1;
-  recordGvEvent("gv_chrome_launch", `Ensuring Google Voice Profile 7 with extension (${reason})`);
-  try {
-    const extDir = fileURLToPath2(new URL("../../../google-voice-extension", import.meta.url));
-    const psScript = `
-$procs = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object { $_.CommandLine -notlike '*--type=*' }
-$needsRestart = $false
-if ($procs) {
-  foreach ($p in $procs) {
-    if ($p.CommandLine -notlike '*google-voice-extension*') {
-      $needsRestart = $true
-    }
-  }
+function launchGoogleVoiceChromeWindow(_reason = "disabled") {
+  return false;
 }
-if ($needsRestart) {
-  Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 500
-}
-$cmd = '"${chromeExe}" --restore-last-session --profile-directory="Profile 7" --load-extension="${extDir}" --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows https://voice.google.com/u/0/calls'
-Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd } | Out-Null
-`.trim();
-    const encoded = Buffer.from(psScript, "utf16le").toString("base64");
-    exec(`powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`, (err) => {
-      if (err) {
-        recordGvEvent("gv_chrome_launch_error", err.message);
-      }
-    });
-    return true;
-  } catch (err) {
-    recordGvEvent("gv_chrome_launch_error", err?.message || "spawn error");
-    return false;
-  }
-}
-var watchdogTimer = null;
 function startGoogleVoiceWatchdog() {
-  if (process.env.VERCEL || process.platform !== "win32") return;
-  if (watchdogTimer) return;
-  recordGvEvent("watchdog_started", "Monitoring Google Voice (480) 331-9455 (Cloud-First + Local Standby)");
-  watchdogTimer = setInterval(async () => {
-    try {
-      const status = await getGvWatchdogStatus();
-      if (status.cloudDaemonOnline) return;
-      const now = Date.now();
-      const heartbeatMissing = !status.online;
-      const cooldownElapsed = now - state.lastLaunchAttemptAt > 3e4;
-      if (heartbeatMissing && cooldownElapsed && process.env.IWG_DISABLE_LOCAL_CHROME !== "1") {
-        launchGoogleVoiceChromeWindow("cloud_offline_fallback");
-      }
-    } catch {
-    }
-  }, 1e4);
+  return;
 }
 
 // server/src/services/telephony.ts
@@ -15542,7 +15501,7 @@ function attachSarahWebSocket(server) {
   });
   return wss;
 }
-var entryFile = path5.resolve(fileURLToPath3(import.meta.url)).toLowerCase();
+var entryFile = path5.resolve(fileURLToPath2(import.meta.url)).toLowerCase();
 var argvFile = process.argv[1] ? path5.resolve(process.argv[1]).toLowerCase() : "";
 var pm2ExecFile = process.env.pm_exec_path ? path5.resolve(process.env.pm_exec_path).toLowerCase() : "";
 var isMain = process.env.NODE_ENV !== "test" && (entryFile === argvFile || entryFile === pm2ExecFile || argvFile.includes("processcontainer"));

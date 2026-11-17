@@ -834,6 +834,7 @@
   }
 
   let pickupFailureLoggedForAttempt = false;
+  let greetingTransitionPending = false;
 
   function logCallStateToNode(payload) {
     try {
@@ -1070,7 +1071,8 @@
     const liveIncomingText = detectLiveIncomingCallContainer(elements);
 
     // If 700ms Bulletproof Pickup Loop answered directly before content.js set pendingAnswerAttempt, greet immediately!
-    if (!pendingAnswerAttempt && IS_TOP_FRAME && now - lastCallEndedTs > 1200 && hasActiveCallIndicators(elements)) {
+    if (!pendingAnswerAttempt && !greetingTransitionPending && IS_TOP_FRAME && now - lastCallEndedTs > 1200 && hasActiveCallIndicators(elements)) {
+      greetingTransitionPending = true;
       const detectedCaller = extractActiveCallerPhone();
       logCallStateToNode({
         status: 'CALL_ACTIVE',
@@ -1081,21 +1083,23 @@
         details: 'Active call verified directly after 700ms Bulletproof Pickup Loop.',
       });
       setTimeout(() => {
+        greetingTransitionPending = false;
         if (!callActive) {
           onIncomingCallAnswered(detectedCaller);
         }
-      }, 150);
+      }, 120);
       return;
     }
 
     // STRICT 2,000ms ACTIVE-CALL VERIFICATION:
     // NEVER treat answerBtns.length === 0 alone as answered! Require an active call timer (00:01),
     // End Call / Hang Up button, or live WebRTC connection!
-    if (pendingAnswerAttempt && IS_TOP_FRAME) {
+    if (pendingAnswerAttempt && !greetingTransitionPending && IS_TOP_FRAME) {
       if (hasActiveCallIndicators(elements)) {
         const pickupElapsedMs = now - pendingAnswerStartedTs;
         pendingAnswerAttempt = false;
         pickupFailureLoggedForAttempt = false;
+        greetingTransitionPending = true;
         const callerToGreet = pendingCallerPhone;
         logCallStateToNode({
           status: 'CALL_ACTIVE',
@@ -1105,12 +1109,13 @@
           url: window.location.href,
           details: `Verified active call transition in ${pickupElapsedMs}ms (timer / End call / WebRTC live).`,
         });
-        // Brief 150ms RTP audio settle on live WebRTC connect so the caller hears every word from syllable 1
+        // Brief 120ms RTP audio settle on live WebRTC connect so the caller hears every word from syllable 1
         setTimeout(() => {
+          greetingTransitionPending = false;
           if (!callActive) {
             onIncomingCallAnswered(callerToGreet);
           }
-        }, 150);
+        }, 120);
         return;
       }
 
@@ -1402,23 +1407,49 @@
   window.__IWG_GV_SIMULATE_CALL__ = triggerSimulatedIncomingCallInDom;
   window.__IWG_GV_PROCESS_CALLER_TURN__ = processCallerTurn;
   window.__IWG_GV_HANGUP_NOW__ = hangupActiveGoogleVoiceCall;
-  window.__IWG_GV_GET_STATE__ = () => ({
-    build: EXTENSION_BUILD,
-    callActive,
-    pendingAnswerAttempt,
-    isSpeaking,
-    activeCallIsBusinessHours,
-    lastAnswerClickTs,
-    lastHangupClickTs,
-    lastCallStartTs,
-    totalCallsAnswered,
-    lastSarahSpokenText,
-    callHistoryLength: callHistory.length,
-    hasPreloadedGreeting: Boolean(preloadedGreeting?.audio_base64),
-    hasPreloadedAfterHoursGreeting: Boolean(preloadedAfterHoursGreeting?.audio_base64),
-    viewportWidth: window.innerWidth,
-    viewportHeight: window.innerHeight,
-  });
+  window.__IWG_FORCE_SARAH_TAKEOVER__ = () => {
+    if (!callActive && !greetingTransitionPending) {
+      onIncomingCallAnswered(extractActiveCallerPhone());
+      return true;
+    }
+    return Boolean(callActive || isSpeaking);
+  };
+  window.__IWG_GV_GET_STATE__ = () => {
+    const webrtcDiag = window.__IWG_WEBRTC_GET_DIAGNOSTICS__?.() || null;
+    const sarahVoiceStreamActive = Boolean(
+      isSpeaking ||
+        turnInFlight ||
+        greetingTransitionPending ||
+        webrtcDiag?.sarahSpeakingNow ||
+        (callActive && webrtcDiag?.virtualTrackReadyState === 'live')
+    );
+    const voiceSessionState =
+      isSpeaking || greetingTransitionPending || webrtcDiag?.sarahSpeakingNow
+        ? 'ACTIVE_SPEAKING'
+        : callActive
+        ? 'ACTIVE_LISTENING'
+        : 'IDLE';
+    return {
+      build: EXTENSION_BUILD,
+      callActive,
+      pendingAnswerAttempt,
+      greetingTransitionPending,
+      isSpeaking,
+      sarahVoiceStreamActive,
+      voiceSessionState,
+      activeCallIsBusinessHours,
+      lastAnswerClickTs,
+      lastHangupClickTs,
+      lastCallStartTs,
+      totalCallsAnswered,
+      lastSarahSpokenText,
+      callHistoryLength: callHistory.length,
+      hasPreloadedGreeting: Boolean(preloadedGreeting?.audio_base64),
+      hasPreloadedAfterHoursGreeting: Boolean(preloadedAfterHoursGreeting?.audio_base64),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+  };
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
