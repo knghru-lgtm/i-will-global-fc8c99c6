@@ -184,11 +184,13 @@ async function testPulseAudioSinks(): Promise<{
     await execAsync(
       [
         'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
-        'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true',
-        'pactl list short sinks | grep -q virtual_speaker || pactl load-module module-null-sink sink_name=virtual_speaker rate=48000 channels=1 sink_properties=device.description="Gemini_Live_Virtual_Speaker"',
-        'pactl list short sources | grep -q virtual_mic || pactl load-module module-remap-source master=virtual_speaker.monitor source_name=virtual_mic source_properties=device.description="Gemini_Live_Virtual_Mic"',
-        'pactl set-sink-mute virtual_speaker 0',
-        'pactl set-source-mute virtual_mic 0',
+        'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --realtime=true --system=false --disallow-module-loading=false 2>/dev/null || true',
+        'pactl list short sinks | grep -q gv_speaker || pactl load-module module-null-sink sink_name=gv_speaker rate=16000 channels=1 sink_properties=device.description="Caller_From_GoogleVoice"',
+        'pactl list short sinks | grep -q gv_mic_sink || pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1 sink_properties=device.description="Sarah_Aoede_Output"',
+        'pactl list short sources | grep -q sarah_virtual_mic || pactl load-module module-remap-source master=gv_mic_sink.monitor source_name=sarah_virtual_mic source_properties=device.description="Sarah_Virtual_Mic"',
+        'pactl set-sink-mute gv_speaker 0',
+        'pactl set-sink-mute gv_mic_sink 0',
+        'pactl set-source-mute sarah_virtual_mic 0',
       ].join(' && ')
     );
 
@@ -196,12 +198,12 @@ async function testPulseAudioSinks(): Promise<{
       await Promise.all([
         execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sinks short'),
         execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sources short'),
-        execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl get-sink-mute virtual_speaker'),
-        execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl get-source-mute virtual_mic'),
+        execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl get-sink-mute gv_mic_sink'),
+        execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl get-source-mute sarah_virtual_mic'),
       ]);
 
-    const virtualSpeakerReady = sinksOut.includes('virtual_speaker');
-    const virtualMicReady = sourcesOut.includes('virtual_mic');
+    const virtualSpeakerReady = sinksOut.includes('gv_speaker') && sinksOut.includes('gv_mic_sink');
+    const virtualMicReady = sourcesOut.includes('sarah_virtual_mic');
     const unmuted = !/yes/i.test(sinkMute) && !/yes/i.test(srcMute);
 
     return {
@@ -209,7 +211,7 @@ async function testPulseAudioSinks(): Promise<{
       virtualSpeakerReady,
       virtualMicReady,
       unmuted,
-      details: `virtual_speaker=${virtualSpeakerReady}, virtual_mic=${virtualMicReady}, unmuted=${unmuted}`,
+      details: `gv_speaker+gv_mic_sink=${virtualSpeakerReady}, sarah_virtual_mic=${virtualMicReady}, unmuted=${unmuted}`,
     };
   } catch (err: any) {
     return {
@@ -410,19 +412,21 @@ async function runPre9AmGeminiAutoFix(failureSummary: string): Promise<string[]>
     await execAsync(
       [
         'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
-        'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 2>/dev/null || true',
-        'pactl list short sinks | grep -q virtual_speaker || pactl load-module module-null-sink sink_name=virtual_speaker rate=48000 channels=1',
-        'pactl list short sources | grep -q virtual_mic || pactl load-module module-remap-source master=virtual_speaker.monitor source_name=virtual_mic',
-        'pactl set-sink-mute virtual_speaker 0',
-        'pactl set-source-mute virtual_mic 0',
+        'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --realtime=true --system=false --disallow-module-loading=false 2>/dev/null || true',
+        'pactl list short sinks | grep -q gv_speaker || pactl load-module module-null-sink sink_name=gv_speaker rate=16000 channels=1',
+        'pactl list short sinks | grep -q gv_mic_sink || pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1',
+        'pactl list short sources | grep -q sarah_virtual_mic || pactl load-module module-remap-source master=gv_mic_sink.monitor source_name=sarah_virtual_mic',
+        'pactl set-sink-mute gv_speaker 0',
+        'pactl set-sink-mute gv_mic_sink 0',
+        'pactl set-source-mute sarah_virtual_mic 0',
       ].join(' && ')
     ).catch(() => {});
     actions.push('reloaded_pulseaudio_virtual_sinks');
 
     await execAsync(
-      'rm -f /tmp/.X99-lock /home/king/.sarah-chrome-profile/Singleton* 2>/dev/null || true && pm2 restart cloud-voip-daemon --update-env'
+      'rm -f /tmp/.X99-lock /home/king/.sarah-chrome-profile/Singleton* 2>/dev/null || true && (pm2 restart sarah-daemon --update-env || pm2 restart cloud-voip-daemon --update-env)'
     ).catch(() => {});
-    actions.push('restarted_cloud_voip_daemon');
+    actions.push('restarted_sarah_daemon');
 
     for (let i = 0; i < 48; i++) {
       await sleep(2000);

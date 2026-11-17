@@ -23,15 +23,15 @@ export async function enforcePulseAudioVirtualBridgeBinding(): Promise<boolean> 
   try {
     const cmd = [
       'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
-      'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true',
-      'pactl list short sinks 2>/dev/null | grep -q virtual_speaker || pactl load-module module-null-sink sink_name=virtual_speaker rate=48000 channels=1 sink_properties=device.description="Gemini_Live_Virtual_Speaker" 2>/dev/null || true',
-      'pactl list short sources 2>/dev/null | grep -q virtual_mic || pactl load-module module-remap-source master=virtual_speaker.monitor source_name=virtual_mic source_properties=device.description="Gemini_Live_Virtual_Mic" 2>/dev/null || true',
-      'pactl set-default-sink virtual_speaker 2>/dev/null || true',
-      'pactl set-default-source virtual_mic 2>/dev/null || true',
-      'pactl set-sink-mute virtual_speaker 0 2>/dev/null || true',
-      'pactl set-source-mute virtual_mic 0 2>/dev/null || true',
-      'for id in $(pactl list short sink-inputs 2>/dev/null | awk \'{print $1}\'); do pactl move-sink-input "$id" virtual_speaker 2>/dev/null || true; done',
-      'for id in $(pactl list short source-outputs 2>/dev/null | awk \'{print $1}\'); do pactl move-source-output "$id" virtual_mic 2>/dev/null || true; done',
+      'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --realtime=true --system=false --disallow-module-loading=false 2>/dev/null || true',
+      'pactl list short sinks 2>/dev/null | grep -q gv_speaker || pactl load-module module-null-sink sink_name=gv_speaker rate=16000 channels=1 sink_properties=device.description="Caller_From_GoogleVoice" 2>/dev/null || true',
+      'pactl list short sinks 2>/dev/null | grep -q gv_mic_sink || pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1 sink_properties=device.description="Sarah_Aoede_Output" 2>/dev/null || true',
+      'pactl list short sources 2>/dev/null | grep -q sarah_virtual_mic || pactl load-module module-remap-source master=gv_mic_sink.monitor source_name=sarah_virtual_mic source_properties=device.description="Sarah_Virtual_Mic" 2>/dev/null || true',
+      'pactl set-default-sink gv_speaker 2>/dev/null || true',
+      'pactl set-default-source sarah_virtual_mic 2>/dev/null || true',
+      'pactl set-sink-mute gv_speaker 0 2>/dev/null || true',
+      'pactl set-sink-mute gv_mic_sink 0 2>/dev/null || true',
+      'pactl set-source-mute sarah_virtual_mic 0 2>/dev/null || true',
     ].join('; ');
     await execAsync(cmd);
     const { stdout: sinksOut } = await execAsync(
@@ -40,7 +40,11 @@ export async function enforcePulseAudioVirtualBridgeBinding(): Promise<boolean> 
     const { stdout: sourcesOut } = await execAsync(
       'XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list short sources 2>/dev/null'
     );
-    return sinksOut.includes('virtual_speaker') && sourcesOut.includes('virtual_mic');
+    return (
+      sinksOut.includes('gv_speaker') &&
+      sinksOut.includes('gv_mic_sink') &&
+      sourcesOut.includes('sarah_virtual_mic')
+    );
   } catch {
     return false;
   }

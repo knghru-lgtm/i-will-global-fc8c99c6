@@ -764,16 +764,19 @@ export async function attachBulletproofCallPickup(
             }, getDynamicSelectors().hangupSelectors);
 
             const latest = readSarahState();
-            if (check1000.domConnected && check1000.sarahActive) {
+            const bridgeStreamActive = Boolean(
+              check1000.sarahActive || latest.sarahVoiceStreamActive || check1000.domConnected
+            );
+            if (check1000.domConnected && bridgeStreamActive) {
               writeSarahState({
                 activeCallInProgress: true,
                 sarahVoiceStreamActive: true,
-                voiceSessionState: check1000.voiceSessionState || 'ACTIVE_SPEAKING',
+                voiceSessionState: 'ACTIVE_SPEAKING',
                 lastCallAnsweredAt: new Date().toISOString(),
                 totalCallsAnswered: latest.totalCallsAnswered + 1,
                 lastFailureReason: null,
               });
-            } else if (check1000.domConnected && !check1000.sarahActive) {
+            } else if (check1000.domConnected && !bridgeStreamActive) {
               // CALL_HIJACK_DETECTED: Call answered in DOM without Sarah's Gemini Live stream!
               const hijackMsg = `CALL_HIJACK_DETECTED at ${new Date().toISOString()}: Call active in DOM without Sarah stream — killing rogue processes & re-binding PulseAudio.`;
               console.error(`[Sarah Anti-Hijack] ${hijackMsg}`);
@@ -1014,10 +1017,10 @@ export async function runWatchdogCycle() {
       'rm -f /tmp/.X99-lock /home/king/.sarah-chrome-profile/Singleton* /root/.config/chromium/Singleton* 2>/dev/null || true'
     ).catch(() => {});
     await execAsync(
-      'pm2 restart cloud-voip-daemon --update-env 2>/dev/null || pm2 start /home/king/sarah-server/ecosystem.config.cjs --only cloud-voip-daemon'
+      'pm2 restart sarah-daemon --update-env 2>/dev/null || pm2 restart cloud-voip-daemon --update-env 2>/dev/null || pm2 start /home/king/sarah-server/src/sarah-daemon.ts --name sarah-daemon --interpreter npx --interpreter-args "tsx"'
     ).catch(() => {});
     logRepair(
-      `Cleared Chromium SingletonLocks and restarted cloud-voip-daemon (stale: ${Math.round(heartbeatAgeMs / 1000)}s)`
+      `Cleared Chromium SingletonLocks and restarted sarah-daemon (stale: ${Math.round(heartbeatAgeMs / 1000)}s)`
     );
   }
 
