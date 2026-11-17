@@ -314,8 +314,8 @@ async function launchResilientBrowser(execPath) {
   reapZombieChromeProcesses();
   // Purge background Service Workers and any Chrome Voice extension folders before launch (preserving Default/Cookies!)
   for (const rel of [
+    path.join('Default', 'Extensions'),
     path.join('Default', 'Service Worker'),
-    path.join('Default', 'Extensions', 'kcnhkahnjcbndmmehfkdnkjomaanaooo'),
   ]) {
     try {
       rmSync(path.join(CHROME_PROFILE_DIR, rel), { recursive: true, force: true });
@@ -337,8 +337,9 @@ async function launchResilientBrowser(execPath) {
     '--disable-software-rasterizer',
     '--disable-extensions',
     '--disable-component-extensions-with-background-pages',
-    '--disable-translate',
     '--disable-default-apps',
+    '--disable-sync',
+    '--disable-translate',
     '--disable-blink-features=AutomationControlled',
     '--password-store=basic',
     '--use-mock-keychain',
@@ -362,8 +363,8 @@ async function launchResilientBrowser(execPath) {
   const ignoredPuppeteerDefaults = [
     '--mute-audio',
     '--enable-automation',
+    '--disable-extensions',
     '--disable-background-networking',
-    '--disable-sync',
     '--metrics-recording-only',
   ];
   const hasX11Display = Boolean(process.env.DISPLAY) && existsSync('/tmp/.X11-unix');

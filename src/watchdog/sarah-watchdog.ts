@@ -5,6 +5,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  BROWSER_PID_FILE,
+  enforceExclusiveSarahCallOwnership,
+  enforcePulseAudioVirtualBridgeBinding,
+  lockBrowserToSarahOnly,
+} from './anti-hijack.ts';
 
 type Page = any;
 type BrowserContext = any;
@@ -58,7 +64,7 @@ export const SELECTORS_FILE = path.join(TMP_ROOT, 'sarah-dynamic-selectors.json'
 export const SCREENSHOT_PATH = path.join(TMP_ROOT, 'sarah-latest-screen.png');
 export const LIVE_STATUS_SCREENSHOT_PATH = path.join(TMP_ROOT, 'gv-live-status.png');
 export const DOM_SNAPSHOT_PATH = path.join(TMP_ROOT, 'sarah-failed-dom.html');
-export const BROWSER_PID_FILE = path.join(TMP_ROOT, 'sarah-browser.pid');
+export { BROWSER_PID_FILE };
 export const SYNTHETIC_RING_FLAG = path.join(TMP_ROOT, 'sarah-trigger-synthetic-ring.flag');
 export const SYNTHETIC_RING_FLAG_FILE = SYNTHETIC_RING_FLAG;
 export const FORCE_RELOAD_FLAG = path.join(TMP_ROOT, 'sarah-force-reload.flag');
@@ -238,157 +244,7 @@ export function writeSarahState(patch: Partial<SarahLiveState>): SarahLiveState 
   return updated;
 }
 
-// ============================================================================
-// ANTI-HIJACK PULSEAUDIO & PROCESS ENFORCEMENT HELPERS
-// ============================================================================
-async function enforcePulseAudioVirtualBridgeBinding(): Promise<boolean> {
-  if (process.platform !== 'linux') return true;
-  try {
-    const cmd = [
-      'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
-      'pactl set-default-sink virtual_speaker 2>/dev/null || true',
-      'pactl set-default-source virtual_mic 2>/dev/null || true',
-      'pactl set-sink-mute virtual_speaker 0 2>/dev/null || true',
-      'pactl set-source-mute virtual_mic 0 2>/dev/null || true',
-      'for id in $(pactl list short sink-inputs 2>/dev/null | awk \'{print $1}\'); do pactl move-sink-input "$id" virtual_speaker 2>/dev/null || true; done',
-      'for id in $(pactl list short source-outputs 2>/dev/null | awk \'{print $1}\'); do pactl move-source-output "$id" virtual_mic 2>/dev/null || true; done',
-    ].join('; ');
-    await execAsync(cmd);
-    const { stdout: sinksOut } = await execAsync(
-      'XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list short sinks 2>/dev/null'
-    );
-    const { stdout: sourcesOut } = await execAsync(
-      'XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list short sources 2>/dev/null'
-    );
-    return sinksOut.includes('virtual_speaker') && sourcesOut.includes('virtual_mic');
-  } catch {
-    return false;
-  }
-}
-
-async function auditAndEnforceAntiHijackProcesses(): Promise<{
-  chromeVoicePurged: boolean;
-  extensionBanEnforced: boolean;
-  singleBrowserInstanceLocked: boolean;
-  rootBrowserCount: number;
-  killedPids: number[];
-}> {
-  if (process.platform !== 'linux') {
-    return {
-      chromeVoicePurged: true,
-      extensionBanEnforced: true,
-      singleBrowserInstanceLocked: true,
-      rootBrowserCount: 1,
-      killedPids: [],
-    };
-  }
-
-  const killedPids: number[] = [];
-  const thisDir = path.dirname(fileURLToPath(import.meta.url));
-  const repoRoot =
-    path.basename(thisDir) === 'api'
-      ? path.resolve(thisDir, '..')
-      : path.resolve(thisDir, '..', '..');
-
-  // 1. Purge any rogue Chrome Voice extension directories & background Service Workers
-  const forbiddenPaths = [
-    path.join(repoRoot, 'google-voice-extension'),
-    '/home/king/.sarah-chrome-profile/Default/Extensions/kcnhkahnjcbndmmehfkdnkjomaanaooo',
-    '/root/.config/chromium/Default/Extensions/kcnhkahnjcbndmmehfkdnkjomaanaooo',
-    '/etc/chromium/policies/managed/extension_install_forcelist.json',
-    '/etc/opt/chrome/policies/managed/extension_install_forcelist.json',
-  ];
-  for (const fp of forbiddenPaths) {
-    if (fs.existsSync(fp)) {
-      try {
-        fs.rmSync(fp, { recursive: true, force: true });
-      } catch {}
-    }
-  }
-
-  // 2. Scan running processes for --load-extension, kcnhkahnjcbndmmehfkdnkjomaanaooo, x11vnc, or duplicate root browsers
-  let authorizedRootPid = 0;
-  try {
-    if (fs.existsSync(BROWSER_PID_FILE)) {
-      authorizedRootPid = Number(fs.readFileSync(BROWSER_PID_FILE, 'utf-8').trim()) || 0;
-    }
-  } catch {}
-
-  let rootBrowserPids: number[] = [];
-  let rogueExtensionFound = false;
-
-  try {
-    const { stdout } = await execAsync('ps -eo pid=,ppid=,args=');
-    const lines = stdout.split(/\r?\n/);
-    for (const rawLine of lines) {
-      const m = rawLine.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
-      if (!m) continue;
-      const pid = Number(m[1]);
-      const args = m[3];
-
-      // Kill any left-open VNC server on :99
-      if (/\bx11vnc\b/i.test(args)) {
-        try {
-          process.kill(pid, 'SIGKILL');
-          killedPids.push(pid);
-        } catch {}
-        continue;
-      }
-
-      const isBrowserBin =
-        /^(\/opt\/google\/chrome\/chrome|\/usr\/bin\/google-chrome|\/usr\/bin\/chromium|\/usr\/lib\/chromium\/chromium)\b/.test(
-          args
-        );
-      if (!isBrowserBin) continue;
-
-      // Extension Ban Check: kill immediately if any extension-loading flag or Chrome Voice ID appears
-      if (
-        /--load-extension|--disable-extensions-except|kcnhkahnjcbndmmehfkdnkjomaanaooo|google-voice-extension/i.test(
-          args
-        )
-      ) {
-        rogueExtensionFound = true;
-        try {
-          process.kill(pid, 'SIGKILL');
-          killedPids.push(pid);
-        } catch {}
-        continue;
-      }
-
-      // Root browser processes do NOT pass --type= and are not crashpad_handler
-      if (!args.includes('--type=') && !args.includes('crashpad')) {
-        rootBrowserPids.push(pid);
-      }
-    }
-
-    // Duplicate Browser Check: if >1 root browser exists, keep ONLY authorizedRootPid (or newest) and kill all others
-    if (rootBrowserPids.length > 1) {
-      const keepPid =
-        authorizedRootPid && rootBrowserPids.includes(authorizedRootPid)
-          ? authorizedRootPid
-          : Math.max(...rootBrowserPids);
-      for (const rPid of rootBrowserPids) {
-        if (rPid !== keepPid) {
-          try {
-            process.kill(rPid, 'SIGKILL');
-            killedPids.push(rPid);
-          } catch {}
-        }
-      }
-      rootBrowserPids = [keepPid];
-    }
-  } catch {}
-
-  const extStillOnDisk = forbiddenPaths.some((fp) => fs.existsSync(fp));
-
-  return {
-    chromeVoicePurged: !extStillOnDisk && !rogueExtensionFound,
-    extensionBanEnforced: !rogueExtensionFound,
-    singleBrowserInstanceLocked: rootBrowserPids.length <= 1,
-    rootBrowserCount: rootBrowserPids.length,
-    killedPids,
-  };
-}
+const auditAndEnforceAntiHijackProcesses = enforceExclusiveSarahCallOwnership;
 
 async function runInlineGoogleVoiceSettingsAuditOnPage(page: Page): Promise<{
   webOn: boolean;
