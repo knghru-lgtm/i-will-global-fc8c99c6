@@ -159,11 +159,60 @@ export async function launchSarahExclusiveBrowser(): Promise<{
   await lockBrowserToSarahOnly(browser, primaryPage);
   setInterval(() => enforceExclusiveSarahCallOwnership().catch(() => {}), 10000);
 
+  // Polyfill tsx/esbuild __name helper on every navigation
+  await primaryPage.evaluateOnNewDocument('window.__name = (fn) => fn;').catch(() => {});
+
+  // Hydrate encrypted native Linux vault cookies if profile cookies were interrupted
+  try {
+    const cdp = await primaryPage.createCDPSession();
+    const existing = await cdp.send('Storage.getCookies').catch(() => ({ cookies: [] }));
+    const hasSid = Array.isArray(existing?.cookies) && existing.cookies.some((c: any) => c.name === 'SID');
+    if (!hasSid) {
+      const bridgeToken = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-9455';
+      const vRes = await fetch('http://127.0.0.1:4000/api/sarah/gv-session-sync', {
+        headers: { 'x-iwg-bridge-token': bridgeToken },
+      });
+      if (vRes.ok) {
+        const vData: any = await vRes.json();
+        if (Array.isArray(vData?.cookies)) {
+          for (const ck of vData.cookies) {
+            if (!ck?.name || typeof ck?.value !== 'string' || !ck?.domain) continue;
+            const host = String(ck.domain).replace(/^\.+/, '');
+            const isHostOnly = ck.name.startsWith('__Host-') || ck.hostOnly === true || !String(ck.domain).startsWith('.');
+            const entry: any = {
+              name: ck.name,
+              value: ck.value,
+              path: ck.name.startsWith('__Host-') ? '/' : String(ck.path || '/'),
+              secure: Boolean(ck.secure || ck.name.startsWith('__Secure-') || ck.name.startsWith('__Host-')),
+              httpOnly: Boolean(ck.httpOnly),
+            };
+            if (isHostOnly) entry.url = `${entry.secure ? 'https' : 'http'}://${host}${entry.path}`;
+            else entry.domain = ck.domain;
+            await cdp.send('Network.setCookie', entry).catch(() => {});
+          }
+        }
+      }
+    }
+  } catch {}
+
   console.log('[Sarah Daemon] Opening Google Voice Calls view...');
   await primaryPage.goto(GOOGLE_VOICE_URL, {
     waitUntil: 'domcontentloaded',
     timeout: 60000,
   });
+
+  // Follow Google Workspace passive grandcentral SSO redirect if workspace.google.com landing page appears
+  if (primaryPage.url().includes('workspace.google.com')) {
+    console.log('[Sarah Daemon] Completing Google Workspace passive grandcentral SSO -> /u/0/calls...');
+    await primaryPage
+      .goto(
+        'https://accounts.google.com/ServiceLogin?service=grandcentral&passive=true&continue=https%3A%2F%2Fvoice.google.com%2Fu%2F0%2Fcalls',
+        { waitUntil: 'domcontentloaded', timeout: 45000 }
+      )
+      .catch(() => {});
+    await new Promise((r) => setTimeout(r, 2500));
+  }
+  await primaryPage.evaluate('window.__name = (fn) => fn;').catch(() => {});
 
   // Dismiss any promotional banner so full call sidebar height stays visible
   setTimeout(async () => {

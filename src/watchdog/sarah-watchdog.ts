@@ -344,6 +344,10 @@ export async function attachBulletproofCallPickup(
     await cdp.send('Page.setWebLifecycleState', { state: 'active' }).catch(() => {});
   } catch {}
 
+  // Polyfill esbuild/tsx __name helper in browser context so page.evaluate() never throws ReferenceError: __name is not defined
+  await page.evaluateOnNewDocument('window.__name = (fn) => fn;').catch(() => {});
+  await page.evaluate('window.__name = (fn) => fn;').catch(() => {});
+
   await page
     .evaluateOnNewDocument(() => {
       setInterval(() => {

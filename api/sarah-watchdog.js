@@ -396,6 +396,10 @@ async function attachBulletproofCallPickup(page, context) {
     });
   } catch {
   }
+  await page.evaluateOnNewDocument("window.__name = (fn) => fn;").catch(() => {
+  });
+  await page.evaluate("window.__name = (fn) => fn;").catch(() => {
+  });
   await page.evaluateOnNewDocument(() => {
     setInterval(() => {
       const win = window;
