@@ -3,9 +3,10 @@
 # One-Time Direct VM Google Voice Sign-In & Persistent Profile Lock
 # Uses /usr/local/bin/sarah-chrome (--disable-extensions --disable-sync),
 # starts directly on Google ServiceLogin -> voice.google.com/u/0/calls,
+# verifies live Xvfb :99 + x11vnc :5900 + websockify :6080 RFB socket,
 # and ONLY completes once gv-availability-chip / settings-ogb-button is live!
 # ==============================================================================
-set -euo pipefail
+set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="${REPO_DIR}/server/data"
@@ -24,25 +25,49 @@ echo "[1/5] Stopping background daemons & unlocking persistent Chrome profile...
 pm2 stop sarah-watchdog >/dev/null 2>&1 || true
 pm2 stop sarah-daemon >/dev/null 2>&1 || true
 pm2 delete cloud-voip-daemon >/dev/null 2>&1 || true
-pkill -f "websockify.*6080" 2>/dev/null || true
-pkill -f "x11vnc.*:99" 2>/dev/null || true
+pkill -9 -f "websockify.*6080" 2>/dev/null || true
+pkill -9 -f "x11vnc.*5900" 2>/dev/null || true
+pkill -9 -f "x11vnc.*:99" 2>/dev/null || true
 pkill -TERM -f "${PROFILE_DIR}" 2>/dev/null || true
 sleep 1
 pkill -9 -f "${PROFILE_DIR}" 2>/dev/null || true
-pkill -f "Xvfb :99" 2>/dev/null || true
-rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 "${TOKEN_FILE}" "${PROFILE_DIR}/.native-vm-auth" "${PROFILE_DIR}/.last-vault-stamp"
+pkill -9 -f "Xvfb :99" 2>/dev/null || true
+
+# Wait until any old Xvfb :99 abstract socket is 100% released by the kernel
+for _ in $(seq 1 20); do
+  if ! pgrep -f "Xvfb :99" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.2
+done
+sudo rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
+rm -f "${TOKEN_FILE}" "${PROFILE_DIR}/.native-vm-auth" "${PROFILE_DIR}/.last-vault-stamp"
 rm -rf "${PROFILE_DIR}"/Singleton* "${PROFILE_DIR}/Default/Extensions" "${PROFILE_DIR}/Default/Service Worker" 2>/dev/null || true
 
 LOGIN_TOKEN="$(node -e "process.stdout.write(require('crypto').randomBytes(12).toString('hex'))")"
 umask 077
 printf '%s' "${LOGIN_TOKEN}" > "${TOKEN_FILE}"
 
-echo "[2/5] Starting Xvfb :99 (1280x960) + hardened sarah-chrome + localhost VNC (:6080)..."
+echo "[2/5] Starting Xvfb :99 (1280x960) + hardened sarah-chrome + localhost VNC (:5900 -> :6080)..."
 Xvfb :99 -screen 0 1280x960x24 -nolisten tcp -ac -noreset >/tmp/iwg-xvfb-login.log 2>&1 &
 XVFB_PID=$!
-sleep 1
+
+# Wait for Xvfb :99 socket to exist and stay alive
+for _ in $(seq 1 25); do
+  if [ -S /tmp/.X11-unix/X99 ] && kill -0 "${XVFB_PID}" 2>/dev/null; then
+    break
+  fi
+  sleep 0.2
+done
+
+if ! kill -0 "${XVFB_PID}" 2>/dev/null; then
+  echo "❌ ERROR: Xvfb :99 failed to start:"
+  cat /tmp/iwg-xvfb-login.log 2>/dev/null || true
+  exit 1
+fi
+
 export DISPLAY=:99
-export DBUS_SESSION_BUS_ADDRESS=/dev/null
+unset DBUS_SESSION_BUS_ADDRESS
 
 CHROME_BIN="/usr/local/bin/sarah-chrome"
 if [ ! -x "${CHROME_BIN}" ]; then
@@ -68,14 +93,21 @@ fi
   --remote-debugging-port=9222 \
   --window-size=1280,960 \
   --window-position=0,0 \
-  "https://accounts.google.com/ServiceLogin?service=grandcentral&continue=https%3A%2F%2Fvoice.google.com%2Fu%2F0%2Fcalls" >/tmp/iwg-chrome-login.log 2>&1 &
+  "https://accounts.google.com/ServiceLogin?service=grandcentral&Email=king%40iwillglobal.com&continue=https%3A%2F%2Fvoice.google.com%2Fu%2F0%2Fcalls" >/tmp/iwg-chrome-login.log 2>&1 &
 CHROME_PID=$!
 
-sleep 1
-x11vnc -display :99 -rfbport 5900 -localhost -nopw -forever -shared >/tmp/iwg-x11vnc.log 2>&1 &
+sleep 2
+x11vnc -display :99 -rfbport 5900 -localhost -nopw -forever -shared -noxdamage >/tmp/iwg-x11vnc.log 2>&1 &
 VNC_PID=$!
 
-sleep 1
+# Wait for x11vnc TCP 127.0.0.1:5900 to listen
+for _ in $(seq 1 25); do
+  if ss -tln 2>/dev/null | grep -q ':5900 '; then
+    break
+  fi
+  sleep 0.2
+done
+
 if command -v websockify >/dev/null 2>&1; then
   websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 >/tmp/iwg-websockify.log 2>&1 &
 else
@@ -86,8 +118,8 @@ WS_PID=$!
 CLEANED_UP=0
 
 verify_real_gv_dom_ready() {
-  (cd "${REPO_DIR}/cloud-voip-daemon" && node --input-type=module - <<'NODE_EOF'
-import puppeteer from 'puppeteer-core';
+  (cd "${REPO_DIR}" && node --input-type=module - <<'NODE_EOF'
+import puppeteer from 'puppeteer';
 try {
   const verRes = await fetch('http://127.0.0.1:9222/json/version');
   if (!verRes.ok) process.exit(1);
@@ -120,8 +152,8 @@ NODE_EOF
 }
 
 sync_and_close_browser_cleanly() {
-  (cd "${REPO_DIR}/cloud-voip-daemon" && node --input-type=module - "${BRIDGE_TOKEN}" <<'NODE_EOF'
-import puppeteer from 'puppeteer-core';
+  (cd "${REPO_DIR}" && node --input-type=module - "${BRIDGE_TOKEN}" <<'NODE_EOF'
+import puppeteer from 'puppeteer';
 const bridgeToken = process.argv[2];
 try {
   const verRes = await fetch('http://127.0.0.1:9222/json/version');
@@ -149,7 +181,6 @@ try {
             source: 'vm-direct-login-native',
           }),
         }).catch(() => {});
-        // Close browser gracefully via CDP so SQLite Default/Cookies checkpoints cleanly to disk!
         await browser.close().catch(() => {});
         process.exit(0);
       }
@@ -186,8 +217,8 @@ cleanup() {
   fi
 
   kill "${WS_PID}" "${VNC_PID}" "${XVFB_PID}" 2>/dev/null || true
-  pkill -f "websockify.*6080" 2>/dev/null || true
-  pkill -f "x11vnc.*:99" 2>/dev/null || true
+  pkill -9 -f "websockify.*6080" 2>/dev/null || true
+  pkill -9 -f "x11vnc.*5900" 2>/dev/null || true
   rm -rf "${PROFILE_DIR}"/Singleton* 2>/dev/null || true
 
   echo "Starting 24/7 sarah-daemon & sarah-watchdog..."
@@ -197,11 +228,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for _ in $(seq 1 15); do
+for _ in $(seq 1 20); do
   if curl -fsS http://127.0.0.1:6080/vnc.html >/dev/null 2>&1; then
     break
   fi
-  sleep 1
+  sleep 0.5
 done
 
 echo "=========================================================================="
@@ -212,6 +243,18 @@ echo "==========================================================================
 
 while true; do
   sleep 3
+  # Self-heal x11vnc or websockify if either ever exits unexpectedly while Chrome is open
+  if kill -0 "${XVFB_PID}" 2>/dev/null; then
+    if ! kill -0 "${VNC_PID}" 2>/dev/null; then
+      x11vnc -display :99 -rfbport 5900 -localhost -nopw -forever -shared -noxdamage >/tmp/iwg-x11vnc.log 2>&1 &
+      VNC_PID=$!
+    fi
+    if ! kill -0 "${WS_PID}" 2>/dev/null; then
+      websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 >/tmp/iwg-websockify.log 2>&1 &
+      WS_PID=$!
+    fi
+  fi
+
   if verify_real_gv_dom_ready; then
     sleep 4
     if verify_real_gv_dom_ready; then
