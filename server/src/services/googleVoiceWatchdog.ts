@@ -186,10 +186,14 @@ export async function saveCloudGvCookies(
   const src = String(source || '');
   const isCloudNativeSource =
     src.startsWith('cloud-daemon') || src.startsWith('vm-direct-login') || process.env.NODE_ENV === 'test';
+  const cloudCurrentlyAuthenticated = Boolean(
+    state.cloudDaemon &&
+      Date.now() - state.cloudDaemon.lastHeartbeatAt < 30_000 &&
+      state.cloudDaemon.sessionAuthenticated === true
+  );
 
-  // PERMANENT STANDALONE CLOUD RULE: Ignore all local desktop Chrome / Chrome Extension cookie syncs
-  // so local browsers and extensions are 100% unnecessary and can never overwrite the standalone Cloud VM session!
-  if (!isCloudNativeSource) {
+  // Protect live standalone Cloud VM session when already authenticated, while allowing instant self-heal when unauthenticated!
+  if (!isCloudNativeSource && cloudCurrentlyAuthenticated) {
     return {
       ok: true,
       count: state.cookieVaultCount || 0,
@@ -234,7 +238,12 @@ export async function saveCloudGvCookies(
     .digest('hex')
     .slice(0, 24);
 
-  if (seenCookieAuthFingerprints.has(authFingerprint) && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== 'test') {
+  if (
+    cloudCurrentlyAuthenticated &&
+    seenCookieAuthFingerprints.has(authFingerprint) &&
+    state.cookieVaultUpdatedAt &&
+    process.env.NODE_ENV !== 'test'
+  ) {
     return {
       ok: true,
       count: state.cookieVaultCount || googleCookies.length,

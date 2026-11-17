@@ -7083,7 +7083,10 @@ async function saveCloudGvCookies(cookies, source = "extension", userAgent = "")
   await ensureSettingsTable2();
   const src = String(source || "");
   const isCloudNativeSource = src.startsWith("cloud-daemon") || src.startsWith("vm-direct-login") || process.env.NODE_ENV === "test";
-  if (!isCloudNativeSource) {
+  const cloudCurrentlyAuthenticated = Boolean(
+    state.cloudDaemon && Date.now() - state.cloudDaemon.lastHeartbeatAt < 3e4 && state.cloudDaemon.sessionAuthenticated === true
+  );
+  if (!isCloudNativeSource && cloudCurrentlyAuthenticated) {
     return {
       ok: true,
       count: state.cookieVaultCount || 0,
@@ -7119,7 +7122,7 @@ async function saveCloudGvCookies(cookies, source = "extension", userAgent = "")
       ].includes(String(c.name))
     ).map((c) => `${c.domain || ""}:${c.name}=${c.value}`).sort().join("|")
   ).digest("hex").slice(0, 24);
-  if (seenCookieAuthFingerprints.has(authFingerprint) && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== "test") {
+  if (cloudCurrentlyAuthenticated && seenCookieAuthFingerprints.has(authFingerprint) && state.cookieVaultUpdatedAt && process.env.NODE_ENV !== "test") {
     return {
       ok: true,
       count: state.cookieVaultCount || googleCookies.length,
