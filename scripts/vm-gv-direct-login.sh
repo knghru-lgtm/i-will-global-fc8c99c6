@@ -22,7 +22,8 @@ mkdir -p "${PROFILE_DIR}" "${DATA_DIR}"
 
 echo "[1/5] Stopping background daemons & unlocking persistent Chrome profile..."
 pm2 stop sarah-watchdog >/dev/null 2>&1 || true
-pm2 stop cloud-voip-daemon >/dev/null 2>&1 || true
+pm2 stop sarah-daemon >/dev/null 2>&1 || true
+pm2 delete cloud-voip-daemon >/dev/null 2>&1 || true
 pkill -f "websockify.*6080" 2>/dev/null || true
 pkill -f "x11vnc.*:99" 2>/dev/null || true
 pkill -TERM -f "${PROFILE_DIR}" 2>/dev/null || true
@@ -189,9 +190,9 @@ cleanup() {
   pkill -f "x11vnc.*:99" 2>/dev/null || true
   rm -rf "${PROFILE_DIR}"/Singleton* 2>/dev/null || true
 
-  echo "Starting 24/7 cloud-voip-daemon & sarah-watchdog..."
-  (cd "${REPO_DIR}" && pm2 start cloud-voip-daemon --update-env)
-  (cd "${REPO_DIR}" && pm2 start sarah-watchdog --update-env)
+  echo "Starting 24/7 sarah-daemon & sarah-watchdog..."
+  (cd "${REPO_DIR}" && (pm2 start sarah-daemon --update-env || pm2 start src/sarah-daemon.ts --name sarah-daemon --interpreter npx --interpreter-args "tsx"))
+  (cd "${REPO_DIR}" && (pm2 start sarah-watchdog --update-env || pm2 start src/watchdog/sarah-watchdog.ts --name sarah-watchdog --interpreter npx --interpreter-args "tsx"))
   pm2 save --force >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM

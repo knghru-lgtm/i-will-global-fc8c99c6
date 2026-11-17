@@ -162,38 +162,53 @@ export async function launchSarahExclusiveBrowser(): Promise<{
   // Polyfill tsx/esbuild __name helper on every navigation
   await primaryPage.evaluateOnNewDocument('window.__name = (fn) => fn;').catch(() => {});
 
-  // Hydrate encrypted native Linux vault cookies if profile cookies were interrupted
-  try {
-    const cdp = await primaryPage.createCDPSession();
-    const existing = await cdp.send('Storage.getCookies').catch(() => ({ cookies: [] }));
-    const hasSid = Array.isArray(existing?.cookies) && existing.cookies.some((c: any) => c.name === 'SID');
-    if (!hasSid) {
+  const hydrateFromVaultCookies = async () => {
+    try {
       const bridgeToken = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-9455';
       const vRes = await fetch('http://127.0.0.1:4000/api/sarah/gv-session-sync', {
         headers: { 'x-iwg-bridge-token': bridgeToken },
       });
-      if (vRes.ok) {
-        const vData: any = await vRes.json();
-        if (Array.isArray(vData?.cookies)) {
-          for (const ck of vData.cookies) {
-            if (!ck?.name || typeof ck?.value !== 'string' || !ck?.domain) continue;
-            const host = String(ck.domain).replace(/^\.+/, '');
-            const isHostOnly = ck.name.startsWith('__Host-') || ck.hostOnly === true || !String(ck.domain).startsWith('.');
-            const entry: any = {
-              name: ck.name,
-              value: ck.value,
-              path: ck.name.startsWith('__Host-') ? '/' : String(ck.path || '/'),
-              secure: Boolean(ck.secure || ck.name.startsWith('__Secure-') || ck.name.startsWith('__Host-')),
-              httpOnly: Boolean(ck.httpOnly),
-            };
-            if (isHostOnly) entry.url = `${entry.secure ? 'https' : 'http'}://${host}${entry.path}`;
-            else entry.domain = ck.domain;
-            await cdp.send('Network.setCookie', entry).catch(() => {});
-          }
+      if (!vRes.ok) return false;
+      const vData: any = await vRes.json();
+      if (!Array.isArray(vData?.cookies) || vData.cookies.length === 0) return false;
+      const cdp = await primaryPage.createCDPSession();
+      await cdp.send('Network.clearBrowserCookies').catch(() => {});
+      for (const c of vData.cookies) {
+        if (!c?.name || typeof c?.value !== 'string' || !c?.domain) continue;
+        const rawDomain = String(c.domain);
+        const cleanHost = rawDomain.replace(/^\.+/, '');
+        const isHostPrefix = String(c.name).startsWith('__Host-');
+        const isSecurePrefix = isHostPrefix || String(c.name).startsWith('__Secure-');
+        const isHostOnly = isHostPrefix || c.hostOnly === true || !rawDomain.startsWith('.');
+        const ss = String(c.sameSite || '').toLowerCase();
+        let sameSite: string | undefined;
+        if (ss === 'no_restriction' || ss === 'none') sameSite = 'None';
+        else if (ss === 'lax') sameSite = 'Lax';
+        else if (ss === 'strict') sameSite = 'Strict';
+        const secure = Boolean(c.secure) || isSecurePrefix || sameSite === 'None';
+        const cookiePath = isHostPrefix ? '/' : String(c.path || '/');
+        const entry: any = {
+          name: String(c.name),
+          value: String(c.value),
+          path: cookiePath,
+          secure,
+          httpOnly: Boolean(c.httpOnly),
+        };
+        if (isHostOnly) {
+          entry.url = `${secure ? 'https' : 'http'}://${cleanHost}${cookiePath.startsWith('/') ? cookiePath : '/' + cookiePath}`;
+        } else {
+          entry.domain = rawDomain;
         }
+        if (sameSite) entry.sameSite = sameSite;
+        if (typeof c.expires === 'number' && c.expires > 0) entry.expires = c.expires;
+        else if (typeof c.expirationDate === 'number' && c.expirationDate > 0) entry.expires = c.expirationDate;
+        await cdp.send('Network.setCookie', entry).catch(() => {});
       }
+      return true;
+    } catch {
+      return false;
     }
-  } catch {}
+  };
 
   console.log('[Sarah Daemon] Opening Google Voice Calls view...');
   await primaryPage.goto(GOOGLE_VOICE_URL, {
@@ -201,7 +216,6 @@ export async function launchSarahExclusiveBrowser(): Promise<{
     timeout: 60000,
   });
 
-  // Follow Google Workspace passive grandcentral SSO redirect if workspace.google.com landing page appears
   if (primaryPage.url().includes('workspace.google.com')) {
     console.log('[Sarah Daemon] Completing Google Workspace passive grandcentral SSO -> /u/0/calls...');
     await primaryPage
@@ -211,6 +225,25 @@ export async function launchSarahExclusiveBrowser(): Promise<{
       )
       .catch(() => {});
     await new Promise((r) => setTimeout(r, 2500));
+  }
+
+  // Fallback to encrypted native Linux cookie vault if profile landed on accounts.google.com
+  if (primaryPage.url().includes('accounts.google.com') || primaryPage.url().includes('workspace.google.com')) {
+    const hydrated = await hydrateFromVaultCookies();
+    if (hydrated) {
+      await primaryPage
+        .goto(GOOGLE_VOICE_URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
+        .catch(() => {});
+      if (primaryPage.url().includes('workspace.google.com')) {
+        await primaryPage
+          .goto(
+            'https://accounts.google.com/ServiceLogin?service=grandcentral&passive=true&continue=https%3A%2F%2Fvoice.google.com%2Fu%2F0%2Fcalls',
+            { waitUntil: 'domcontentloaded', timeout: 45000 }
+          )
+          .catch(() => {});
+      }
+      await new Promise((r) => setTimeout(r, 2500));
+    }
   }
   await primaryPage.evaluate('window.__name = (fn) => fn;').catch(() => {});
 
