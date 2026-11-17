@@ -6983,7 +6983,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, 
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import path3 from "node:path";
-var CURRENT_GV_EXTENSION_BUILD = "2026-11-15-v15";
+var CURRENT_GV_EXTENSION_BUILD = "2026-11-16-v17";
 var DEFAULT_GV_BRIDGE_TOKEN = "iwg-sarah-cloud-bridge-v10-9455";
 var DISK_COOKIE_VAULT_PATH = path3.resolve(repoRoot, "server/data/gv-cookie-vault.enc.json");
 var state = {
@@ -7281,14 +7281,6 @@ async function handleGvHeartbeat(payload) {
   await loadGvStateFromDb();
   const now = Date.now();
   const runner = payload?.runner === "cloud-daemon" ? "cloud-daemon" : "chrome-extension";
-  if (runner === "chrome-extension" && process.env.NODE_ENV !== "test") {
-    return {
-      ok: true,
-      standbyForCloud: true,
-      needsCookieSync: false,
-      targetBuild: CURRENT_GV_EXTENSION_BUILD
-    };
-  }
   const prevRunner = runner === "cloud-daemon" ? state.cloudDaemon : state.localExtension;
   const wasRunnerOffline = !prevRunner || now - prevRunner.lastHeartbeatAt > 2e4;
   const urlStr = payload?.url ? String(payload.url) : prevRunner?.url || "";

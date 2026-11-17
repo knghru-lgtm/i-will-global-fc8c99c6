@@ -31,9 +31,18 @@ echo "✅ Step 3: Bundled api/index.js & api/sarah-watchdog.js."
 
 # 4. Ensure Caddy Reverse Proxy Routes `/watchdog*` -> `localhost:4099`
 if command -v caddy >/dev/null 2>&1 && [ -f /etc/caddy/Caddyfile ]; then
-  if ! grep -q "localhost:4099" /etc/caddy/Caddyfile; then
+  if ! grep -q ":80" /etc/caddy/Caddyfile || ! grep -q "localhost:4099" /etc/caddy/Caddyfile; then
     sudo tee /etc/caddy/Caddyfile >/dev/null << 'CADDY_EOF'
 voice.iwillglobal.com {
+    handle /watchdog* {
+        reverse_proxy localhost:4099
+    }
+    handle {
+        reverse_proxy localhost:4000
+    }
+}
+
+:80 {
     handle /watchdog* {
         reverse_proxy localhost:4099
     }

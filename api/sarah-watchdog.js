@@ -687,14 +687,14 @@ async function runWatchdogCycle() {
   let pulseAudioSinkReady = false;
   try {
     const { stdout } = await execAsync(
-      'XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sinks short 2>/dev/null'
+      'PULSE_RUNTIME_PATH="/tmp/sarah-pulse" pactl list sinks short 2>/dev/null || XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sinks short 2>/dev/null'
     );
     pulseAudioSinkReady = stdout.trim().length > 0;
   } catch {
   }
   if (!pulseAudioSinkReady && process.platform === "linux") {
     await execAsync(
-      'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; pulseaudio --start 2>/dev/null || true; pactl load-module module-null-sink sink_name=virtual_speaker rate=48000 channels=1 2>/dev/null || true; pactl load-module module-remap-source master=virtual_speaker.monitor source_name=virtual_mic 2>/dev/null || true'
+      'export PULSE_RUNTIME_PATH="/tmp/sarah-pulse"; mkdir -p "$PULSE_RUNTIME_PATH" && chmod 700 "$PULSE_RUNTIME_PATH"; pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true; pactl load-module module-null-sink sink_name=SarahCloudNullSink rate=48000 channels=1 2>/dev/null || true; pactl load-module module-remap-source master=SarahCloudNullSink.monitor source_name=SarahCloudVirtualMic 2>/dev/null || true; pactl load-module module-null-sink sink_name=virtual_speaker rate=48000 channels=1 2>/dev/null || true; pactl load-module module-remap-source master=virtual_speaker.monitor source_name=virtual_mic 2>/dev/null || true; pactl set-sink-mute virtual_speaker 0 2>/dev/null || true; pactl set-source-mute virtual_mic 0 2>/dev/null || true'
     ).catch(() => {
     });
     pulseAudioSinkReady = true;

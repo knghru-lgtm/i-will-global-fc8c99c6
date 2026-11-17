@@ -183,8 +183,9 @@ async function testPulseAudioSinks(): Promise<{
   try {
     await execAsync(
       [
-        'export XDG_RUNTIME_DIR="/run/user/$(id -u)"',
-        'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 2>/dev/null || true',
+        'export PULSE_RUNTIME_PATH="/tmp/sarah-pulse"',
+        'mkdir -p "$PULSE_RUNTIME_PATH" && chmod 700 "$PULSE_RUNTIME_PATH"',
+        'pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true',
         'pactl list short sinks | grep -q virtual_speaker || pactl load-module module-null-sink sink_name=virtual_speaker rate=48000 channels=1 sink_properties=device.description="Gemini_Live_Virtual_Speaker"',
         'pactl list short sources | grep -q virtual_mic || pactl load-module module-remap-source master=virtual_speaker.monitor source_name=virtual_mic source_properties=device.description="Gemini_Live_Virtual_Mic"',
         'pactl set-sink-mute virtual_speaker 0',
@@ -194,10 +195,10 @@ async function testPulseAudioSinks(): Promise<{
 
     const [{ stdout: sinksOut }, { stdout: sourcesOut }, { stdout: sinkMute }, { stdout: srcMute }] =
       await Promise.all([
-        execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sinks short'),
-        execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl list sources short'),
-        execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl get-sink-mute virtual_speaker'),
-        execAsync('XDG_RUNTIME_DIR="/run/user/$(id -u)" pactl get-source-mute virtual_mic'),
+        execAsync('PULSE_RUNTIME_PATH="/tmp/sarah-pulse" pactl list sinks short'),
+        execAsync('PULSE_RUNTIME_PATH="/tmp/sarah-pulse" pactl list sources short'),
+        execAsync('PULSE_RUNTIME_PATH="/tmp/sarah-pulse" pactl get-sink-mute virtual_speaker'),
+        execAsync('PULSE_RUNTIME_PATH="/tmp/sarah-pulse" pactl get-source-mute virtual_mic'),
       ]);
 
     const virtualSpeakerReady = sinksOut.includes('virtual_speaker');

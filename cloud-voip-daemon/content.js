@@ -7,7 +7,7 @@
   }
   window.__IWG_GV_RECEPTIONIST_ACTIVE__ = true;
 
-  const EXTENSION_BUILD = '2026-11-16-v16';
+  const EXTENSION_BUILD = '2026-11-16-v17';
   const SELECTORS = [
     'button[gv-test-id="in-call-pickup-call"]',
     'button.pickup-call-button',

@@ -19,8 +19,10 @@ pkill -f "Xvfb :99" 2>/dev/null || true
 rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
 rm -rf "$PROFILE_DIR"/Singleton* 2>/dev/null || true
 
-# 2. Ultra-low-latency 20ms mono 48kHz PulseAudio null-sink (zero physical mic/speaker, zero echo, half RAM)
-export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+# 2. Ultra-low-latency 20ms mono 48kHz PulseAudio null-sink (persistent /tmp/sarah-pulse survives SSH disconnect & systemd boot)
+export PULSE_RUNTIME_PATH="/tmp/sarah-pulse"
+mkdir -p "$PULSE_RUNTIME_PATH" 2>/dev/null || true
+chmod 700 "$PULSE_RUNTIME_PATH" 2>/dev/null || true
 export PULSE_LATENCY_MSEC=20
 if command -v pulseaudio >/dev/null 2>&1; then
   pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true

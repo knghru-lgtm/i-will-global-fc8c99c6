@@ -34,7 +34,7 @@ const API_BASES = Array.from(new Set([LOCAL_API_BASE, PUBLIC_API_BASE]));
 const BRIDGE_TOKEN = process.env.GV_BRIDGE_TOKEN || 'iwg-sarah-cloud-bridge-v10-9455';
 const REGION = process.env.GOOGLE_CLOUD_REGION || 'us-west1';
 const INSTANCE_ID = `gcloud-${REGION}-${randomUUID().slice(0, 8)}`;
-const EXTENSION_BUILD = '2026-11-16-v16';
+const EXTENSION_BUILD = '2026-11-16-v17';
 const MAX_IDLE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const TMP_DIR = process.platform === 'win32' ? os.tmpdir() : '/tmp';
 const CALL_STATE_FILE = path.join(TMP_DIR, 'sarah-call-state.json');
@@ -204,6 +204,13 @@ async function saveRefreshedCookies(cookies, userAgent = '') {
 }
 
 async function reportDaemonHeartbeat(extra = {}) {
+  try {
+    writeSarahState({
+      gvUrl: typeof extra.url === 'string' && extra.url ? extra.url : readSarahState().gvUrl,
+      isLoggedIn: Boolean(extra.sessionAuthenticated),
+      activeCallInProgress: Boolean(extra.callActive),
+    });
+  } catch { }
   try {
     await fetchDaemonApi('/api/sarah/gv-heartbeat', {
       method: 'POST',
@@ -560,8 +567,9 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
     ? readFileSync(lastVaultStampFile, 'utf8').trim()
     : '';
 
-  // Self-heal poisoned "Signed out" SQLite cookies before Chrome opens the profile
-  if (forceClearCookies && cookies.length > 0) {
+  // Self-heal poisoned "Signed out" SQLite cookies ONLY when a genuinely newer vault sync arrived
+  const hasNewerVaultOnDisk = Boolean(vaultUpdatedAt && vaultUpdatedAt !== previousVaultStamp);
+  if (forceClearCookies && hasNewerVaultOnDisk && cookies.length > 0) {
     try {
       rmSync(vmSessionLiveMarker, { force: true });
     } catch { }
@@ -622,10 +630,11 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
       profileHasGvCookies;
 
     const shouldInjectVaultCookies =
-      !hasNativeVmAuthMarker &&
-      !profileHasLiveVmSession &&
       cookies.length > 0 &&
-      (forceClearCookies || !profileHasAllCoreAuth || !profileHasGvCookies || hasNewerVaultSync);
+      (hasNewerVaultSync ||
+        (!hasNativeVmAuthMarker &&
+          !profileHasLiveVmSession &&
+          (forceClearCookies || !profileHasAllCoreAuth || !profileHasGvCookies)));
 
     // Strip HeadlessChrome marker; keep syncedUserAgent consistently whenever session came from cookie vault
     const defaultUa = (await browser.userAgent()).replace(/HeadlessChrome\//gi, 'Chrome/');
@@ -908,7 +917,6 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
 
       if (isSignedOut) {
         try {
-          rmSync(nativeVmAuthMarker, { force: true });
           rmSync(vmSessionLiveMarker, { force: true });
         } catch { }
         recordCallState({
@@ -957,8 +965,7 @@ async function runBrowserSession(cookies, syncedUserAgent = null, opts = {}) {
           const sipUnregistered =
             hasVoipErrorBanner ||
             lastSignalerStatus === 401 ||
-            lastSignalerStatus === 403 ||
-            (recentVoice401 && lastSignalerStatus !== 200);
+            lastSignalerStatus === 403;
           return {
             state: window.__IWG_GV_GET_STATE__?.() || null,
             webrtc: window.__IWG_WEBRTC_GET_DIAGNOSTICS__?.() || null,

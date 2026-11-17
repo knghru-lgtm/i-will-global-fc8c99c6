@@ -6,7 +6,7 @@ import path from 'node:path';
 import { config, repoRoot } from '../config.ts';
 import { one, q } from '../db/index.ts';
 
-export const CURRENT_GV_EXTENSION_BUILD = '2026-11-15-v15';
+export const CURRENT_GV_EXTENSION_BUILD = '2026-11-16-v17';
 export const DEFAULT_GV_BRIDGE_TOKEN = 'iwg-sarah-cloud-bridge-v10-9455';
 const DISK_COOKIE_VAULT_PATH = path.resolve(repoRoot, 'server/data/gv-cookie-vault.enc.json');
 
@@ -427,15 +427,6 @@ export async function handleGvHeartbeat(payload: any) {
   const now = Date.now();
   const runner: 'cloud-daemon' | 'chrome-extension' =
     payload?.runner === 'cloud-daemon' ? 'cloud-daemon' : 'chrome-extension';
-
-  if (runner === 'chrome-extension' && process.env.NODE_ENV !== 'test') {
-    return {
-      ok: true,
-      standbyForCloud: true,
-      needsCookieSync: false,
-      targetBuild: CURRENT_GV_EXTENSION_BUILD,
-    };
-  }
 
   const prevRunner = runner === 'cloud-daemon' ? state.cloudDaemon : state.localExtension;
   const wasRunnerOffline = !prevRunner || now - prevRunner.lastHeartbeatAt > 20_000;
