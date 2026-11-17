@@ -353,6 +353,18 @@ const isDirectEntry =
   Boolean(process.argv[1] && /sarah-daemon\.(ts|js|mjs)$/i.test(process.argv[1])) ||
   Boolean(process.env.pm_exec_path && /sarah-daemon\.(ts|js|mjs)$/i.test(process.env.pm_exec_path));
 
+// Never let a transient child pipe EPIPE or unhandled promise rejection kill the live Google Voice browser mid-call
+process.on('uncaughtException', (err: any) => {
+  if (err?.code === 'EPIPE' || /EPIPE|ERR_STREAM_DESTROYED/i.test(String(err?.message || ''))) {
+    console.warn('[Sarah Daemon] Ignored transient audio pipe close (EPIPE).');
+    return;
+  }
+  console.error('[Sarah Daemon Uncaught Exception]', err);
+});
+process.on('unhandledRejection', (reason: any) => {
+  console.warn('[Sarah Daemon Unhandled Rejection]', reason);
+});
+
 if (isDirectEntry) {
   launchSarahExclusiveBrowser().catch((err) => {
     console.error('[Sarah Daemon Fatal Error]', err);

@@ -1,9 +1,12 @@
-import { execSync, spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { exec, execSync, spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { promisify } from 'util';
 import WebSocket from 'ws';
 import { writeSarahState } from '../watchdog/sarah-watchdog.ts';
+
+const execAsync = promisify(exec);
 
 export const VOICE_PROFILE = 'Vindemiatrix' as const;
 export const CALLER_SINK = 'gv_speaker'; // Chromium outputs caller voice here (16kHz)
@@ -136,31 +139,41 @@ export function setupZeroLagPulseAudioTopology(): void {
   }
 }
 
-export function enforceChromiumPulseBinding(): void {
-  if (process.platform !== 'linux') return;
-  const env = pulseEnv();
-  try {
-    const sinkInputsRaw = execSync('pactl list sink-inputs', { env }).toString();
-    const sinkBlocks = sinkInputsRaw.split(/Sink Input #/);
-    for (const blk of sinkBlocks) {
-      const idMatch = blk.match(/^(\d+)/);
-      if (!idMatch) continue;
-      if (/pacat|parec|PulseAudio Volume Control/i.test(blk)) continue;
-      execSync(`pactl move-sink-input ${idMatch[1]} ${CALLER_SINK}`, { stdio: 'ignore', env });
-    }
+let lastPulseBindAtMs = 0;
+let pulseBindInFlight = false;
 
-    const sourceOutputsRaw = execSync('pactl list source-outputs', { env }).toString();
-    const srcBlocks = sourceOutputsRaw.split(/Source Output #/);
-    for (const blk of srcBlocks) {
-      const idMatch = blk.match(/^(\d+)/);
-      if (!idMatch) continue;
-      if (/pacat|parec|PulseAudio Volume Control/i.test(blk)) continue;
-      execSync(`pactl move-source-output ${idMatch[1]} ${SARAH_VIRTUAL_MIC}`, {
-        stdio: 'ignore',
-        env,
-      });
+export function enforceChromiumPulseBinding(forceImmediate = false): void {
+  if (process.platform !== 'linux') return;
+  const now = Date.now();
+  if (!forceImmediate && (pulseBindInFlight || now - lastPulseBindAtMs < 3000)) return;
+  lastPulseBindAtMs = now;
+  pulseBindInFlight = true;
+
+  const env = pulseEnv();
+  void (async () => {
+    try {
+      const { stdout: sinkInputsRaw } = await execAsync('pactl list sink-inputs', { env });
+      for (const blk of sinkInputsRaw.split(/Sink Input #/)) {
+        const idMatch = blk.match(/^(\d+)/);
+        if (!idMatch) continue;
+        if (/pacat|parec|PulseAudio Volume Control/i.test(blk)) continue;
+        await execAsync(`pactl move-sink-input ${idMatch[1]} ${CALLER_SINK}`, { env }).catch(() => {});
+      }
+
+      const { stdout: sourceOutputsRaw } = await execAsync('pactl list source-outputs', { env });
+      for (const blk of sourceOutputsRaw.split(/Source Output #/)) {
+        const idMatch = blk.match(/^(\d+)/);
+        if (!idMatch) continue;
+        if (/pacat|parec|PulseAudio Volume Control/i.test(blk)) continue;
+        await execAsync(`pactl move-source-output ${idMatch[1]} ${SARAH_VIRTUAL_MIC}`, {
+          env,
+        }).catch(() => {});
+      }
+    } catch {
+    } finally {
+      pulseBindInFlight = false;
     }
-  } catch {}
+  })();
 }
 
 export class GeminiVindemiatrixCallBridge {
@@ -170,6 +183,7 @@ export class GeminiVindemiatrixCallBridge {
   private keepAliveTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private drainTimer: NodeJS.Timeout | null = null;
+  private firstByteWatchdogTimer: NodeJS.Timeout | null = null;
 
   private isRunning = false;
   private isSpeaking = false;
@@ -192,19 +206,21 @@ export class GeminiVindemiatrixCallBridge {
     isSpeaking: boolean;
     pcmBytesSentToMic: number;
     scriptCompleted: boolean;
+    parecAlive: boolean;
   } {
     return {
       isRunning: this.isRunning,
       isSpeaking: this.isSpeaking || Date.now() < this.playbackDrainUntilMs,
       pcmBytesSentToMic: this.pcmBytesSentToMic,
       scriptCompleted: this.scriptCompleted,
+      parecAlive: Boolean(this.parecProc && this.parecProc.exitCode === null && !this.parecProc.killed),
     };
   }
 
   private spawnPacatPlayback(forceFlush = false): void {
-    // PLAYBACK DRAIN GUARD: Never kill pacat while Vindemiatrix PCM frames are actively draining unless explicitly forced after script completion
     if (
       this.pacatProc &&
+      this.pacatProc.exitCode === null &&
       this.pacatProc.stdin.writable &&
       !forceFlush &&
       (this.isSpeaking || Date.now() < this.playbackDrainUntilMs)
@@ -214,7 +230,7 @@ export class GeminiVindemiatrixCallBridge {
     try {
       this.pacatProc?.kill('SIGKILL');
     } catch {}
-    this.pacatProc = spawn(
+    const proc = spawn(
       'pacat',
       [
         '--playback',
@@ -228,11 +244,16 @@ export class GeminiVindemiatrixCallBridge {
       ],
       { env: pulseEnv() }
     );
+    // CRITICAL: Suppress EPIPE on pacat stdin so closing audio pipe never crashes sarah-daemon!
+    proc.stdin.on('error', () => {});
+    proc.on('error', () => {});
+    this.pacatProc = proc;
   }
 
   private ensureParecCapture(): void {
-    if (this.parecProc && !this.parecProc.killed) return;
-    this.parecProc = spawn(
+    if (this.parecProc && this.parecProc.exitCode === null && !this.parecProc.killed) return;
+    // NOTE: Ubuntu PulseAudio 17 parec does NOT accept --fragsize; use --latency-msec=20 only!
+    const proc = spawn(
       'parec',
       [
         '-d',
@@ -241,16 +262,18 @@ export class GeminiVindemiatrixCallBridge {
         '--format=s16le',
         '--channels=1',
         '--raw',
-        '--latency-msec=10',
-        '--fragsize=1024',
+        '--latency-msec=20',
       ],
       { env: pulseEnv() }
     );
+    proc.on('error', () => {});
+    proc.stdout.on('error', () => {});
+    proc.stderr.on('data', () => {});
 
-    this.parecProc.stdout.on('data', (pcmChunk: Buffer) => {
+    proc.stdout.on('data', (pcmChunk: Buffer) => {
       if (!this.isRunning || this.ws?.readyState !== WebSocket.OPEN) return;
 
-      // 6-SECOND INITIAL BARGE-IN GUARD: Gate line static / connection clicks to silence while Sarah delivers her opening reception greeting
+      // 6-SECOND INITIAL BARGE-IN GUARD: Gate line static / connection clicks to silence while Sarah delivers her opening greeting
       const inOpeningImmunityWindow =
         Date.now() - this.callStartedAtMs < INITIAL_BARGE_IN_GUARD_MS && !this.openingTurnFinished;
       const outboundPcm = inOpeningImmunityWindow ? Buffer.alloc(pcmChunk.length) : pcmChunk;
@@ -268,16 +291,25 @@ export class GeminiVindemiatrixCallBridge {
         );
       } catch {}
     });
+
+    this.parecProc = proc;
   }
 
   private writePcmToSarahMic(pcm: Buffer): void {
-    if (!pcm || pcm.length === 0) return;
-    if (!this.pacatProc || !this.pacatProc.stdin.writable) {
+    if (!pcm || pcm.length === 0 || !this.isRunning) return;
+    if (
+      !this.pacatProc ||
+      this.pacatProc.exitCode !== null ||
+      !this.pacatProc.stdin.writable ||
+      this.pacatProc.stdin.destroyed
+    ) {
       this.spawnPacatPlayback(true);
     }
-    if (this.pacatProc?.stdin.writable) {
-      this.pacatProc.stdin.write(pcm);
-    }
+    try {
+      if (this.pacatProc?.stdin.writable && !this.pacatProc.stdin.destroyed) {
+        this.pacatProc.stdin.write(pcm);
+      }
+    } catch {}
 
     // 24kHz 16-bit mono = 48,000 bytes/sec
     const chunkDurationMs = Math.ceil((pcm.length / 48000) * 1000);
@@ -305,7 +337,7 @@ export class GeminiVindemiatrixCallBridge {
       }
     }, waitMs);
 
-    if (now - this.lastTelemetryFlushMs > 500 || this.scriptCompleted) {
+    if (now - this.lastTelemetryFlushMs > 400 || this.scriptCompleted) {
       this.lastTelemetryFlushMs = now;
       writeSarahState({
         voiceProfile: VOICE_PROFILE,
@@ -335,7 +367,7 @@ export class GeminiVindemiatrixCallBridge {
       });
       if (!res.ok) return;
       const data: any = await res.json();
-      if (!data?.audio_base64) return;
+      if (!data?.audio_base64 || !this.isRunning) return;
       const audioBuf = Buffer.from(data.audio_base64, 'base64');
 
       await new Promise<void>((resolve) => {
@@ -357,13 +389,19 @@ export class GeminiVindemiatrixCallBridge {
           ],
           { env: pulseEnv() }
         );
+        ff.stdin.on('error', () => {});
+        ff.stdout.on('error', () => {});
+        ff.on('error', () => resolve());
         ff.stdout.on('data', (pcm: Buffer) => {
           this.writePcmToSarahMic(pcm);
         });
         ff.on('close', () => resolve());
-        ff.on('error', () => resolve());
-        ff.stdin.write(audioBuf);
-        ff.stdin.end();
+        try {
+          ff.stdin.write(audioBuf);
+          ff.stdin.end();
+        } catch {
+          resolve();
+        }
       });
       await this.waitForPlaybackDrain(10000);
     } catch (err: any) {
@@ -486,7 +524,6 @@ export class GeminiVindemiatrixCallBridge {
 
         if (msg?.serverContent?.interrupted) {
           const elapsedMs = Date.now() - this.callStartedAtMs;
-          // Disable premature barge-in buffer killing during the first 6s OR before opening script completes
           if (elapsedMs < INITIAL_BARGE_IN_GUARD_MS || !this.scriptCompleted) {
             return;
           }
@@ -522,27 +559,24 @@ export class GeminiVindemiatrixCallBridge {
       const reason = reasonBuf?.toString('utf8') || '';
       if (!this.isRunning || this.ws !== ws) return;
 
+      console.warn(
+        `[Gemini Live ${VOICE_PROFILE}] WebSocket closed mid-call (code=${code}, reason=${reason.slice(0, 100)}, pcmBytes=${this.pcmBytesSentToMic})`
+      );
+
       if (
         !receivedLiveAudioThisSocket &&
         this.pcmBytesSentToMic === 0 &&
         (code === 1011 || code === 1008) &&
         /credit|quota|billing|not found/i.test(reason)
       ) {
-        console.warn(
-          `[Gemini Live ${VOICE_PROFILE}] WebSocket closed (${code}: ${reason.slice(0, 80)}) — engaging Zero-Dead-Air Neural Fiduciary Bridge over sarah_virtual_mic.`
-        );
         this.ws = null;
         void this.playNeuralTtsToSarahMic(BUSINESS_HOURS_OPENING_GREETING);
         return;
       }
 
-      // Automatic mid-call WebSocket session resumption if a transient frame or GoAway drops mid-call
       if (this.isRunning && code !== 1000 && this.reconnectAttempts < 6) {
         this.reconnectAttempts += 1;
         const backoffMs = Math.min(1500, 300 * this.reconnectAttempts);
-        console.warn(
-          `[Gemini Live ${VOICE_PROFILE}] Transient WebSocket close (${code}) mid-call — auto-resuming session in ${backoffMs}ms (attempt ${this.reconnectAttempts}/6)...`
-        );
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
         this.reconnectTimer = setTimeout(() => {
           this.connectGeminiLiveSession(systemInstruction, true);
@@ -567,7 +601,11 @@ export class GeminiVindemiatrixCallBridge {
     this.sessionResumptionHandle = null;
     this.reconnectAttempts = 0;
 
-    enforceChromiumPulseBinding();
+    enforceChromiumPulseBinding(true);
+    setTimeout(() => {
+      if (this.isRunning) enforceChromiumPulseBinding(true);
+    }, 1200);
+
     this.spawnPacatPlayback(true);
     writeSarahState({
       voiceProfile: VOICE_PROFILE,
@@ -577,7 +615,6 @@ export class GeminiVindemiatrixCallBridge {
       scriptCompleted: false,
     });
 
-    // Enforce strict Arizona After-Hours rule (7:00 PM – 8:59 AM MST Mon-Sat & Sundays)
     if (!isArizonaBusinessHoursNow()) {
       console.log(
         `[Sarah Bridge] After-hours call in Arizona — playing complete ${VOICE_PROFILE} closed greeting over sarah_virtual_mic...`
@@ -599,6 +636,18 @@ export class GeminiVindemiatrixCallBridge {
     }
 
     this.connectGeminiLiveSession(systemInstruction, false);
+
+    // 3.2-SECOND ZERO-DEAD-AIR FIRST-BYTE GUARANTEE:
+    // If Gemini Live has not emitted its first audio chunk within 3,200ms, immediately speak Sarah's opening greeting via neural TTS while keeping the live session open!
+    if (this.firstByteWatchdogTimer) clearTimeout(this.firstByteWatchdogTimer);
+    this.firstByteWatchdogTimer = setTimeout(() => {
+      if (this.isRunning && this.pcmBytesSentToMic === 0) {
+        console.warn(
+          `[Gemini Live ${VOICE_PROFILE}] First audio byte >3.2s — injecting immediate zero-dead-air neural greeting while keeping live session active!`
+        );
+        void this.playNeuralTtsToSarahMic(BUSINESS_HOURS_OPENING_GREETING);
+      }
+    }, 3200);
   }
 
   public stopCallBridge(): void {
@@ -620,6 +669,10 @@ export class GeminiVindemiatrixCallBridge {
       clearTimeout(this.drainTimer);
       this.drainTimer = null;
     }
+    if (this.firstByteWatchdogTimer) {
+      clearTimeout(this.firstByteWatchdogTimer);
+      this.firstByteWatchdogTimer = null;
+    }
 
     try {
       this.parecProc?.kill('SIGKILL');
@@ -631,7 +684,6 @@ export class GeminiVindemiatrixCallBridge {
     } catch {}
     this.ws = null;
 
-    // Drain any remaining PCM frames gracefully instead of truncating pacat mid-word
     const pacatRef = this.pacatProc;
     this.pacatProc = null;
     const drainDelayMs = Math.max(0, Math.min(2500, this.playbackDrainUntilMs - Date.now() + 150));

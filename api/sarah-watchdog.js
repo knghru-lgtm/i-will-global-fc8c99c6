@@ -212,6 +212,10 @@ var defaultSelectors = {
     'button[aria-label*="Answer" i]',
     'div[role="button"][aria-label*="Answer" i]',
     'button[data-test-id*="answer" i]',
+    '[gv-test-id*="answer" i]',
+    'button[aria-label*="Accept" i]',
+    'button[data-call-action="answer"]',
+    '[aria-label*="Pick up" i]',
     'button[mattooltip*="Answer" i]',
     ".gv-call-response button:first-child"
   ],
@@ -518,6 +522,7 @@ async function attachBulletproofCallPickup(page, context) {
   let pickupLock = false;
   let pollBusy = false;
   let activeCallStartedAtMs = 0;
+  let baselineTopCallItem = null;
   const initialUrl = page.url();
   writeSarahState({
     voiceProfile: VOICE_PROFILE,
@@ -544,6 +549,31 @@ async function attachBulletproofCallPickup(page, context) {
       }
       await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {
       });
+      const curState = readSarahState();
+      if (!curState.activeCallInProgress && !pickupLock && curState.isLoggedIn) {
+        const topItemText = await page.evaluate(() => {
+          const first = document.querySelector('gv-call-thread-list-item, [role="listitem"]');
+          return first ? (first.innerText || "").replace(/\s+/g, " ").trim() : "";
+        }).catch(() => "");
+        if (topItemText) {
+          if (baselineTopCallItem === null) {
+            baselineTopCallItem = topItemText;
+          } else if (topItemText !== baselineTopCallItem) {
+            baselineTopCallItem = topItemText;
+            if (/\bmissed\s+call\b|call_missed/i.test(topItemText)) {
+              const missedReason = `MISSED_CALL_DETECTED_IN_GV_HISTORY: ${topItemText.slice(0, 140)}`;
+              console.error(`[Sarah Missed-Call Auditor] ${missedReason}`);
+              await captureFailureEvidenceAndBridgeLogs(page, missedReason);
+              const missedState = writeSarahState({
+                lastPickupFailureAt: (/* @__PURE__ */ new Date()).toISOString(),
+                lastFailureReason: missedReason,
+                totalMissedOrFailed: curState.totalMissedOrFailed + 1
+              });
+              void runAutonomousGeminiDiagnosisAndFix(missedState, true);
+            }
+          }
+        }
+      }
       const pulseBound = await enforcePulseAudioVirtualBridgeBinding();
       writeSarahState({
         openTabCount: 1,
@@ -592,23 +622,37 @@ async function attachBulletproofCallPickup(page, context) {
         }
         syntheticInjectedAtMs = Date.now();
         await page.evaluate(() => {
-          const existingAns = document.getElementById("sarah-synthetic-answer-btn");
-          if (existingAns) existingAns.remove();
-          const existingHup = document.getElementById("sarah-synthetic-hangup-btn");
-          if (existingHup) existingHup.remove();
+          document.getElementById("sarah-synthetic-ring-container")?.remove();
+          document.getElementById("sarah-synthetic-answer-btn")?.remove();
+          document.getElementById("sarah-synthetic-hangup-btn")?.remove();
           const win = window;
           win.__sarahSyntheticRingInjectedMs = Date.now();
           win.__sarahSyntheticClickedMs = 0;
+          const container = document.createElement("div");
+          container.id = "sarah-synthetic-ring-container";
+          container.setAttribute("data-sarah-synthetic-test", "true");
+          container.style.cssText = "position:fixed;top:12px;right:12px;z-index:999999;display:flex;gap:8px;padding:6px;background:#0f172a;border-radius:10px;";
+          const declineBtn = document.createElement("button");
+          declineBtn.id = "sarah-synthetic-decline-btn";
+          declineBtn.type = "button";
+          declineBtn.className = "call-end-button";
+          declineBtn.setAttribute("gv-test-id", "in-call-end-button");
+          declineBtn.setAttribute("data-sarah-synthetic-test", "true");
+          declineBtn.setAttribute("aria-label", "Decline call");
+          declineBtn.style.cssText = "width:90px;height:44px;background:#ef4444;color:#fff;font-weight:bold;border:none;border-radius:8px;cursor:pointer;";
+          declineBtn.innerText = "Decline";
           const btn = document.createElement("button");
           btn.id = "sarah-synthetic-answer-btn";
           btn.type = "button";
+          btn.className = "pickup-call-button";
+          btn.setAttribute("gv-test-id", "in-call-pickup-call");
           btn.setAttribute("data-sarah-synthetic-test", "true");
           btn.setAttribute("aria-label", "Answer synthetic test call");
-          btn.style.cssText = "position:fixed;top:12px;right:12px;z-index:999999;width:100px;height:44px;background:#10b981;color:#000;font-weight:bold;border:none;border-radius:8px;cursor:pointer;";
+          btn.style.cssText = "width:100px;height:44px;background:#10b981;color:#000;font-weight:bold;border:none;border-radius:8px;cursor:pointer;";
           btn.innerText = "Answer";
           btn.onclick = () => {
             win.__sarahSyntheticClickedMs = Date.now();
-            btn.remove();
+            container.remove();
             const hup = document.createElement("button");
             hup.id = "sarah-synthetic-hangup-btn";
             hup.type = "button";
@@ -617,9 +661,11 @@ async function attachBulletproofCallPickup(page, context) {
             hup.style.cssText = "position:fixed;top:12px;right:12px;z-index:999999;width:100px;height:44px;background:#ef4444;color:#fff;font-weight:bold;border:none;border-radius:8px;";
             hup.innerText = "Hang up";
             document.body.appendChild(hup);
-            setTimeout(() => hup.remove(), 3500);
+            setTimeout(() => hup.remove(), 2500);
           };
-          document.body.appendChild(btn);
+          container.appendChild(declineBtn);
+          container.appendChild(btn);
+          document.body.appendChild(container);
         }).catch(() => {
         });
       }
@@ -661,41 +707,17 @@ async function attachBulletproofCallPickup(page, context) {
               btn.click();
             }
           }
-          let activeCall = document.documentElement?.getAttribute("data-iwg-webrtc-connected") === "true";
-          if (!activeCall) {
-            for (const hSel of hupSels) {
-              if (hSel === "#sarah-synthetic-hangup-btn") continue;
-              if (queryAllDeep(hSel).some(
-                (el) => el.offsetWidth > 0 && el.id !== "sarah-synthetic-hangup-btn" && el.getAttribute("data-sarah-synthetic-test") !== "true" && !el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')
-              )) {
-                activeCall = true;
-                break;
-              }
-            }
-          }
-          if (!activeCall) {
-            const callPanel = document.querySelector(
-              "gv-call-sidebar gv-in-call, .gv-call-sidebar, #iwg-simulated-gv-active-call"
-            );
-            if (callPanel && callPanel.offsetWidth > 0) {
-              const panelTxt = String(callPanel.innerText || "");
-              if (/\b\d{2}:\d{2}\b/.test(panelTxt) && !/\b\d{1,2}:\d{2}\s*[AP]M\b/i.test(panelTxt)) {
-                activeCall = true;
-              }
-            }
-          }
           let answerBtn = null;
-          const synthBtn = document.getElementById("sarah-synthetic-answer-btn");
-          if (synthBtn && synthBtn.offsetWidth > 0) {
-            answerBtn = synthBtn;
-          } else if (!activeCall && !lockActive) {
+          if (!lockActive) {
             for (const sel of ansSels) {
-              if (sel === "#sarah-synthetic-answer-btn") continue;
-              const matches = queryAllDeep(sel).filter(
-                (el) => el.offsetWidth > 0 && el.offsetHeight > 0 && !el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]') && !/decline|reject|end\s*call|hang\s*up|in-call-end/i.test(
-                  `${el.getAttribute("aria-label") || ""} ${el.getAttribute("gv-test-id") || ""} ${el.className || ""} ${el.innerText || ""}`
-                )
-              );
+              const matches = queryAllDeep(sel).filter((el) => {
+                if (el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
+                if (el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) {
+                  return false;
+                }
+                const fullLabel = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("gv-test-id") || ""} ${el.className || ""} ${el.innerText || ""}`;
+                return !/decline|reject|end\s*call|hang\s*up|in-call-end/i.test(fullLabel);
+              });
               if (matches.length > 0) {
                 answerBtn = matches[0].closest('button, [role="button"]') || matches[0];
                 break;
@@ -707,8 +729,46 @@ async function attachBulletproofCallPickup(page, context) {
                   return false;
                 }
                 const label = ((btn.getAttribute("aria-label") || "") + " " + (btn.getAttribute("gv-test-id") || "") + " " + (btn.innerText || "")).toLowerCase();
-                return (label.includes("answer") || label.includes("accept call")) && !label.includes("unanswered") && !label.includes("decline") && !label.includes("end call") && !label.includes("hang up") && btn.offsetWidth > 0 && btn.offsetHeight > 0;
+                return (label.includes("answer") || label.includes("accept call") || label.includes("pick up")) && !label.includes("unanswered") && !label.includes("decline") && !label.includes("reject") && !label.includes("end call") && !label.includes("hang up") && btn.offsetWidth > 0 && btn.offsetHeight > 0;
               }) || null;
+            }
+          }
+          const incomingBannerVisible = Boolean(answerBtn) || queryAllDeep("gv-incoming-call").some((el) => el.offsetWidth > 0 && el.offsetHeight > 0) || allButtons.some((btn) => {
+            if (btn.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) {
+              return false;
+            }
+            if (btn.offsetWidth <= 0 || btn.offsetHeight <= 0) return false;
+            const lbl = `${btn.getAttribute("aria-label") || ""} ${btn.innerText || ""}`;
+            return /\b(decline|reject)\b/i.test(lbl);
+          });
+          let activeCall = false;
+          if (!incomingBannerVisible) {
+            activeCall = document.documentElement?.getAttribute("data-iwg-webrtc-connected") === "true";
+            if (!activeCall) {
+              for (const hSel of hupSels) {
+                if (hSel === "#sarah-synthetic-hangup-btn") continue;
+                if (queryAllDeep(hSel).some((el) => {
+                  if (el.offsetWidth <= 0 || el.id === "sarah-synthetic-hangup-btn" || el.getAttribute("data-sarah-synthetic-test") === "true" || el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) {
+                    return false;
+                  }
+                  const lbl = `${el.getAttribute("aria-label") || ""} ${el.innerText || ""}`;
+                  return !/\b(decline|reject)\b/i.test(lbl);
+                })) {
+                  activeCall = true;
+                  break;
+                }
+              }
+            }
+            if (!activeCall) {
+              const callPanel = document.querySelector(
+                "gv-call-sidebar gv-in-call, .gv-call-sidebar, #iwg-simulated-gv-active-call"
+              );
+              if (callPanel && callPanel.offsetWidth > 0) {
+                const panelTxt = String(callPanel.innerText || "");
+                if (/\b\d{2}:\d{2}\b/.test(panelTxt) && !/\b\d{1,2}:\d{2}\s*[AP]M\b/i.test(panelTxt)) {
+                  activeCall = true;
+                }
+              }
             }
           }
           const gvState = window.__IWG_GV_GET_STATE__?.() || null;
@@ -798,30 +858,31 @@ async function attachBulletproofCallPickup(page, context) {
           await new Promise((r) => setTimeout(r, 600));
           const settle600 = await page.evaluate(
             (ansSels, hupSels, coords) => {
-              const isEndCallBtn = (el) => {
+              const isEndOrDeclineBtn = (el) => {
                 if (!el) return false;
                 const b = el.closest('button, [role="button"]') || el;
                 const lbl = `${b.getAttribute?.("aria-label") || ""} ${b.getAttribute?.("gv-test-id") || ""} ${b.className || ""} ${b.innerText || ""}`;
-                return /in-call-end-button|call-end-button|end\s*call|hang\s*up/i.test(lbl);
+                return /in-call-end-button|call-end-button|end\s*call|hang\s*up|decline|reject/i.test(lbl);
               };
-              const endCallVisible = hupSels.some((sel) => {
+              const answerStillVisible = ansSels.some((sel) => {
+                if (sel === "#sarah-synthetic-answer-btn") return false;
+                const el = document.querySelector(sel);
+                if (!el || el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
+                if (el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) return false;
+                return !isEndOrDeclineBtn(el);
+              });
+              const endCallVisible = !answerStillVisible && hupSels.some((sel) => {
                 if (sel === "#sarah-synthetic-hangup-btn") return false;
                 const el = document.querySelector(sel);
-                return Boolean(el && el.offsetWidth > 0 && el.offsetHeight > 0);
+                if (!el || el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
+                if (el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) return false;
+                const lbl = `${el.getAttribute?.("aria-label") || ""} ${el.innerText || ""}`;
+                return !/\b(decline|reject)\b/i.test(lbl);
               });
-              let answerStillVisible = false;
-              if (!endCallVisible) {
-                answerStillVisible = ansSels.some((sel) => {
-                  if (sel === "#sarah-synthetic-answer-btn") return false;
-                  const el = document.querySelector(sel);
-                  if (!el || el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
-                  return !isEndCallBtn(el);
-                });
-              }
               let coordsSafeForFallbackClick = false;
               if (coords && answerStillVisible && !endCallVisible) {
                 const hit = document.elementFromPoint(coords.x, coords.y);
-                coordsSafeForFallbackClick = Boolean(hit && !isEndCallBtn(hit));
+                coordsSafeForFallbackClick = Boolean(hit && !isEndOrDeclineBtn(hit));
               }
               return { endCallVisible, answerStillVisible, coordsSafeForFallbackClick };
             },
@@ -841,47 +902,64 @@ async function attachBulletproofCallPickup(page, context) {
             });
           }
           await new Promise((r) => setTimeout(r, 400));
-          const check1000 = await page.evaluate((hupSels) => {
-            let domConnected = document.documentElement?.getAttribute("data-iwg-webrtc-connected") === "true";
-            if (!domConnected) {
-              domConnected = hupSels.some((sel) => {
-                if (sel === "#sarah-synthetic-hangup-btn") return false;
+          const check1000 = await page.evaluate(
+            (ansSels, hupSels) => {
+              const stillRinging = Boolean(document.querySelector("gv-incoming-call") && document.querySelector("gv-incoming-call").offsetWidth > 0) || ansSels.some((sel) => {
+                if (sel === "#sarah-synthetic-answer-btn") return false;
                 const el = document.querySelector(sel);
-                return Boolean(el && el.offsetWidth > 0);
+                if (!el || el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
+                if (el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) return false;
+                const lbl = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("gv-test-id") || ""} ${el.className || ""} ${el.innerText || ""}`;
+                return !/decline|reject|end\s*call|hang\s*up|in-call-end/i.test(lbl);
               });
-            }
-            if (!domConnected) {
-              const panel = document.querySelector(
-                "gv-call-sidebar gv-in-call, .gv-call-sidebar, #iwg-simulated-gv-active-call"
-              );
-              if (panel && panel.offsetWidth > 0) {
-                const t = String(panel.innerText || "");
-                if (/\b\d{2}:\d{2}\b/.test(t) && !/\b\d{1,2}:\d{2}\s*[AP]M\b/i.test(t)) {
-                  domConnected = true;
+              let domConnected = false;
+              if (!stillRinging) {
+                domConnected = document.documentElement?.getAttribute("data-iwg-webrtc-connected") === "true";
+                if (!domConnected) {
+                  domConnected = hupSels.some((sel) => {
+                    if (sel === "#sarah-synthetic-hangup-btn") return false;
+                    const el = document.querySelector(sel);
+                    if (!el || el.offsetWidth <= 0) return false;
+                    if (el.closest('gv-call-thread-list-item, gv-thread-list-item, [role="listitem"]')) return false;
+                    const lbl = `${el.getAttribute("aria-label") || ""} ${el.innerText || ""}`;
+                    return !/\b(decline|reject)\b/i.test(lbl);
+                  });
+                }
+                if (!domConnected) {
+                  const panel = document.querySelector(
+                    "gv-call-sidebar gv-in-call, .gv-call-sidebar, #iwg-simulated-gv-active-call"
+                  );
+                  if (panel && panel.offsetWidth > 0) {
+                    const t = String(panel.innerText || "");
+                    if (/\b\d{2}:\d{2}\b/.test(t) && !/\b\d{1,2}:\d{2}\s*[AP]M\b/i.test(t)) {
+                      domConnected = true;
+                    }
+                  }
                 }
               }
-            }
-            const gvState = window.__IWG_GV_GET_STATE__?.() || null;
-            const sarahActive = Boolean(
-              gvState?.sarahVoiceStreamActive || gvState?.voiceSessionState === "ACTIVE_SPEAKING"
-            );
-            return {
-              domConnected: domConnected || Boolean(gvState?.callActive),
-              sarahActive,
-              voiceSessionState: String(gvState?.voiceSessionState || "ACTIVE_SPEAKING")
-            };
-          }, getDynamicSelectors().hangupSelectors);
+              const gvState = window.__IWG_GV_GET_STATE__?.() || null;
+              const sarahActive = Boolean(
+                gvState?.sarahVoiceStreamActive || gvState?.voiceSessionState === "ACTIVE_SPEAKING"
+              );
+              return {
+                domConnected: domConnected || !stillRinging && Boolean(gvState?.callActive),
+                stillRinging,
+                sarahActive,
+                voiceSessionState: String(gvState?.voiceSessionState || "ACTIVE_SPEAKING")
+              };
+            },
+            answerSelectors,
+            getDynamicSelectors().hangupSelectors
+          );
           const latest = readSarahState();
           if (check1000.domConnected) {
-            activeCallStartedAtMs = Date.now();
+            if (activeCallStartedAtMs === 0) activeCallStartedAtMs = Date.now();
             writeSarahState({
               activeCallInProgress: true,
               sarahVoiceStreamActive: true,
               voiceSessionState: "ACTIVE_SPEAKING",
               lastCallAnsweredAt: (/* @__PURE__ */ new Date()).toISOString(),
               totalCallsAnswered: latest.totalCallsAnswered + 1,
-              scriptCompleted: false,
-              pcmBytesSentToMic: 0,
               lastFailureReason: null
             });
           } else {
@@ -972,7 +1050,7 @@ async function attachBulletproofCallPickup(page, context) {
     } finally {
       pollBusy = false;
     }
-  }, 700);
+  }, 350);
   const settingsInterval = setInterval(async () => {
     try {
       if (page.isClosed()) return;
