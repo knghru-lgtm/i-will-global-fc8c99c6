@@ -118,8 +118,8 @@ WS_PID=$!
 CLEANED_UP=0
 
 verify_real_gv_dom_ready() {
-  (cd "${REPO_DIR}" && node --input-type=module - <<'NODE_EOF'
-import puppeteer from 'puppeteer';
+  (cd "${REPO_DIR}/cloud-voip-daemon" && node --input-type=module - <<'NODE_EOF'
+import puppeteer from 'puppeteer-core';
 try {
   const verRes = await fetch('http://127.0.0.1:9222/json/version');
   if (!verRes.ok) process.exit(1);
@@ -152,8 +152,8 @@ NODE_EOF
 }
 
 sync_and_close_browser_cleanly() {
-  (cd "${REPO_DIR}" && node --input-type=module - "${BRIDGE_TOKEN}" <<'NODE_EOF'
-import puppeteer from 'puppeteer';
+  (cd "${REPO_DIR}/cloud-voip-daemon" && node --input-type=module - "${BRIDGE_TOKEN}" <<'NODE_EOF'
+import puppeteer from 'puppeteer-core';
 const bridgeToken = process.argv[2];
 try {
   const verRes = await fetch('http://127.0.0.1:9222/json/version');
