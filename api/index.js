@@ -7357,7 +7357,8 @@ async function handleGvHeartbeat(payload) {
     cloudDaemonOnline,
     standbyForCloud: runner === "chrome-extension" && cloudDaemonOnline,
     needsCookieSync: cloudNeedsFreshCookies,
-    reloadExtension: cmdToDeliver?.reloadExtension || needsReload || false,
+    // Never interrupt an in-flight 10s cookie sync fallback with chrome.runtime.reload()!
+    reloadExtension: cloudNeedsFreshCookies ? false : Boolean(cmdToDeliver?.reloadExtension),
     reloadTab: cmdToDeliver?.reloadTab || false,
     simulateIncomingCall: cmdToDeliver?.simulateIncomingCall || false,
     callerPhone: cmdToDeliver?.callerPhone || "",
