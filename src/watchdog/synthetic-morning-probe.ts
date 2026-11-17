@@ -54,7 +54,7 @@ function loadDotEnv(): void {
           process.env[key] = val;
         }
       }
-    } catch {}
+    } catch { }
   }
 }
 loadDotEnv();
@@ -62,9 +62,9 @@ loadDotEnv();
 function getGeminiKey(): string {
   return String(
     process.env.GEMINI_API_KEY ||
-      process.env.GOOGLE_GENAI_API_KEY ||
-      process.env.GOOGLE_API_KEY ||
-      ''
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    ''
   ).trim();
 }
 
@@ -262,7 +262,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
       clearTimeout(timer);
       try {
         ws.close();
-      } catch {}
+      } catch { }
       resolve(res);
     };
 
@@ -283,7 +283,7 @@ async function testGeminiLiveWebSocketHandshake(): Promise<{
       ws.send(
         JSON.stringify({
           setup: {
-            model: 'models/gemini-2.0-flash-exp',
+            model: process.env.GEMINI_LIVE_MODEL || 'models/gemini-3.8-live',
             generationConfig: {
               responseModalities: ['AUDIO'],
               speechConfig: {
@@ -420,12 +420,12 @@ async function runPre9AmGeminiAutoFix(failureSummary: string): Promise<string[]>
         'pactl set-sink-mute gv_mic_sink 0',
         'pactl set-source-mute sarah_virtual_mic 0',
       ].join(' && ')
-    ).catch(() => {});
+    ).catch(() => { });
     actions.push('reloaded_pulseaudio_virtual_sinks');
 
     await execAsync(
       'rm -f /tmp/.X99-lock /home/king/.sarah-chrome-profile/Singleton* 2>/dev/null || true && (pm2 restart sarah-daemon --update-env || pm2 restart cloud-voip-daemon --update-env)'
-    ).catch(() => {});
+    ).catch(() => { });
     actions.push('restarted_sarah_daemon');
 
     for (let i = 0; i < 48; i++) {
@@ -456,7 +456,7 @@ async function sendGoogleWorkspaceProbeNotification(
       event: passed ? 'synthetic_855_probe_passed' : 'synthetic_855_probe_alert',
       eventDetail: JSON.stringify(report).slice(0, 500),
     }),
-  }).catch(() => {});
+  }).catch(() => { });
 
   const chatWebhook = process.env.GOOGLE_CHAT_ALERT_WEBHOOK_URL;
   if (chatWebhook && (!passed || process.env.NOTIFY_ON_SYNTHETIC_PASS === 'true')) {
@@ -468,7 +468,7 @@ async function sendGoogleWorkspaceProbeNotification(
           ? `✅ *Sarah 8:55 AM MST Synthetic Probe PASSED (+14803319455)*\nReady for 9:00 AM Arizona window.`
           : `🚨 *Sarah 8:55 AM MST Synthetic Probe ALERT (+14803319455)*\nAuto-remediation executed; check https://voice.iwillglobal.com/watchdog/status`,
       }),
-    }).catch(() => {});
+    }).catch(() => { });
   }
 }
 
@@ -485,13 +485,13 @@ export async function runSyntheticMorningProbe() {
     const syntheticRingSla = gvAudit.passed
       ? await runSyntheticDomRingSlaTest()
       : {
-          passed: false,
-          slaLimitMs: PICKUP_SLA_MS,
-          measuredWallClockMs: 0,
-          inPageClickLatencyMs: null,
-          lastSyntheticTestPassedIso: null,
-          details: 'Skipped synthetic DOM ring because Google Voice session check failed.',
-        };
+        passed: false,
+        slaLimitMs: PICKUP_SLA_MS,
+        measuredWallClockMs: 0,
+        inPageClickLatencyMs: null,
+        lastSyntheticTestPassedIso: null,
+        details: 'Skipped synthetic DOM ring because Google Voice session check failed.',
+      };
 
     const allPassed =
       gvAudit.passed && pulseCheck.passed && geminiWsCheck.passed && syntheticRingSla.passed;
@@ -549,7 +549,7 @@ export async function runSyntheticMorningProbe() {
   try {
     fs.mkdirSync(path.dirname(PROBE_REPORT_PATH), { recursive: true });
     fs.writeFileSync(PROBE_REPORT_PATH, JSON.stringify(report, null, 2), 'utf-8');
-  } catch {}
+  } catch { }
 
   await sendGoogleWorkspaceProbeNotification(report, finalResult.allPassed);
   return report;

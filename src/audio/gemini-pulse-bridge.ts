@@ -259,16 +259,18 @@ export class GeminiAoedeCallBridge {
     }
 
     let receivedLiveAudio = false;
-    const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(apiKey)}`;
+    let setupCompleted = false;
+    const liveModel = process.env.GEMINI_LIVE_MODEL || 'models/gemini-3.8-live';
+    const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(apiKey)}`;
     this.ws = new WebSocket(wsUrl);
 
     this.ws.on('open', () => {
-      console.log('[Gemini Live Aoede] Connected. Streaming 24kHz Aoede audio...');
+      console.log(`[Gemini Live Aoede] Connected (${liveModel}). Negotiating 24kHz Aoede audio...`);
 
       this.ws?.send(
         JSON.stringify({
           setup: {
-            model: 'models/gemini-2.0-flash-exp',
+            model: liveModel,
             generationConfig: {
               responseModalities: ['AUDIO'],
               speechConfig: {
@@ -285,61 +287,63 @@ export class GeminiAoedeCallBridge {
           },
         })
       );
-
-      this.ws?.send(
-        JSON.stringify({
-          clientContent: {
-            turns: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    text: 'The caller just connected. Greet them warmly right now as Sarah from I Will Global.',
-                  },
-                ],
-              },
-            ],
-            turnComplete: true,
-          },
-        })
-      );
-
-      this.parecProc = spawn(
-        'parec',
-        [
-          '-d',
-          `${CALLER_SINK}.monitor`,
-          '--rate=16000',
-          '--format=s16le',
-          '--channels=1',
-          '--raw',
-          '--latency-msec=10',
-          '--fragsize=1024',
-        ],
-        { env: pulseEnv() }
-      );
-
-      this.parecProc.stdout.on('data', (pcmChunk: Buffer) => {
-        if (this.ws?.readyState === WebSocket.OPEN) {
-          this.ws.send(
-            JSON.stringify({
-              realtimeInput: {
-                mediaChunks: [
-                  {
-                    mimeType: 'audio/pcm;rate=16000',
-                    data: pcmChunk.toString('base64'),
-                  },
-                ],
-              },
-            })
-          );
-        }
-      });
     });
 
     this.ws.on('message', (raw: WebSocket.RawData) => {
       try {
         const msg = JSON.parse(raw.toString());
+        if (msg?.setupComplete && !setupCompleted) {
+          setupCompleted = true;
+          this.ws?.send(
+            JSON.stringify({
+              clientContent: {
+                turns: [
+                  {
+                    role: 'user',
+                    parts: [
+                      {
+                        text: 'The caller just connected. Greet them warmly right now as Sarah from I Will Global.',
+                      },
+                    ],
+                  },
+                ],
+                turnComplete: true,
+              },
+            })
+          );
+
+          this.parecProc = spawn(
+            'parec',
+            [
+              '-d',
+              `${CALLER_SINK}.monitor`,
+              '--rate=16000',
+              '--format=s16le',
+              '--channels=1',
+              '--raw',
+              '--latency-msec=10',
+              '--fragsize=1024',
+            ],
+            { env: pulseEnv() }
+          );
+
+          this.parecProc.stdout.on('data', (pcmChunk: Buffer) => {
+            if (this.ws?.readyState === WebSocket.OPEN && setupCompleted) {
+              this.ws.send(
+                JSON.stringify({
+                  realtimeInput: {
+                    audio: {
+                      mimeType: 'audio/pcm;rate=16000',
+                      data: pcmChunk.toString('base64'),
+                    },
+                  },
+                })
+              );
+            }
+          });
+          return;
+        }
+
         if (msg?.serverContent?.interrupted) {
           this.spawnPacatPlayback();
           return;
