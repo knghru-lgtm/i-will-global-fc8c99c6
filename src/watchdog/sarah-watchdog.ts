@@ -47,16 +47,16 @@ function hydrateEnvFromDotFiles(): void {
         }
       }
     }
-  } catch {}
+  } catch { }
 }
 hydrateEnvFromDotFiles();
 
 function resolveActiveGeminiKey(): string {
   return String(
     process.env.GEMINI_API_KEY ||
-      process.env.GOOGLE_GENAI_API_KEY ||
-      process.env.GOOGLE_API_KEY ||
-      ''
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    ''
   ).trim();
 }
 
@@ -119,10 +119,10 @@ export function getDynamicSelectors(): DynamicSelectors {
         lastPatchedByGeminiIso: parsed.lastPatchedByGeminiIso ?? null,
       };
     }
-  } catch {}
+  } catch { }
   try {
     fs.writeFileSync(SELECTORS_FILE, JSON.stringify(defaultSelectors, null, 2), 'utf-8');
-  } catch {}
+  } catch { }
   return defaultSelectors;
 }
 
@@ -259,7 +259,7 @@ export function readSarahState(): SarahLiveState {
         lastSettingsAuditIso: raw.lastSettingsAuditIso ?? null,
       };
     }
-  } catch {}
+  } catch { }
   return { ...defaultState };
 }
 
@@ -272,7 +272,7 @@ export function writeSarahState(patch: Partial<SarahLiveState>): SarahLiveState 
   };
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(updated, null, 2), 'utf-8');
-  } catch {}
+  } catch { }
   return updated;
 }
 
@@ -419,7 +419,7 @@ async function runInlineGoogleVoiceSettingsAuditOnPage(page: Page): Promise<{
 }
 
 async function captureFailureEvidenceAndBridgeLogs(page: Page, headerReason: string): Promise<void> {
-  await page.screenshot({ path: SCREENSHOT_PATH }).catch(() => {});
+  await page.screenshot({ path: SCREENSHOT_PATH }).catch(() => { });
   const htmlDump = await page
     .evaluate(() => document.body.innerHTML.slice(0, 18000))
     .catch(() => '');
@@ -429,11 +429,11 @@ async function captureFailureEvidenceAndBridgeLogs(page: Page, headerReason: str
     if (fs.existsSync(logPath)) {
       bridgeLogs = fs.readFileSync(logPath, 'utf-8').slice(-6000);
     }
-  } catch {}
+  } catch { }
   const combined = `<!-- ${headerReason} -->\n<!-- BRIDGE LOG TAIL:\n${bridgeLogs}\n-->\n${htmlDump}`;
   try {
     fs.writeFileSync(DOM_SNAPSHOT_PATH, combined, 'utf-8');
-  } catch {}
+  } catch { }
 }
 
 // ============================================================================
@@ -448,19 +448,19 @@ export async function attachBulletproofCallPickup(
   if (context && typeof context.overridePermissions === 'function') {
     await context
       .overridePermissions('https://voice.google.com', ['microphone', 'notifications'])
-      .catch(() => {});
+      .catch(() => { });
   }
 
-  await page.setViewport({ width: 1280, height: 960 }).catch(() => {});
+  await page.setViewport({ width: 1280, height: 960 }).catch(() => { });
 
   try {
     const cdp = await page.target().createCDPSession();
     await cdp.send('Page.enable');
-    await cdp.send('Page.setWebLifecycleState', { state: 'active' }).catch(() => {});
-  } catch {}
+    await cdp.send('Page.setWebLifecycleState', { state: 'active' }).catch(() => { });
+  } catch { }
 
-  await page.evaluateOnNewDocument(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {});
-  await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {});
+  await page.evaluateOnNewDocument(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => { });
+  await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => { });
 
   await page
     .evaluateOnNewDocument(() => {
@@ -468,13 +468,13 @@ export async function attachBulletproofCallPickup(
         const win = window as any;
         if (win.__sarahAudioContexts) {
           win.__sarahAudioContexts.forEach((ctx: AudioContext) => {
-            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+            if (ctx.state === 'suspended') ctx.resume().catch(() => { });
           });
         }
         window.postMessage({ __iwg_webrtc__: true, type: 'IWG_RESUME_AUDIO' }, '*');
       }, 2000);
     })
-    .catch(() => {});
+    .catch(() => { });
 
   let pickupLock = false;
   let pollBusy = false;
@@ -501,21 +501,21 @@ export async function attachBulletproofCallPickup(
       let closedExtraTabs = 0;
       for (const extraPage of allPages) {
         if (extraPage !== page) {
-          await extraPage.close().catch(() => {});
+          await extraPage.close().catch(() => { });
           closedExtraTabs++;
         }
       }
       if (closedExtraTabs > 0) {
         console.warn(`[Sarah Anti-Hijack] Closed ${closedExtraTabs} unauthorized extra browser tab(s).`);
       }
-      await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {});
+      await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => { });
       const pulseBound = await enforcePulseAudioVirtualBridgeBinding();
       writeSarahState({
         openTabCount: 1,
         pulseStreamBoundToVirtualBridge: pulseBound,
         antiHangupGuard: ANTI_HANGUP_GUARD_STATUS,
       });
-    } catch {}
+    } catch { }
   }, 5000);
 
   // B. 700ms Single-Click Atomic Call Detection, Anti-Hangup Guard & Premature-Hangup Duration Auditor
@@ -528,9 +528,9 @@ export async function attachBulletproofCallPickup(
       if (fs.existsSync(FORCE_RELOAD_FLAG)) {
         try {
           fs.unlinkSync(FORCE_RELOAD_FLAG);
-        } catch {}
-        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
-        await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => {});
+        } catch { }
+        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => { });
+        await page.evaluate(ANTI_HANGUP_DOM_GUARD_SCRIPT).catch(() => { });
         return;
       }
 
@@ -543,10 +543,10 @@ export async function attachBulletproofCallPickup(
       if (fs.existsSync(AUDIT_SETTINGS_FLAG) && isLoggedIn && !pickupLock) {
         try {
           fs.unlinkSync(AUDIT_SETTINGS_FLAG);
-        } catch {}
+        } catch { }
         const st = readSarahState();
         if (!st.activeCallInProgress) {
-          await runInlineGoogleVoiceSettingsAuditOnPage(page).catch(() => {});
+          await runInlineGoogleVoiceSettingsAuditOnPage(page).catch(() => { });
         } else {
           writeSarahState({ lastSettingsAuditIso: new Date().toISOString() });
         }
@@ -556,7 +556,7 @@ export async function attachBulletproofCallPickup(
       if (fs.existsSync(SYNTHETIC_RING_FLAG) && isLoggedIn && !pickupLock) {
         try {
           fs.unlinkSync(SYNTHETIC_RING_FLAG);
-        } catch {}
+        } catch { }
         syntheticInjectedAtMs = Date.now();
         await page
           .evaluate(() => {
@@ -593,7 +593,7 @@ export async function attachBulletproofCallPickup(
             };
             document.body.appendChild(btn);
           })
-          .catch(() => {});
+          .catch(() => { });
       }
 
       const { answerSelectors, hangupSelectors } = getDynamicSelectors();
@@ -611,7 +611,7 @@ export async function attachBulletproofCallPickup(
                   collectShadowRoots(sr);
                 }
               }
-            } catch {}
+            } catch { }
           };
           collectShadowRoots(document);
 
@@ -623,7 +623,7 @@ export async function attachBulletproofCallPickup(
                 for (let j = 0; j < list.length; j++) {
                   results.push(list[j] as HTMLElement);
                 }
-              } catch {}
+              } catch { }
             }
             return results;
           };
@@ -730,8 +730,8 @@ export async function attachBulletproofCallPickup(
           if (answerBtn) {
             isSyntheticTest = Boolean(
               answerBtn.id === 'sarah-synthetic-answer-btn' ||
-                answerBtn.getAttribute('data-sarah-synthetic-test') === 'true' ||
-                answerBtn.closest('[data-sarah-synthetic-test="true"]')
+              answerBtn.getAttribute('data-sarah-synthetic-test') === 'true' ||
+              answerBtn.closest('[data-sarah-synthetic-test="true"]')
             );
             answerBtn.scrollIntoView?.({ block: 'center', inline: 'center' });
             const r = answerBtn.getBoundingClientRect();
@@ -770,7 +770,7 @@ export async function attachBulletproofCallPickup(
           if (stillSynthetic) {
             await page.mouse
               .click(domCheck.answerCoords.x, domCheck.answerCoords.y, { delay: 20 })
-              .catch(() => {});
+              .catch(() => { });
           }
         }
         const syntheticVerify = await page
@@ -881,7 +881,7 @@ export async function attachBulletproofCallPickup(
             );
             await page.mouse
               .click(domCheck.answerCoords.x, domCheck.answerCoords.y, { delay: 25 })
-              .catch(() => {});
+              .catch(() => { });
           }
 
           // Wait remaining 400ms (total 1,000ms from Answer click) to verify active call & Vindemiatrix audio stream
@@ -964,8 +964,8 @@ export async function attachBulletproofCallPickup(
             activeCallStartedAtMs > 0
               ? activeCallStartedAtMs
               : prev.lastCallAnsweredAt
-              ? new Date(prev.lastCallAnsweredAt).getTime()
-              : Date.now();
+                ? new Date(prev.lastCallAnsweredAt).getTime()
+                : Date.now();
           const durationMs = Math.max(0, Date.now() - startedAt);
           activeCallStartedAtMs = 0;
 
@@ -1051,7 +1051,7 @@ export async function attachBulletproofCallPickup(
       const state = readSarahState();
       if (pollBusy || state.activeCallInProgress || pickupLock || !state.isLoggedIn) return;
       await runInlineGoogleVoiceSettingsAuditOnPage(page);
-    } catch {}
+    } catch { }
   }, 180000);
 
   page.once?.('close', () => {
@@ -1107,7 +1107,7 @@ Respond ONLY with valid JSON matching this schema:
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${encodeURIComponent(apiKey)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1129,12 +1129,12 @@ Respond ONLY with valid JSON matching this schema:
 
     const validAnswerSels = Array.isArray(patch.newAnswerSelectors)
       ? patch.newAnswerSelectors.filter(
-          (s: any) =>
-            typeof s === 'string' &&
-            s.trim().length > 3 &&
-            s !== 'button' &&
-            !/decline|end\s*call|hang\s*up|in-call-end|call-end|listitem/i.test(s)
-        )
+        (s: any) =>
+          typeof s === 'string' &&
+          s.trim().length > 3 &&
+          s !== 'button' &&
+          !/decline|end\s*call|hang\s*up|in-call-end|call-end|listitem/i.test(s)
+      )
       : [];
 
     if (validAnswerSels.length > 0) {
@@ -1154,7 +1154,7 @@ Respond ONLY with valid JSON matching this schema:
       !patch.safeShellCommandToFix.includes('rm -rf /') &&
       !patch.safeShellCommandToFix.includes('.sarah-chrome-profile')
     ) {
-      await execAsync(patch.safeShellCommandToFix).catch(() => {});
+      await execAsync(patch.safeShellCommandToFix).catch(() => { });
     }
 
     const summary = `[Gemini Auto-Patch Applied] Cause: ${patch.rootCause}`;
@@ -1202,13 +1202,13 @@ export async function runWatchdogCycle() {
       ? Date.now() - Number(daemonProc.pm2_env.pm_uptime)
       : 0;
     daemonBooting = Boolean(pm2DaemonOnline && uptimeMs >= 0 && uptimeMs < 45000);
-  } catch {}
+  } catch { }
 
   const pulseAudioSinkReady = await enforcePulseAudioVirtualBridgeBinding();
   if (!pulseAudioSinkReady && process.platform === 'linux') {
     await execAsync(
       'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; pulseaudio --check 2>/dev/null || pulseaudio -D --exit-idle-time=-1 --system=false --disallow-module-loading=false 2>/dev/null || true; pactl load-module module-null-sink sink_name=gv_speaker rate=16000 channels=1 2>/dev/null || true; pactl load-module module-null-sink sink_name=gv_mic_sink rate=24000 channels=1 2>/dev/null || true; pactl load-module module-remap-source master=gv_mic_sink.monitor source_name=sarah_virtual_mic 2>/dev/null || true; pactl set-default-sink gv_speaker 2>/dev/null || true; pactl set-default-source sarah_virtual_mic 2>/dev/null || true; pactl set-sink-mute gv_speaker 0 2>/dev/null || true; pactl set-sink-mute gv_mic_sink 0 2>/dev/null || true; pactl set-source-mute sarah_virtual_mic 0 2>/dev/null || true'
-    ).catch(() => {});
+    ).catch(() => { });
     logRepair('Reloaded PulseAudio gv_speaker / gv_mic_sink / sarah_virtual_mic topology for Vindemiatrix');
   }
 
@@ -1221,10 +1221,10 @@ export async function runWatchdogCycle() {
     lastDaemonRestartAttemptMs = Date.now();
     await execAsync(
       'rm -f /tmp/.X99-lock /home/king/.sarah-chrome-profile/Singleton* /root/.config/chromium/Singleton* 2>/dev/null || true'
-    ).catch(() => {});
+    ).catch(() => { });
     await execAsync(
       'pm2 restart sarah-daemon --update-env 2>/dev/null || pm2 start /home/king/sarah-server/src/sarah-daemon.ts --name sarah-daemon --interpreter npx --interpreter-args "tsx"'
-    ).catch(() => {});
+    ).catch(() => { });
     logRepair(
       `Cleared Chromium SingletonLocks and restarted sarah-daemon (stale: ${Math.round(heartbeatAgeMs / 1000)}s)`
     );
@@ -1232,15 +1232,15 @@ export async function runWatchdogCycle() {
 
   const lastPickupFailed = Boolean(
     telemetry.lastPickupFailureAt &&
-      (!telemetry.lastCallAnsweredAt ||
-        new Date(telemetry.lastPickupFailureAt) > new Date(telemetry.lastCallAnsweredAt))
+    (!telemetry.lastCallAnsweredAt ||
+      new Date(telemetry.lastPickupFailureAt) > new Date(telemetry.lastCallAnsweredAt))
   );
 
   const prematureHangupFaultActive = Boolean(
     String(telemetry.lastFailureReason || '').includes('PREMATURE_HANGUP_FAULT') ||
-      (telemetry.lastPrematureHangupAt &&
-        (!telemetry.lastHealthyCallCompletedAt ||
-          new Date(telemetry.lastPrematureHangupAt) > new Date(telemetry.lastHealthyCallCompletedAt)))
+    (telemetry.lastPrematureHangupAt &&
+      (!telemetry.lastHealthyCallCompletedAt ||
+        new Date(telemetry.lastPrematureHangupAt) > new Date(telemetry.lastHealthyCallCompletedAt)))
   );
 
   if (lastPickupFailed || prematureHangupFaultActive) {
@@ -1314,7 +1314,7 @@ export async function runWatchdogCycle() {
       JSON.stringify(report, null, 2),
       'utf-8'
     );
-  } catch {}
+  } catch { }
 
   return report;
 }
@@ -1382,8 +1382,8 @@ export function createWatchdogDashboardApp() {
       report.overallStatus === 'HEALTHY'
         ? '#10b981'
         : report.overallStatus === 'DEGRADED'
-        ? '#f59e0b'
-        : '#ef4444';
+          ? '#f59e0b'
+          : '#ef4444';
 
     res.setHeader('Content-Type', 'text/html');
     res.send(`<!DOCTYPE html>

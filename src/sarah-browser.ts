@@ -57,7 +57,7 @@ export async function launchSarahExclusiveBrowser(): Promise<{
     fs.rmSync(`${USER_DATA_DIR}/SingletonSocket`, { force: true });
     fs.rmSync(`${USER_DATA_DIR}/Default/Extensions`, { recursive: true, force: true });
     fs.rmSync(`${USER_DATA_DIR}/Default/Service Worker`, { recursive: true, force: true });
-  } catch {}
+  } catch { }
 
   // Ensure virtual display :99 and PulseAudio virtual sinks are active
   process.env.DISPLAY = process.env.DISPLAY || ':99';
@@ -66,7 +66,7 @@ export async function launchSarahExclusiveBrowser(): Promise<{
       execSync(
         'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; pulseaudio --check 2>/dev/null || pulseaudio --start || true; pactl list short sinks 2>/dev/null | grep -q virtual_speaker || pactl load-module module-null-sink sink_name=virtual_speaker rate=48000 channels=1 || true; pactl list short sources 2>/dev/null | grep -q virtual_mic || pactl load-module module-remap-source master=virtual_speaker.monitor source_name=virtual_mic || true; pactl set-default-sink virtual_speaker || true; pactl set-default-source virtual_mic || true'
       );
-    } catch {}
+    } catch { }
   }
 
   const puppeteer = resolvePuppeteer();
@@ -110,7 +110,7 @@ export async function launchSarahExclusiveBrowser(): Promise<{
   if (spawnedPid) {
     try {
       fs.writeFileSync(BROWSER_PID_FILE, String(spawnedPid), 'utf-8');
-    } catch {}
+    } catch { }
   }
 
   const context = browser.defaultBrowserContext();
@@ -140,7 +140,7 @@ export async function launchSarahExclusiveBrowser(): Promise<{
 
   // Continuous 10s background check to terminate any rogue Chrome Voice processes
   setInterval(() => {
-    enforceExclusiveSarahCallOwnership().catch(() => {});
+    enforceExclusiveSarahCallOwnership().catch(() => { });
   }, 10000);
 
   // 4. Navigate to Google Voice Calls View

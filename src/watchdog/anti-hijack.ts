@@ -81,7 +81,7 @@ export async function enforceExclusiveSarahCallOwnership(): Promise<AntiHijackAu
     if (fs.existsSync(fp)) {
       try {
         fs.rmSync(fp, { recursive: true, force: true });
-      } catch {}
+      } catch { }
     }
   }
 
@@ -90,7 +90,7 @@ export async function enforceExclusiveSarahCallOwnership(): Promise<AntiHijackAu
     if (fs.existsSync(BROWSER_PID_FILE)) {
       authorizedRootPid = Number(fs.readFileSync(BROWSER_PID_FILE, 'utf-8').trim()) || 0;
     }
-  } catch {}
+  } catch { }
 
   let rootBrowserPids: number[] = [];
   let rogueExtensionFound = false;
@@ -108,7 +108,7 @@ export async function enforceExclusiveSarahCallOwnership(): Promise<AntiHijackAu
         try {
           process.kill(pid, 'SIGKILL');
           killedPids.push(pid);
-        } catch {}
+        } catch { }
         continue;
       }
 
@@ -127,7 +127,7 @@ export async function enforceExclusiveSarahCallOwnership(): Promise<AntiHijackAu
         try {
           process.kill(pid, 'SIGKILL');
           killedPids.push(pid);
-        } catch {}
+        } catch { }
         continue;
       }
 
@@ -146,12 +146,12 @@ export async function enforceExclusiveSarahCallOwnership(): Promise<AntiHijackAu
           try {
             process.kill(rPid, 'SIGKILL');
             killedPids.push(rPid);
-          } catch {}
+          } catch { }
         }
       }
       rootBrowserPids = [keepPid];
     }
-  } catch {}
+  } catch { }
 
   await enforcePulseAudioVirtualBridgeBinding();
 
@@ -175,7 +175,7 @@ export async function lockBrowserToSarahOnly(browser: any, primaryPage: any): Pr
   if (spawnedPid) {
     try {
       fs.writeFileSync(BROWSER_PID_FILE, String(spawnedPid), 'utf-8');
-    } catch {}
+    } catch { }
   }
 
   const pruneExtraPages = async () => {
@@ -184,11 +184,11 @@ export async function lockBrowserToSarahOnly(browser: any, primaryPage: any): Pr
       const pages = await browser.pages();
       for (const p of pages) {
         if (p !== primaryPage) {
-          await p.close().catch(() => {});
+          await p.close().catch(() => { });
         }
       }
       await enforcePulseAudioVirtualBridgeBinding();
-    } catch {}
+    } catch { }
   };
 
   await pruneExtraPages();
