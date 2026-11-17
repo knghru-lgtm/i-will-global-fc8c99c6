@@ -27,6 +27,7 @@ if [ -f "${REPO_DIR}/scripts/optimize-e2-small-os.sh" ]; then
   bash "${REPO_DIR}/scripts/optimize-e2-small-os.sh" >/dev/null 2>&1 || true
 fi
 
+pm2 stop sarah-watchdog >/dev/null 2>&1 || true
 pm2 stop cloud-voip-daemon >/dev/null 2>&1 || true
 pkill -f "websockify.*6080" 2>/dev/null || true
 pkill -f "x11vnc.*:99" 2>/dev/null || true
@@ -58,6 +59,8 @@ export DBUS_SESSION_BUS_ADDRESS=/dev/null
 
 CHROME_BIN="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser)"
 "${CHROME_BIN}" \
+  --disable-extensions \
+  --disable-component-extensions-with-background-pages \
   --no-sandbox \
   --disable-setuid-sandbox \
   --disable-dev-shm-usage \
